@@ -15,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
+      - uses: lukka/get-cmake@latest   # CMake >= 3.24 (Ubuntu 22.04 ships 3.22)
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build libyaml-dev libcairo2-dev zlib1g-dev clang python3-numpy python3-yaml python3-jsonschema python3-pil
       - name: Configure
