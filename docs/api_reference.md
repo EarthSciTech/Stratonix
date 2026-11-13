@@ -80,6 +80,21 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Scalar field on a regular grid. Undefined nodes hold NaN.
 - `double sample(double x, double y) const`  
   Bilinear interpolation; NaN if outside or if any corner is undefined.
+- `double sample_clamped(double x, double y) const`  
+  As sample(), but outside the grid the nearest edge value is held (constant extrapolation).
+
+## include/stratonix/core/linalg.hpp
+
+- `(file)`  
+  Dense linear solvers for interpolation systems (Eigen is not available in every build; these are small, dependency-free and deterministic).
+- `void solve_dense_reference(std::vector<double>& A, std::vector<double>& b, std::size_t n);`  
+  Solve A x = b for a dense n x n row-major matrix by Gaussian elimination with partial pivoting. Reference implementation: plain loops, the specification for the optimised solver. A and b are overwritten; the solution is returned in b. Throws Error(Build) if A is singular.
+- `void solve_dense_blocked(std::vector<double>& A, std::vector<double>& b, std::size_t n, std::size_t block = 64);`  
+  Same result by a blocked right-looking LU factorisation with partial pivoting whose trailing updates run in parallel (fixed chunks, so the result does not depend on the thread count). Pivot choices equal the reference's up to rounding; parity is tested.
+- `void solve_dense(std::vector<double>& A, std::vector<double>& b, std::size_t n, std::size_t threshold = 256);`  
+  Solve with the optimised solver when optimised_kernels() is on and n >= threshold, otherwise with the reference solver.
+- `void symmetric_eigen3(const double a[9], double values[3], double vectors[9]);`  
+  Eigen-decomposition of a symmetric 3 x 3 matrix by Jacobi rotations: eigenvalues ascending, eigenvectors as columns (v[3*row + col]).
 
 ## include/stratonix/core/mesh.hpp
 
@@ -103,7 +118,7 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 
 - `(file)`  
   Units accepted in model descriptions and their conversion to SI.
-- `enum class Dimension { Length, Angle, Dimensionless, Ordinal, Flag, Any };`  
+- `enum class Dimension { Length, Angle, Dimensionless, Ordinal, Flag, Area, Any };`  
   Physical dimension of a parameter.
 - `std::optional<UnitDef> find_unit(std::string_view name);`  
   Look up a unit by name ("m", "km", "ft", "deg", "rad", "fraction", "ratio", "percent", "ordinal", "flag"). Returns nullopt if unknown.
@@ -166,6 +181,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Plain-words description used in README files ("assumed by the modeller", ...).
 - `struct Param`  
   A labelled parameter: value(s), unit, evidence class and source.
+- `struct ImplicitData { std::string input, kind, format, horizon; };`  
+  Data-conditioned (implicit) structure: data inputs and interpolation settings.
 - `struct Description`  
   A complete, validated model description.
 - `std::vector<const Param*> all_params() const;`  
@@ -206,8 +223,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Structure-builder plugins turn a validated description into a Model.
 - `struct BuildLog`  
   Messages and numbers a builder reports (corrections applied, resolved tips, ...).
+- `struct DataPoint`  
+  A data point for data-conditioned builders: position, optional unit normal (orientation data, pointing up), and a label (horizon or fault name; empty if the data entry names it).
 - `struct BuildInputs`  
-  Grids read from description inputs, keyed by input id (filled by the pipeline's importers).
+  Data read from description inputs, keyed by input id (filled by the pipeline's importers).
 - `class StructureBuilder : public registry::PluginBase`  
   Structure builder plugin interface.
 - `virtual bool accepts(const desc::Description& d) const = 0;`  
@@ -265,6 +284,23 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Ages, youngest first.
 - `void register_fault_plugins();`  
   Register built-in kinematics and hanging-wall plugins (part of register_engine_plugins()).
+
+## include/stratonix/engines/implicit.hpp
+
+- `(file)`  
+  Data-conditioned (implicit) structure builder: a stratigraphic scalar field interpolated from interface points, orientations and well tops by Hermite radial basis functions (cubic kernel, linear drift), with faults from the v1 fault network. The field is interpolated in the restored frame; data are restored through the faults and the field is re-solved until the fault tips (which refer to the horizons) and the data agree. The result is a model behind the same interface as the parametric engine, so every section, export, check and package command works on it unchanged.
+- `class RbfField`  
+  Hermite RBF interpolant s(x) = sum_i a_i phi(x - x_i) - sum_j beta_j e_j . grad phi(x - y_j) + c0 + c . x with phi(d) = |d|^3, fitted to values at interface points x_i and, at each orientation, to two tangent constraints e . grad s = 0 (the direction of the gradient, not its magnitude).
+- `RbfField(std::vector<Value> values, std::vector<Gradient> grads, double nugget, Vec3 centre, double scale, double vertical_stretch = 1.0);`  
+  Fit. nugget (m) is added to the diagonal of the value rows (0 = exact interpolation). Coordinates are centred and scaled by `scale` internally for conditioning. vertical_stretch > 1 stretches z before the kernel is applied (anisotropy: horizons vary slowly laterally compared with the spacing of the horizons).
+- `struct FittedPlane { Vec3 centroid, normal; double strike = 0, dip = 0, rms = 0; std::size_t points = 0; };`  
+  Plane fitted to fault sticks: centroid, unit normal pointing up, strike and dip (radians, right-hand rule: dip direction = strike + 90 degrees) and RMS distance of the points.
+- `class ImplicitModel final : public Model`  
+  The model returned by the implicit builder: a parametric model whose horizons are the implicit surfaces, plus provenance and the misfit at every data point.
+- `const void* capability(std::string_view name) const override;`  
+  "structure", "faults" (as the parametric engine), "data_misfit" -> const std::vector<DataMisfit>*.
+- `ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in, BuildLog& log);`  
+  Build an implicit model (also available as the "implicit-rbf" structure-builder plugin).
 
 ## include/stratonix/engines/parametric.hpp
 
@@ -421,6 +457,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Approximate plane and extent of a fault, used by extractors to locate its surface.
 - `struct ModelInfo`  
   Description of a model, independent of the engine.
+- `std::vector<std::string> provenance;`  
+  Data the model was conditioned on, one line per input with its evidence class and source (empty for purely parametric models). Carried into export READMEs and packages.
+- `struct DataMisfit`  
+  Misfit of a data-conditioned model at one data point (capability "data_misfit" returns a const std::vector<DataMisfit>*).
 - `enum EvalFields : unsigned { kEvalUnit = 1u, kEvalBlock = 2u, kEvalScalars = 4u, kEvalAll = 7u };`  
   Which fields evaluate() should fill.
 - `struct EvalResult`  
@@ -495,6 +535,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Build only (no files written); used by the C API and tests.
 - `std::vector<std::pair<std::string, std::string>> key_numbers(const desc::Description& d, const Model& m, const struct CheckReport& rep, class CheckContext& ctx);`  
   Key numbers of a built model (summary table; also read by the figures).
+- `std::string data_misfit_csv(const Model& m);`  
+  Misfit at every data point of a data-conditioned model (empty if the model has no data).
 - `void write_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys, const std::filesystem::path& folder);`  
   Write the figure set (sections from the description, maps, 3D views, fence) into a folder.
 - `BuildOutcome run_section(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::string& name, const Polyline& line, const BuildOptions& opt);`  
