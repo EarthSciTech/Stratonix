@@ -37,7 +37,7 @@ TEST_CASE("synthetic example validates") {
   CHECK_NEAR(d.faults[0].dip.si(), 60.0 * 3.14159265358979323846 / 180, 1e-12);
   CHECK(d.faults[0].throw_max.evidence == Evidence::UserInstruction);
   CHECK(d.all_params().size() > 40);
-  CHECK(d.closure_faults_seal.flag == false);
+  CHECK(d.closure_faults_seal.flag == true);
   CHECK(d.sections.size() == 2);
   CHECK(d.sections[0].polyline.rows() == 2);
 }

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(stratonix VERSION 0.2.0 DESCRIPTION "Stratonix geomodelling toolkit" LANGUAGES C CXX)
+project(stratonix VERSION 0.4.0 DESCRIPTION "Stratonix geomodelling toolkit" LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,7 +31,7 @@ if(NOT STX_GIT_COMMIT)
 endif()
 
 # ---- Layer 0: core -------------------------------------------------------------------------
-add_library(stratonix_core STATIC src/core/core.cpp)
+add_library(stratonix_core STATIC src/core/core.cpp src/core/well.cpp)
 target_include_directories(stratonix_core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_definitions(stratonix_core PRIVATE
   STRATONIX_VERSION="${PROJECT_VERSION}" STRATONIX_GIT_COMMIT="${STX_GIT_COMMIT}"

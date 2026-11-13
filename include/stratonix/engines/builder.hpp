@@ -1,10 +1,12 @@
 /// @file builder.hpp
 /// @brief Structure-builder plugins turn a validated description into a Model.
 #pragma once
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "stratonix/core/grid.hpp"
 #include "stratonix/desc/description.hpp"
 #include "stratonix/model/model.hpp"
 #include "stratonix/registry/registry.hpp"
@@ -19,17 +21,23 @@ struct BuildLog {
   void value(std::string k, std::string v) { values.emplace_back(std::move(k), std::move(v)); }
 };
 
+/// Grids read from description inputs, keyed by input id (filled by the pipeline's importers).
+struct BuildInputs {
+  std::map<std::string, Grid2D> grids;
+};
+
 /// Structure builder plugin interface.
 class StructureBuilder : public registry::PluginBase {
  public:
   /// True if this builder can build the description.
   virtual bool accepts(const desc::Description& d) const = 0;
-  virtual ModelPtr build(const desc::Description& d, BuildLog& log) const = 0;
+  virtual ModelPtr build(const desc::Description& d, const BuildInputs& in, BuildLog& log) const = 0;
 };
 
 /// Build a model with the first registered builder that accepts the description, preferring
 /// `preferred` if given. Throws Error(Build) if none accepts it.
-ModelPtr build_model(const desc::Description& d, BuildLog& log, const std::string& preferred = {});
+ModelPtr build_model(const desc::Description& d, const BuildInputs& in, BuildLog& log,
+                     const std::string& preferred = {});
 
 /// Common ModelInfo filled from a description (horizons, units, domain, CRS, basis).
 ModelInfo model_info_from(const desc::Description& d);

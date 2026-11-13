@@ -3,9 +3,12 @@
 
 #include <sstream>
 
+#include "stratonix/checks/checks.hpp"
 #include "stratonix/checks/manifest.hpp"
+#include "stratonix/engines/wells.hpp"
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/util.hpp"
+#include "stratonix/io/io.hpp"
 
 namespace stratonix {
 
@@ -14,6 +17,8 @@ void register_all_plugins() {
   if (done) return;
   done = true;
   register_engine_plugins();
+  io::register_io_plugins();
+  register_check_plugins();
 }
 
 void ensure_new_output_dir(const std::filesystem::path& out_dir) {
@@ -29,7 +34,9 @@ BuildOutcome build_only(const desc::Description& d, const BuildOptions& opt) {
   if (opt.threads) set_thread_count(opt.threads);
   set_optimised_kernels(!opt.reference_kernels);
   BuildOutcome o;
-  o.model = build_model(d, o.log, opt.builder);
+  BuildInputs in;
+  io::load_build_inputs(d, in);
+  o.model = build_model(d, in, o.log, opt.builder);
   return o;
 }
 
@@ -60,6 +67,11 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
   ensure_new_output_dir(out_dir);
   BuildOutcome o = build_only(d, opt);
   write_file(out_dir / "model_summary.txt", summary_text(d, *o.model, o.log));
+  CheckContext ctx(*o.model, d, make_well_paths(d), d.grid_spacing.si());
+  CheckReport rep = run_checks(ctx);
+  o.checks_passed = rep.passed();
+  write_file(out_dir / "checks_report.txt", rep.text());
+  write_file(out_dir / "checks_report.csv", rep.csv());
   Manifest man = Manifest::from_description(d, command);
   for (auto& [k, v] : o.log.values) man.extra.emplace_back(k, v);
   man.add_outputs(out_dir);

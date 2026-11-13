@@ -97,7 +97,7 @@ Domain Description::domain() const {
 std::vector<const Param*> Description::all_params() const {
   std::vector<const Param*> r;
   auto add = [&](const Param& p) { if (p.present) r.push_back(&p); };
-  for (auto* p : {&origin, &size, &depth_range, &grid_spacing, &ref_point, &regional_dip,
+  for (auto* p : {&origin, &size, &depth_range, &grid_spacing, &ref_point, &regional_dip, &correction_range,
                   &regional_dip_azimuth, &frame_point, &tol_thickness_min, &tol_crossing,
                   &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
@@ -340,6 +340,7 @@ struct Typer {
         d.regional_dip_azimuth = P(r, "dip_azimuth", "structure.regional", Dimension::Angle, d.regional_type == "planar", 1);
       }
       if (const Node* bs = s->get("base")) d.base_type = S(bs, "type", "conformable");
+      d.correction_range = P(s, "correction_range", "structure", Dimension::Length, false, 1);
       if (const Node* ps = s->get("primitives"))
         for (std::size_t k = 0; k < ps->seq.size(); ++k) {
           const Node& p = ps->seq[k];
@@ -573,6 +574,16 @@ struct Typer {
           c.err("wells[" + std::to_string(k) + "].tops." + h, "W1", "unknown horizon '" + h + "'");
       if (w.role == "control" && w.tops.empty())
         c.err("wells[" + std::to_string(k) + "]", "W2", "a control well must have tops");
+    }
+    {
+      int controls = 0;
+      for (auto& w : d.wells) controls += (w.role == "control" && !w.tops.empty()) ? 1 : 0;
+      bool imported = false;
+      for (auto& h : d.horizons) imported = imported || !h.surface_input.empty() || !h.iso_input.empty();
+      if ((controls > 1 || (imported && controls > 0)) && !d.correction_range.present)
+        c.err("structure.correction_range", "W3",
+              "control wells beyond the reference (or imported surfaces) are honoured by a correction field; "
+              "give its range as a parameter");
     }
     // primitives
     for (std::size_t k = 0; k < d.primitives.size(); ++k)

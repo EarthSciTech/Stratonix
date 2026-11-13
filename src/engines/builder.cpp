@@ -31,7 +31,7 @@ ModelInfo model_info_from(const desc::Description& d) {
   return mi;
 }
 
-ModelPtr build_model(const desc::Description& d, BuildLog& log, const std::string& preferred) {
+ModelPtr build_model(const desc::Description& d, const BuildInputs& in, BuildLog& log, const std::string& preferred) {
   auto& reg = registry::Registry::global();
   std::vector<const registry::Entry*> cands;
   if (!preferred.empty()) {
@@ -43,7 +43,7 @@ ModelPtr build_model(const desc::Description& d, BuildLog& log, const std::strin
     auto b = reg.create<StructureBuilder>(registry::Kind::StructureBuilder, e->name);
     if (b->accepts(d)) {
       log.value("structure_builder", e->name + "@" + e->version);
-      return b->build(d, log);
+      return b->build(d, in, log);
     }
   }
   throw Error(ErrorCode::Build, "no registered structure builder accepts this description");
@@ -59,7 +59,7 @@ class FlatLayersBuilder final : public StructureBuilder {
       if (!h.surface_input.empty() || !h.iso_input.empty()) return false;
     return true;
   }
-  ModelPtr build(const desc::Description& d, BuildLog& log) const override {
+  ModelPtr build(const desc::Description& d, const BuildInputs&, BuildLog& log) const override {
     ModelInfo mi = model_info_from(d);
     std::vector<double> z;
     const desc::WellDesc* rw = d.ref_well.empty() ? nullptr : d.well(d.ref_well);

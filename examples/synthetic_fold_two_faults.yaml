@@ -62,7 +62,7 @@ faults:
       dip: "60 deg | user_instruction | synthetic example"
     extent:
       upper_tip: {rule: within_unit, unit: Unit_B, fraction: "0.5 fraction | user_instruction | synthetic example"}
-      lower_tip: {rule: horizon, horizon: H5, offset: "150 m | user_instruction | synthetic example"}
+      lower_tip: {rule: within_unit, unit: Unit_D, fraction: "0.7 fraction | user_instruction | synthetic example"}
       length: "3000 m | user_instruction | synthetic example"
       tip_line_shape: elliptical
     throw:
@@ -100,7 +100,7 @@ checks:
     wells: "0.01 m | user_instruction | synthetic example"
   closure:
     horizon: H2
-    faults_seal: "false flag | assumed | synthetic example: faults treated as non-sealing"
+    faults_seal: "true flag | assumed | synthetic example: faults treated as sealing"
 outputs:
   sections:
     - name: XS_A

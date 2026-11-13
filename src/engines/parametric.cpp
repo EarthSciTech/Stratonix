@@ -1,0 +1,130 @@
+// Parametric engine: Model interface over Structure + FaultNetwork.
+#include "stratonix/engines/parametric.hpp"
+
+#include <cmath>
+#include <limits>
+
+#include "stratonix/core/error.hpp"
+#include "stratonix/core/util.hpp"
+
+namespace stratonix {
+
+ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& in, BuildLog& log)
+    : info_(model_info_from(d)) {
+  info_.engine = "parametric";
+  structure_ = std::make_shared<Structure>(d, in, log);
+  faults_ = std::make_shared<FaultNetwork>(d, *structure_, log);
+  for (auto& f : faults_->faults()) {
+    FaultInfo fi;
+    fi.name = f.name;
+    fi.index = f.index;
+    fi.age = static_cast<int>(f.age);
+    fi.ref_point = f.p0;
+    fi.strike_dir = f.s;
+    fi.dip_dir = f.dd;
+    fi.normal = f.n;
+    fi.half_length = 0.5 * f.length;
+    fi.b_min = std::numeric_limits<double>::infinity();
+    fi.b_max = -std::numeric_limits<double>::infinity();
+    for (std::size_t i = 0; i < f.a_tab.size(); ++i) {
+      double bu, bl;
+      f.tips(f.a_tab[i], bu, bl);
+      fi.b_min = std::min(fi.b_min, bu);
+      fi.b_max = std::max(fi.b_max, bl);
+    }
+    fi.slip_mode = f.kin->name();
+    info_.faults.push_back(fi);
+  }
+}
+
+const void* ParametricModel::capability(std::string_view name) const {
+  if (name == "structure") return structure_.get();
+  if (name == "faults") return faults_.get();
+  return nullptr;
+}
+
+void ParametricModel::eval_point(const Vec3& p, BlockCode* block, Vec3* restored, double* scalars) const {
+  Vec3 r = faults_->empty() ? p : faults_->restore(p, block);
+  if (faults_->empty() && block) *block = 0;
+  if (restored) *restored = r;
+  if (scalars) {
+    structure_->z_all(r.x, r.y, scalars);
+    for (std::size_t h = 0; h < structure_->horizons(); ++h) scalars[h] = r.z - scalars[h];
+  }
+}
+
+void ParametricModel::evaluate(std::span<const Vec3> pts, unsigned fields, EvalResult& out) const {
+  const std::size_t n = pts.size(), nh = structure_->horizons();
+  out.n = n;
+  out.unit.assign(fields & kEvalUnit ? n : 0, 0);
+  out.block.assign(fields & kEvalBlock ? n : 0, 0);
+  out.scalar.assign(fields & kEvalScalars ? n * nh : 0, 0.0);
+  auto body = [&](std::size_t a, std::size_t b) {
+    std::vector<double> s(nh);
+    for (std::size_t i = a; i < b; ++i) {
+      BlockCode bc = 0;
+      eval_point(pts[i], &bc, nullptr, s.data());
+      if (fields & kEvalBlock) out.block[i] = bc;
+      if (fields & kEvalScalars)
+        for (std::size_t h = 0; h < nh; ++h) out.scalar[h * n + i] = s[h];
+      if (fields & kEvalUnit) out.unit[i] = unit_from_scalars(s.data(), 1, nh);
+    }
+  };
+  if (optimised_kernels() && n >= 2048) parallel_for(n, 1024, body);
+  else body(0, n);
+}
+
+void ParametricModel::scalar_in_block(std::span<const Vec3> pts, BlockCode block, int horizon, std::span<double> out) const {
+  if (horizon < 0 || static_cast<std::size_t>(horizon) >= structure_->horizons())
+    throw Error(ErrorCode::InvalidArgument, "horizon index out of range");
+  auto body = [&](std::size_t a, std::size_t b) {
+    for (std::size_t i = a; i < b; ++i) {
+      Vec3 r = faults_->empty() ? pts[i] : faults_->restore(pts[i], nullptr, &block);
+      out[i] = r.z - structure_->z(static_cast<std::size_t>(horizon), r.x, r.y);
+    }
+  };
+  if (optimised_kernels() && pts.size() >= 2048) parallel_for(pts.size(), 1024, body);
+  else body(0, pts.size());
+}
+
+void ParametricModel::evaluate_fault(int f, std::span<const Vec3> pts, FaultEval& out) const {
+  if (f < 0 || static_cast<std::size_t>(f) >= faults_->size()) throw Error(ErrorCode::InvalidArgument, "fault index out of range");
+  const Fault& F = faults_->faults()[static_cast<std::size_t>(f)];
+  out.distance.resize(pts.size());
+  out.extent.resize(pts.size());
+  out.displacement.resize(pts.size());
+  auto body = [&](std::size_t a0, std::size_t b0) {
+    for (std::size_t i = a0; i < b0; ++i) {
+      Vec3 q = faults_->to_fault_frame(pts[i], f);
+      double a, b;
+      F.profile_coords(q, a, b);
+      out.distance[i] = F.sigma(q);
+      out.extent[i] = F.extent_coord(a, b);
+      bool active = true;
+      Vec3 r = faults_->relative_displacement(f, q, &active);
+      out.displacement[i] = active ? norm(r) : 0.0;
+    }
+  };
+  if (optimised_kernels() && pts.size() >= 2048) parallel_for(pts.size(), 1024, body);
+  else body(0, pts.size());
+}
+
+void ParametricModel::restore(std::span<const Vec3> pts, std::span<Vec3> out) const {
+  for (std::size_t i = 0; i < pts.size(); ++i) out[i] = faults_->empty() ? pts[i] : faults_->restore(pts[i], nullptr);
+}
+
+namespace {
+class ParametricBuilder final : public StructureBuilder {
+ public:
+  bool accepts(const desc::Description&) const override { return true; }
+  ModelPtr build(const desc::Description& d, const BuildInputs& in, BuildLog& log) const override {
+    return std::make_shared<ParametricModel>(d, in, log);
+  }
+};
+}  // namespace
+
+STRATONIX_REGISTER(parametric_builder, registry::Kind::StructureBuilder, "parametric", "1.0.0",
+                   "Fold primitives, imported surfaces, isochores, faults with kinematics and frame rule",
+                   [] { return std::make_unique<ParametricBuilder>(); })
+
+}  // namespace stratonix

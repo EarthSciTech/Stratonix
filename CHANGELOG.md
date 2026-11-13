@@ -3,6 +3,48 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [0.4.0] - 2026-11-13 - Fault framework and kinematics (Prompt 4)
+
+### Added
+- Fault network as its own object: planar faults by point/strike/dip or trace/dip; tips by
+  horizon-relative rules (horizon + offset, fraction through a unit, depth, free); along-strike
+  length with rectangular or elliptical tip line; throw profiles (sine, flat-topped, elliptical,
+  linear) down dip and along strike.
+- Kinematics plugins (dip_slip, vertical_offset) and hanging-wall field plugins (rigid, decay,
+  linear_between_faults); ages, abutting, and the frame rule (fixed well or point).
+- Representations: fault surfaces clipped to the tip line, fault sticks, hanging-wall and
+  footwall cut-off lines refined by bisection, throw tables.
+- Checks C3 (no offset outside tips), C4 (throw equals profile), C6 (top/base unoffset),
+  C7 (faults in domain, mesh quality), C8 (fault intersections resolved).
+- Benchmarks: constant-throw fault, blind fault, two faults with different extents, intersecting
+  faults with abutting, tip inside a unit; dip-slip versus vertical offset comparison.
+- Prototype regression harness (skipped until the reference tables are supplied).
+
+### Changed (found while testing)
+- The throw profile is read at the restored position of the material, at the fault point of the
+  same elevation; restoration solves a bracketed 1D equation per fault. Before, a rigid hanging
+  wall moved material above a blind fault's upper tip, and the throw at a horizon depended on
+  which block the frame held fixed.
+- Tips of a younger fault are resolved on the stratigraphy already displaced by older faults.
+- Synthetic example: F1 made truly blind (lower tip inside Unit_D); closure with sealing faults.
+
+## [0.3.0] - 2026-11-13 - Structure engine (Prompt 3)
+
+Delivered in the same commit as 0.4.0.
+
+### Added
+- Parametric structure builder: stratigraphy from a reference well or point (tops or
+  thicknesses); fold primitives (anticline, dome, syncline, basin) with axis azimuth, plunge,
+  half-length, limb half-widths, radii, rim synclines; relief per horizon by anchors; flat or
+  conformable base; imported surfaces (IRAP classic ASCII, ZMAP+, regular XYZ) and isochore
+  stacking; control wells honoured by construction or by a reported correction field.
+- Grid importers; horizon grids per block and faulted with gaps; well intersections; closure
+  analysis (crest, spill point, closure area); contours.
+- Checks C1 (thickness), C2 (crossing), C5 (wells), C9 (closure against targets, reported, never
+  tuned); checks report (text and CSV); build fails when a check fails.
+- Benchmarks: flat layers, symmetric dome with known closure, asymmetric anticline with known limb
+  dips, second control well, imported surface with isochore, closure targets.
+
 ## [0.2.0] - 2026-11-13 - Core (Prompt 2)
 
 ### Added

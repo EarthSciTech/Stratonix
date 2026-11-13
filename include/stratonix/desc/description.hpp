@@ -102,6 +102,7 @@ struct Description {
   std::string regional_type = "flat";
   Param regional_dip, regional_dip_azimuth;
   std::string base_type = "conformable";
+  Param correction_range;  ///< range of the well-correction field (needed when >1 control well or imported surfaces)
   std::vector<PrimitiveDesc> primitives;
   std::vector<FaultDesc> faults;
   std::string frame_well;

@@ -164,6 +164,7 @@
             "dip_azimuth": {"$ref": "#/$defs/param"}
           }
         },
+        "correction_range": {"$ref": "#/$defs/param"},
         "base": {
           "type": "object",
           "required": ["type"],
