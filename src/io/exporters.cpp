@@ -241,21 +241,35 @@ class TSurfExporter final : public Exporter {
   std::vector<ExportedFile> write(ExportContext& c, const fs::path& folder) const override {
     std::vector<ExportedFile> out;
     const auto& inf = c.info();
+    const std::string crs = petrel_name(inf.crs.label());
     for (std::size_t f = 0; f < inf.faults.size(); ++f) {
-      TSurfInfo ti{petrel_name(inf.faults[f].name), "Elevation", 0.8, 0.2, 0.2};
-      fs::path p = fs::path("faults") / (petrel_name(inf.faults[f].name) + ".ts");
       const auto& fsu = c.fault_surface(static_cast<int>(f));
+      TSurfInfo ti;
+      ti.name = petrel_name(inf.faults[f].name);
+      ti.crs_name = crs;
+      ti.r = 0.8; ti.g = 0.2; ti.b = 0.2;
+      FaultEval fe;
+      c.model().evaluate_fault(static_cast<int>(f), fsu.mesh.v, fe);
+      ti.property = "displacement";
+      ti.values = fe.displacement;
+      fs::path p = fs::path("faults") / (petrel_name(inf.faults[f].name) + ".ts");
       put(folder, p, write_tsurf(fsu.mesh, ti, c.decimals));
       out.push_back({rel(p), "GOCAD TSurf", "GOCAD TSurf (ASCII)",
-                     inf.faults[f].name + " triangulated plane clipped to the tip line (" + std::to_string(fsu.mesh.t.size()) + " triangles)"});
+                     inf.faults[f].name + " triangulated plane clipped to the tip line (" + std::to_string(fsu.mesh.t.size()) +
+                         " triangles); vertex property displacement (m)"});
     }
     for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
-      TSurfInfo ti{petrel_name(inf.horizons[h].name), "Elevation", 0.6, 0.7, 0.9};
-      fs::path p = fs::path("horizons") / (petrel_name(inf.horizons[h].name) + "_faulted.ts");
       TriMesh mesh = repr::grid_to_mesh(c.faulted(static_cast<int>(h)).z);
+      TSurfInfo ti;
+      ti.name = petrel_name(inf.horizons[h].name);
+      ti.crs_name = crs;
+      ti.r = 0.6; ti.g = 0.7; ti.b = 0.9;
+      ti.property = "depth";
+      for (auto& v : mesh.v) ti.values.push_back(-v.z);
+      fs::path p = fs::path("horizons") / (petrel_name(inf.horizons[h].name) + "_faulted.ts");
       put(folder, p, write_tsurf(mesh, ti, c.decimals));
       out.push_back({rel(p), "GOCAD TSurf", "GOCAD TSurf (ASCII)",
-                     inf.horizons[h].name + " faulted surface as triangles (no triangles across gaps)"});
+                     inf.horizons[h].name + " faulted surface as triangles (no triangles across gaps); vertex property depth (m, positive down)"});
     }
     return out;
   }
@@ -315,7 +329,9 @@ STRATONIX_REGISTER(exp_well_heads, registry::Kind::Exporter, "well_heads", "1.0.
 STRATONIX_REGISTER(exp_well_tops, registry::Kind::Exporter, "well_tops", "1.0.0", "Wells: Petrel well tops",
                    [] { return std::make_unique<WellTopsExporter>(); })
 
+void register_neutral_exporters();
 void register_exporters() {
+  register_neutral_exporters();
   STRATONIX_PLUGIN_ANCHOR(exp_irap_ascii);
   STRATONIX_PLUGIN_ANCHOR(exp_zmap);
   STRATONIX_PLUGIN_ANCHOR(exp_fault_polygons);

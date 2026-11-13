@@ -3,6 +3,29 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [0.9.0] - 2026-11-13 - Interoperability (Prompt 9)
+
+### Added
+- Exporters: `vtk` (VTU surfaces with depth or displacement, wells as polylines, VTI voxel units
+  and blocks, PVD collection, ParaView Python state with vertical exaggeration), `obj`, `stl`,
+  `csv` (nodes with elevation, depth and block; XYZ; well tops), `geojson` (domain, fault polygons,
+  wells; model coordinates, flagged as not WGS 84), `gempy` and `loopstructural` (interface points,
+  orientations and fault data sampled from the model away from fault gaps).
+- GOCAD TSurf now carries the coordinate-system name and a vertex property (`displacement` on
+  faults, `depth` on horizons).
+- Importers: `xyz_points`, `irap_lines`, `petrel_points` (grouped into sticks), `gocad_tsurf`,
+  `well_tops` (grids: `irap_ascii`, `zmap`, `xyz` as before).
+- Tests: `test_interop` round trips for every exporter and importer; GemPy and LoopStructural
+  points lie on the model's horizons and faults; `tests/tools/check_neutral_set.py` checks the
+  neutral files independently; `tests/tools/crosscheck_implicit.py` rebuilds the horizons from
+  the LoopStructural set (LoopStructural when installed, otherwise a SciPy RBF substitute) and
+  reports depth differences near and away from faults (see STX-TN-03).
+
+### Not done here
+- RESQML 2.0.1 (FESAPI and HDF5 cannot be built without network): deferred.
+- ParaView, VTK and LoopStructural are not installable here: files checked with own parsers,
+  cross-check run with the substitute interpolator.
+
 ## [0.8.0] - 2026-11-13 - Petrel export set (Prompt 8)
 
 ### Added

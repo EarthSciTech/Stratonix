@@ -157,6 +157,12 @@ std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Mo
   double sp = grid_spacing > 0 ? grid_spacing : d.grid_spacing.si();
   double sticks = d.fault_stick_spacing.present ? d.fault_stick_spacing.si() : 250.0;  // Stratonix default when not given
   io::ExportContext c(m, make_well_paths(d), GridSpec::covering(m.info().domain, sp), std::max(10.0, sp / 2), sticks);
+  c.vertical_exaggeration = d.vertical_exaggeration.present ? d.vertical_exaggeration.si() : 1.0;
+  if (d.voxel_spacing.present) {
+    auto v = d.voxel_spacing.si_list();
+    if (v.size() == 3) { c.voxel_dx = v[0]; c.voxel_dy = v[1]; c.voxel_dz = v[2]; }
+  }
+  c.sample_spacing = std::max(250.0, 5 * sp);  // Stratonix default: sparse enough for implicit modellers
   std::string note = "Every parameter of the description carries a value, unit, evidence class and source (see manifest.json).";
   return io::export_set(c, ids, folder, note);
 }

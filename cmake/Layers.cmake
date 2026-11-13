@@ -31,6 +31,8 @@ add_library(stratonix_io STATIC
   src/io/grids.cpp
   src/io/formats.cpp
   src/io/exporters.cpp
+  src/io/neutral.cpp
+  src/io/importers.cpp
   src/io/register.cpp)
 target_link_libraries(stratonix_io PUBLIC stratonix_engines stratonix_repr)
 stx_layer(stratonix_io 5)

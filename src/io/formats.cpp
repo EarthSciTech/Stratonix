@@ -88,10 +88,13 @@ std::vector<Polyline> read_irap_lines(const std::string& text) {
 
 // ---- GOCAD TSurf ---------------------------------------------------------------------------
 std::string write_tsurf(const TriMesh& m, const TSurfInfo& in, int d) {
+  const bool prop = !in.property.empty() && in.values.size() == m.v.size();
   std::string o = "GOCAD TSurf 1\nHEADER {\nname:" + in.name + "\n*solid*color:" + fmt_fixed(in.r, 4) + " " + fmt_fixed(in.g, 4) + " " +
                   fmt_fixed(in.b, 4) + " 1\n}\n";
-  o += "GOCAD_ORIGINAL_COORDINATE_SYSTEM\nNAME Default\nAXIS_NAME \"X\" \"Y\" \"Z\"\nAXIS_UNIT \"m\" \"m\" \"m\"\nZPOSITIVE " + in.z_positive +
-       "\nEND_ORIGINAL_COORDINATE_SYSTEM\nTFACE\n";
+  o += "GOCAD_ORIGINAL_COORDINATE_SYSTEM\nNAME " + in.crs_name + "\nAXIS_NAME \"X\" \"Y\" \"Z\"\nAXIS_UNIT \"m\" \"m\" \"m\"\nZPOSITIVE " +
+       in.z_positive + "\nEND_ORIGINAL_COORDINATE_SYSTEM\n";
+  if (prop) o += "PROPERTIES " + in.property + "\nPROPERTY_CLASSES " + in.property + "\nPROPERTY_KINDS \"unknown\"\nESIZES 1\nUNITS m\n";
+  o += "TFACE\n";
   // only vertices used by triangles, renumbered from 1
   std::vector<long> id(m.v.size(), -1);
   long n = 0;
@@ -101,7 +104,7 @@ std::string write_tsurf(const TriMesh& m, const TSurfInfo& in, int d) {
   for (std::size_t i = 0; i < m.v.size(); ++i)
     if (id[i] == 0) {
       id[i] = ++n;
-      o += "VRTX " + std::to_string(n) + " " + xyz(m.v[i], d) + "\n";
+      o += (prop ? "PVRTX " : "VRTX ") + std::to_string(n) + " " + xyz(m.v[i], d) + (prop ? " " + fmt_fixed(in.values[i], d) : "") + "\n";
     }
   for (auto& t : m.t) o += "TRGL " + std::to_string(id[t[0]]) + " " + std::to_string(id[t[1]]) + " " + std::to_string(id[t[2]]) + "\n";
   o += "END\n";
@@ -124,10 +127,13 @@ TriMesh read_tsurf(const std::string& text, TSurfInfo* info) {
     }
     auto t = fields(tl);
     if (t[0] == "ZPOSITIVE" && info && t.size() > 1) info->z_positive = t[1];
+    if (t[0] == "NAME" && info && t.size() > 1) info->crs_name = t[1];
+    if (t[0] == "PROPERTIES" && info && t.size() > 1) info->property = t[1];
     if (t[0] == "VRTX" || t[0] == "PVRTX") {
       if (t.size() < 5) throw Error(ErrorCode::Parse, "TSurf: short VRTX line: " + tl);
       idx[std::stol(t[1])] = m.v.size();
       m.v.push_back({parse_double(t[2]), parse_double(t[3]), parse_double(t[4])});
+      if (t[0] == "PVRTX" && info && t.size() > 5) info->values.push_back(parse_double(t[5]));
     } else if (t[0] == "TRGL") {
       if (t.size() < 4) throw Error(ErrorCode::Parse, "TSurf: short TRGL line: " + tl);
       std::array<std::uint32_t, 3> tri{};

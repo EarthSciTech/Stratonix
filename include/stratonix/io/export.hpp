@@ -34,7 +34,11 @@ std::vector<Polyline> read_irap_lines(const std::string& text);
 struct TSurfInfo {
   std::string name;
   std::string z_positive = "Elevation";  ///< "Elevation" or "Depth"
+  std::string crs_name = "Default";      ///< GOCAD_ORIGINAL_COORDINATE_SYSTEM NAME
   double r = 0.7, g = 0.7, b = 0.7;
+  /// Optional vertex property (written with PROPERTIES / PVRTX); empty name = none.
+  std::string property;
+  std::vector<double> values;            ///< one per mesh vertex when property is set
 };
 std::string write_tsurf(const TriMesh& m, const TSurfInfo& info, int decimals = 4);
 TriMesh read_tsurf(const std::string& text, TSurfInfo* info = nullptr);
@@ -59,6 +63,31 @@ std::vector<WellTopRow> read_well_tops(const std::string& text);
 /// Deviation survey as MD X Y Z (elevation) rows with a commented header.
 std::string write_well_path(const WellPath& w, int decimals = 2);
 
+// ---- Neutral formats -------------------------------------------------------------------------
+/// VTK XML unstructured grid (ASCII) of triangles or polylines with optional point and cell arrays.
+struct VtuData {
+  std::vector<Vec3> pts;
+  std::vector<std::vector<std::int64_t>> cells;   ///< vertex ids per cell
+  std::vector<std::uint8_t> types;                ///< VTK cell types (5 triangle, 4 polyline)
+  std::vector<std::pair<std::string, std::vector<double>>> point_data;
+  std::vector<std::pair<std::string, std::vector<std::int32_t>>> cell_data;
+};
+std::string write_vtu(const VtuData& d, int decimals = 4);
+VtuData read_vtu(const std::string& text);
+/// VTK XML image data of a voxel grid (cell arrays unit and block).
+std::string write_vti(const repr::VoxelGrid& v, int decimals = 4);
+repr::VoxelGrid read_vti(const std::string& text);
+std::string write_obj(const TriMesh& m, const std::string& name, const std::vector<std::string>& comments, int decimals = 4);
+TriMesh read_obj(const std::string& text);
+std::string write_stl(const TriMesh& m, const std::string& name, int decimals = 4);
+TriMesh read_stl(const std::string& text);
+/// Comma-separated table with a header line; numbers and plain strings (no commas or quotes).
+struct CsvTable { std::vector<std::string> header; std::vector<std::vector<std::string>> rows; };
+std::string write_csv(const CsvTable& t, const std::vector<std::string>& comments);
+CsvTable read_csv(const std::string& text);
+/// Points "x y z" per line (comment lines start with '#').
+std::vector<Vec3> read_xyz_points(const std::string& text);
+
 // ---- Export context ------------------------------------------------------------------------
 /// What the exporters write from: the model, wells, grid and spacings, with lazily computed and
 /// cached representations so several formats share one evaluation.
@@ -71,6 +100,9 @@ class ExportContext {
   const GridSpec& grid() const { return grid_; }
   double stick_spacing() const { return stick_spacing_; }
   int decimals = 4;
+  double vertical_exaggeration = 1;          ///< for viewer state files
+  double voxel_dx = 0, voxel_dy = 0, voxel_dz = 0;  ///< voxel grid spacing (0: none)
+  double sample_spacing = 250;               ///< point sampling for GemPy / LoopStructural sets
   /// Lines written at the top of every file that takes comments (model, CRS, z convention).
   std::vector<std::string> comments() const;
 
@@ -125,5 +157,6 @@ std::vector<ExportedFile> export_set(ExportContext& c, const std::vector<std::st
 std::string export_readme(const ExportContext& c, const std::vector<ExportedFile>& files, const std::string& evidence_note);
 
 void register_exporters();
+void register_importers();
 
 }  // namespace stratonix::io
