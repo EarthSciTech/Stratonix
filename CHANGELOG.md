@@ -3,6 +3,24 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [1.0.0] - 2026-11-13 - Release 1.0 (Prompt 11)
+
+### Added
+- C API 1.1 (additive to 1.0): horizon grids (faulted with gaps, or per block), export and package
+  implemented; `stx_status_name`, `stx_model_fault_name`; every status code documented in
+  `stratonix_c.h`. Shared library `stratonix_c` (SONAME 1). C example
+  `capi/examples/stratonix_example.c` built and run as a test; `capi_test` covers build, evaluate,
+  surfaces, export, package and error codes.
+- Worked examples `examples/one_fault.yaml` and `examples/dome_blind_fault.yaml` (built as tests).
+- Documentation: user guide, developer guide, roadmap v2-v5, API reference generated from the
+  header comments (`tools/gen_api_reference.py`; `docs/Doxyfile` for Doxygen), `tools/build_docs.py`.
+- Continuous integration: Windows packages install the vcpkg DLLs next to the program; a release
+  job publishes the Windows installer and zip and the Linux archive with `SHA256SUMS.txt` on a tag.
+
+### Release artefacts
+- Linux: `stratonix-1.0.0-Linux-x86_64.tar.gz` and `.zip` with SHA-256, built here.
+- Windows installer and portable zip: built by the CI release job (no Windows host here).
+
 ## [0.10.0] - 2026-11-13 - Delivery package (Prompt 10)
 
 ### Added

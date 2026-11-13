@@ -38,6 +38,15 @@ Evidence classes: measured, interpreted, calibrated, upscaled, literature_derive
 user_instruction. A description with an unlabelled parameter is refused. Design models are
 labelled DESIGN in every exported file.
 
+## Documentation
+
+- `docs/user_guide.md`: installing, writing a description (three worked examples), running,
+  reading the checks report, exporting and packaging, limitations of the kinematics.
+- `docs/developer_guide.md`: architecture, model interface and suite, build, adding plugins.
+- `docs/api_reference.md` (generated from the headers; `doxygen docs/Doxyfile` for HTML).
+- `docs/roadmap.md`: v2 to v5. `docs/performance_and_threading.md`, `docs/package_config.md`.
+- C API: `capi/include/stratonix_c.h`, example `capi/examples/stratonix_example.c`.
+
 ## Building
 
 Linux (system packages):

@@ -25,6 +25,8 @@ struct PackageConfig {
   bool default_patterns = true;                    ///< also apply the built-in patterns below
 
   static PackageConfig load(const std::filesystem::path& file);
+  /// Same keys from YAML or JSON text (used by the C API's options_json).
+  static PackageConfig parse(const std::string& text, const std::string& origin = "<options>");
   /// Built-in banned patterns (Stratonix default): register identifiers (D-001, I-004, O-010,
   /// R-0.9.0, S-002), WBS codes, internal note identifiers (STX-TN-02, STX-RI-01), absolute
   /// local paths (C:\..., /home/...).

@@ -1,0 +1,72 @@
+# Worked example 3: a dome with a blind fault on its flank that cuts only the middle units.
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_dome_blind_fault, version: "1.0.0", status: DESIGN,
+        title: "Dome with a blind fault on its flank"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 2500] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1500, 1500] m | user_instruction | worked example: control well off the dome"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1150 m | user_instruction | worked example"
+      H3: "1300 m | user_instruction | worked example"
+      H4: "1500 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[5000, 5000] m | user_instruction | worked example: planned well at the crest"
+    total_depth: "1600 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}, {name: H4}]
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+  base: {type: flat}
+  primitives:
+    - type: dome
+      name: D1
+      crest: "[5000, 5000] m | user_instruction | worked example"
+      radius_major: "3000 m | user_instruction | worked example"
+      relief:
+        H1: "150 m | user_instruction | worked example"
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry:
+      type: planar
+      reference_point: "[6500, 5000] m | user_instruction | worked example: east flank"
+      reference_depth: "1250 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example"
+      dip: "55 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: within_unit, unit: Unit_1, fraction: "0.5 fraction | user_instruction | worked example"}
+      lower_tip: {rule: within_unit, unit: Unit_3, fraction: "0.5 fraction | user_instruction | worked example"}
+      length: "4000 m | user_instruction | worked example"
+      tip_line_shape: elliptical
+    throw:
+      max: "25 m | user_instruction | worked example"
+      profile_dip: {type: sine}          # an elliptical dip profile is refused: its throw gradient is unbounded at the tips
+      profile_strike: {type: elliptical}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+checks:
+  closure:
+    horizon: H2
+    faults_seal: "false flag | assumed | worked example: fault not assumed to seal"
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[1000, 5000], [9000, 5000]] m | user_instruction | worked example: east-west through the crest"
+  vertical_exaggeration: "5 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

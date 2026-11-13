@@ -21,8 +21,13 @@ add_test(NAME layer_check COMMAND ${CMAKE_COMMAND} -DTABLE=${CMAKE_BINARY_DIR}/l
          -P ${PROJECT_SOURCE_DIR}/cmake/LayerCheckScript.cmake)
 
 # C API
-add_test(NAME capi_test COMMAND capi_test ${PROJECT_SOURCE_DIR}/examples/flat_three_layers.yaml
-         ${PROJECT_SOURCE_DIR}/examples/broken/broken_missing_evidence.yaml)
+add_test(NAME capi_test COMMAND ${CMAKE_COMMAND} -E rm -rf ${STX_TEST_TMP}/capi)
+set_tests_properties(capi_test PROPERTIES FIXTURES_SETUP capi_tmp)
+add_test(NAME capi_test_run COMMAND capi_test ${PROJECT_SOURCE_DIR}/examples/flat_three_layers.yaml
+         ${PROJECT_SOURCE_DIR}/examples/broken/broken_missing_evidence.yaml
+         ${PROJECT_SOURCE_DIR}/examples/synthetic_fold_two_faults.yaml ${STX_TEST_TMP}/capi)
+set_tests_properties(capi_test_run PROPERTIES FIXTURES_REQUIRED capi_tmp)
+add_test(NAME capi_example COMMAND stratonix_capi_example ${PROJECT_SOURCE_DIR}/examples/synthetic_fold_two_faults.yaml)
 
 # Command line: validate passes on the example and fails clearly on the three broken files.
 set(STX_EX ${PROJECT_SOURCE_DIR}/examples)

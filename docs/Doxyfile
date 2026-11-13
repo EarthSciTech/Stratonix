@@ -1,0 +1,15 @@
+# Doxygen configuration for the Stratonix API reference: run `doxygen docs/Doxyfile` from the
+# repository root. Output: build/doc/html.
+PROJECT_NAME           = Stratonix
+PROJECT_NUMBER         = 1.0.0
+OUTPUT_DIRECTORY       = build/doc
+INPUT                  = include capi/include docs/developer_guide.md
+FILE_PATTERNS          = *.hpp *.h *.md
+RECURSIVE              = YES
+EXTRACT_ALL            = NO
+JAVADOC_AUTOBRIEF      = YES
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+USE_MDFILE_AS_MAINPAGE = docs/developer_guide.md

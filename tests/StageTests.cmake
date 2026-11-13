@@ -34,3 +34,9 @@ add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:str
 # LeakSanitizer: ignore process-lifetime caches of fontconfig/Cairo (see lsan.supp).
 get_property(_stx_tests DIRECTORY PROPERTY TESTS)
 set_tests_properties(${_stx_tests} PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+# The worked examples of the user guide build with every check passing.
+foreach(ex one_fault dome_blind_fault)
+  add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
+           -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
+           -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
+endforeach()

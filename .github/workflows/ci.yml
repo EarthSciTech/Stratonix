@@ -46,7 +46,7 @@ jobs:
       # The vcpkg baseline is pinned in vcpkg.json once a networked run has produced it:
       #   vcpkg x-update-baseline --add-initial-baseline   (commit the result)
       - name: Configure (MSVC + vcpkg)
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -DX_VCPKG_APPLOCAL_DEPS_INSTALL=ON
       - name: Build
         run: cmake --build build --config ${{ matrix.config }} --parallel
       - name: Test
@@ -71,3 +71,20 @@ jobs:
           path: |
             build/stratonix-*.zip
             build/stratonix-*.exe
+
+  # On a version tag: collect the Windows and Linux packages, write SHA256SUMS.txt, publish a release.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions: {contents: write}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {path: dist, merge-multiple: true}
+      - name: Checksums
+        run: cd dist && sha256sum stratonix-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/stratonix-*
+            dist/SHA256SUMS.txt

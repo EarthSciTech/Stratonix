@@ -56,10 +56,12 @@ std::vector<std::pair<std::string, std::string>> PackageConfig::builtin_translat
           {"(STX-TN-02)", "(the Petrel import checklist)"}};
 }
 
-PackageConfig PackageConfig::load(const fs::path& file) {
+PackageConfig PackageConfig::load(const fs::path& file) { return parse(read_file(file), file.string()); }
+
+PackageConfig PackageConfig::parse(const std::string& text, const std::string& origin) {
   PackageConfig c;
-  auto n = desc::parse_document(read_file(file), file.string());
-  if (!n.is_map()) throw Error(ErrorCode::Parse, "package config must be a mapping: " + file.string());
+  auto n = desc::parse_document(text, origin);
+  if (!n.is_map()) throw Error(ErrorCode::Parse, "package config must be a mapping: " + origin);
   auto strs = [&](const char* k, std::vector<std::string>& out) {
     if (auto* v = n.get(k)) {
       out.clear();

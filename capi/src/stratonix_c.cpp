@@ -79,6 +79,27 @@ stx_status stx_model_counts(const stx_model* m, int* h, int* u, int* f) {
   });
 }
 
+const char* stx_status_name(stx_status s) {
+  switch (s) {
+    case STX_OK: return "STX_OK";
+    case STX_E_INVALID_ARGUMENT: return "STX_E_INVALID_ARGUMENT";
+    case STX_E_IO: return "STX_E_IO";
+    case STX_E_PARSE: return "STX_E_PARSE";
+    case STX_E_VALIDATION: return "STX_E_VALIDATION";
+    case STX_E_BUILD: return "STX_E_BUILD";
+    case STX_E_CHECK_FAILED: return "STX_E_CHECK_FAILED";
+    case STX_E_NOT_IMPLEMENTED: return "STX_E_NOT_IMPLEMENTED";
+    case STX_E_UNSUPPORTED: return "STX_E_UNSUPPORTED";
+    case STX_E_INTERNAL: return "STX_E_INTERNAL";
+  }
+  return "STX_E_UNKNOWN";
+}
+
+const char* stx_model_fault_name(const stx_model* m, int i) {
+  if (!m || i < 0 || i >= static_cast<int>(m->model->info().faults.size())) return nullptr;
+  return m->model->info().faults[static_cast<std::size_t>(i)].name.c_str();
+}
+
 const char* stx_model_horizon_name(const stx_model* m, int i) {
   if (!m || i < 0 || i >= static_cast<int>(m->model->info().horizons.size())) return nullptr;
   return m->model->info().horizons[static_cast<std::size_t>(i)].name.c_str();

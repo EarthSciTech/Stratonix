@@ -1,0 +1,54 @@
+# Worked example 1: a gently dipping layer stack cut by one normal fault that reaches the top
+# horizon. DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_one_fault, version: "1.0.0", status: DESIGN,
+        title: "One normal fault through a dipping layer stack"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[6000, 4000] m | user_instruction | worked example"
+  depth_range: "[0, 2000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 2000] m | user_instruction | worked example"
+    tops:
+      Top_A: "900 m | user_instruction | worked example"
+      Top_B: "1050 m | user_instruction | worked example"
+      Top_C: "1250 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: Top_A, intended_offset: true}, {name: Top_B}, {name: Top_C, intended_offset: true}]   # the fault cuts top and base on purpose
+  units:
+    - {name: Unit_A, top: Top_A, base: Top_B}
+    - {name: Unit_B, top: Top_B, base: Top_C}
+structure:
+  regional: {type: planar, dip: "2 deg | user_instruction | worked example", dip_azimuth: "90 deg | user_instruction | worked example"}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry:
+      type: planar
+      reference_point: "[3000, 2000] m | user_instruction | worked example"
+      reference_depth: "1050 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: horizon, horizon: Top_A, offset: "-50 m | user_instruction | worked example: tip 50 m above Top_A"}
+      lower_tip: {rule: horizon, horizon: Top_C, offset: "100 m | user_instruction | worked example: tip 100 m below Top_C"}
+      length: "3000 m | user_instruction | worked example"
+      tip_line_shape: elliptical
+    throw:
+      max: "30 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.3 fraction | user_instruction | worked example"}
+      profile_strike: {type: elliptical}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_1
+      polyline: "[[500, 2000], [5500, 2000]] m | user_instruction | worked example: dip section"
+  vertical_exaggeration: "4 ratio | user_instruction | worked example"
+  exports: [petrel]
