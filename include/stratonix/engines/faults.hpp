@@ -72,6 +72,12 @@ struct Fault {
   std::shared_ptr<const HangingWallField> hw;
   double influence = 0;
   int abuts = -1;            ///< index of the older fault it abuts, or -1
+  // Cached at build time (optimised kernels): slip vector, bounds of the active region.
+  Vec3 slip;                 ///< kinematics slip vector (vertical component -1)
+  double b_lo = 0, b_hi = 0; ///< extreme tips over the strike range (profile coordinate b)
+  double slip_b = 0;         ///< max change of profile b caused by a displacement of tmax
+  double slip_sigma = 0;     ///< max change of sigma caused by a displacement of tmax
+  bool decays = false;       ///< hanging-wall field vanishes beyond the influence distance
   bool abut_hw_side = true;  ///< active on the hanging-wall side of the abutted fault
 
   double sigma(const Vec3& p) const { return dot(p - p0, n); }
@@ -122,6 +128,10 @@ class FaultNetwork {
   /// so the throw at a horizon is read where the horizon meets the fault before faulting and
   /// does not depend on which block the frame holds fixed. Returns q0; writes tau if asked.
   Vec3 undo(int f, const Vec3& q, int sgn, double* tau = nullptr) const;
+  /// True when fault f provably cannot displace material whose present position is q (the
+  /// restored position stays outside the active region for any displacement up to tmax). Then
+  /// undo() would return q exactly, so skipping it changes nothing.
+  bool cannot_move(int f, const Vec3& q) const;
   /// Restore a point given in fault f's frame, on the stated wall of f, through f and the
   /// faults older than it (used to measure throw in the fault's own frame).
   Vec3 restore_from_frame(const Vec3& q, int f, bool hanging_wall) const;

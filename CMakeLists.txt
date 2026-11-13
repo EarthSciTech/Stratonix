@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(stratonix VERSION 0.5.0 DESCRIPTION "Stratonix geomodelling toolkit" LANGUAGES C CXX)
+project(stratonix VERSION 0.6.0 DESCRIPTION "Stratonix geomodelling toolkit" LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

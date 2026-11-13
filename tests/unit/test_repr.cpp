@@ -85,6 +85,7 @@ TEST_CASE("P5 voxel grid agrees with per-block horizon surfaces") {
     mismatch += unit != v.unit[c];
   }
   CHECK(n > 2900);
+  CHECK(n + near == 3000);
   CHECK(mismatch == 0);
 }
 

@@ -3,6 +3,28 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [0.6.0] - 2026-11-13 - Performance: optimised kernels and parity (Prompt 6)
+
+### Added
+- Optimised kernels behind the reference ones, selected by `set_optimised_kernels()`
+  (`--reference-kernels`, `bench --mode reference|optimised|both`): structure terms shared across
+  horizons; per-block and faulted horizon grids by Illinois iteration seeded from a coarse grid;
+  cut-off lines by Illinois on the bisection bracket; column-wise voxel grids.
+- Parity tests K1-K5 (`test_parity`): point evaluation bitwise equal and identical for 1, 3 and
+  8 threads; grids within 1e-6 m with identical gap masks; cut-off lines within 1e-4 m; voxel
+  grids identical. Edge cases: points on fault planes, at tips, on horizons, outside the domain.
+- `docs/performance_and_threading.md`: kernels, determinism and thread-safety rules.
+
+### Measured (synthetic production model, 40 x 40 km, ten faults, 2 threads, GCC 13, Linux)
+| Spacing | Reference full build + checks | Optimised | Speed-up | Peak memory |
+|---|---|---|---|---|
+| 100 m | 165.3 s | 7.3 s | 22.6x | 110 MB |
+| 50 m | 465.6 s | 14.8 s | 31.5x | 144 MB |
+| 25 m | not run (reference) | 32.9 s | - | 414 MB |
+
+Before this release (0.5.0, optimised path of that time) the 50 m build took 32.6 s.
+Windows timings: pending the CI runner (no Windows host in the build environment).
+
 ## [0.5.0] - 2026-11-13 - Evaluation and representations (Prompt 5)
 
 ### Added

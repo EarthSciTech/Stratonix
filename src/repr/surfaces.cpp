@@ -30,20 +30,58 @@ BlockList list_blocks(const Model& m, std::size_t n, std::size_t nz) {
 
 // ---- vertical roots ------------------------------------------------------------------------
 void vertical_roots(const Model& m, int h, BlockCode block, const std::vector<double>& xs, const std::vector<double>& ys,
-                    double z_hi, double z_lo, std::vector<double>& z_out) {
+                    double z_hi, double z_lo, std::vector<double>& z_out, const std::vector<double>* guess) {
   const std::size_t n = xs.size();
   z_out.assign(n, kNaN);
   if (n == 0) return;
   std::vector<double> hi(n, z_hi), lo(n, z_lo), fhi(n), flo(n);
   std::vector<Vec3> p(n);
-  for (std::size_t i = 0; i < n; ++i) p[i] = {xs[i], ys[i], z_hi};
-  m.scalar_in_block(p, block, h, fhi);
-  for (std::size_t i = 0; i < n; ++i) p[i].z = z_lo;
-  m.scalar_in_block(p, block, h, flo);
+  if (guess && optimised_kernels()) {
+    // Narrow brackets around the guesses; nodes whose narrow bracket fails use the full one.
+    const double w = 40;
+    std::vector<std::size_t> g;
+    for (std::size_t i = 0; i < n; ++i)
+      if (!std::isnan((*guess)[i])) g.push_back(i);
+    std::vector<Vec3> ph(g.size()), pl(g.size());
+    for (std::size_t k = 0; k < g.size(); ++k) {
+      std::size_t i = g[k];
+      double gz = std::clamp((*guess)[i], z_lo + w, z_hi - w);
+      ph[k] = {xs[i], ys[i], gz + w};
+      pl[k] = {xs[i], ys[i], gz - w};
+    }
+    std::vector<double> sh(g.size()), sl(g.size());
+    m.scalar_in_block(ph, block, h, sh);
+    m.scalar_in_block(pl, block, h, sl);
+    std::vector<char> narrowed(n, 0);
+    for (std::size_t k = 0; k < g.size(); ++k)
+      if (sh[k] > 0 && sl[k] < 0) {
+        std::size_t i = g[k];
+        hi[i] = ph[k].z; fhi[i] = sh[k];
+        lo[i] = pl[k].z; flo[i] = sl[k];
+        narrowed[i] = 1;
+      }
+    std::vector<std::size_t> rest;
+    for (std::size_t i = 0; i < n; ++i)
+      if (!narrowed[i]) rest.push_back(i);
+    std::vector<Vec3> q1(rest.size()), q2(rest.size());
+    for (std::size_t k = 0; k < rest.size(); ++k) {
+      q1[k] = {xs[rest[k]], ys[rest[k]], z_hi};
+      q2[k] = {xs[rest[k]], ys[rest[k]], z_lo};
+    }
+    std::vector<double> s1(rest.size()), s2(rest.size());
+    m.scalar_in_block(q1, block, h, s1);
+    m.scalar_in_block(q2, block, h, s2);
+    for (std::size_t k = 0; k < rest.size(); ++k) { fhi[rest[k]] = s1[k]; flo[rest[k]] = s2[k]; }
+  } else {
+    for (std::size_t i = 0; i < n; ++i) p[i] = {xs[i], ys[i], z_hi};
+    m.scalar_in_block(p, block, h, fhi);
+    for (std::size_t i = 0; i < n; ++i) p[i].z = z_lo;
+    m.scalar_in_block(p, block, h, flo);
+  }
   std::vector<std::size_t> act;
   for (std::size_t i = 0; i < n; ++i) {
-    if (fhi[i] == 0) { z_out[i] = z_hi; continue; }
-    if (flo[i] == 0) { z_out[i] = z_lo; continue; }
+    if (fhi[i] == 0) { z_out[i] = hi[i]; continue; }
+    if (flo[i] == 0) { z_out[i] = lo[i]; continue; }
     if (fhi[i] > 0 && flo[i] < 0) act.push_back(i);
   }
   const bool fast = optimised_kernels();
@@ -84,12 +122,39 @@ void vertical_roots(const Model& m, int h, BlockCode block, const std::vector<do
   for (auto i : act) z_out[i] = 0.5 * (hi[i] + lo[i]);
 }
 
+/// Bilinear guesses on grid g from a coarse grid with stride `st` (NaN where unavailable).
+static std::vector<double> coarse_guess(const GridSpec& g, std::size_t st, const std::vector<double>& cz, const GridSpec& c) {
+  std::vector<double> out(g.size(), kNaN);
+  Grid2D cg(c);
+  cg.v = cz;
+  for (std::size_t j = 0; j < g.ny; ++j)
+    for (std::size_t i = 0; i < g.nx; ++i) out[g.index(i, j)] = cg.sample(g.x(i), g.y(j));
+  (void)st;
+  return out;
+}
+
+static GridSpec coarse_of(const GridSpec& g, std::size_t st) {
+  GridSpec c{g.x0, g.y0, g.dx * st, g.dy * st, (g.nx - 1) / st + 1, (g.ny - 1) / st + 1};
+  return c;
+}
+
 Grid2D horizon_grid_block(const Model& m, int h, BlockCode block, const GridSpec& g, double margin) {
   const Domain& d = m.info().domain;
   std::vector<double> xs(g.size()), ys(g.size()), z;
   for (std::size_t j = 0; j < g.ny; ++j)
     for (std::size_t i = 0; i < g.nx; ++i) { xs[g.index(i, j)] = g.x(i); ys[g.index(i, j)] = g.y(j); }
-  vertical_roots(m, h, block, xs, ys, d.z_top + margin, d.z_base - margin, z);
+  const std::size_t st = 4;
+  if (optimised_kernels() && g.nx > 4 * st && g.ny > 4 * st) {
+    GridSpec c = coarse_of(g, st);
+    std::vector<double> cx(c.size()), cy(c.size()), cz;
+    for (std::size_t j = 0; j < c.ny; ++j)
+      for (std::size_t i = 0; i < c.nx; ++i) { cx[c.index(i, j)] = c.x(i); cy[c.index(i, j)] = c.y(j); }
+    vertical_roots(m, h, block, cx, cy, d.z_top + margin, d.z_base - margin, cz);
+    auto guess = coarse_guess(g, st, cz, c);
+    vertical_roots(m, h, block, xs, ys, d.z_top + margin, d.z_base - margin, z, &guess);
+  } else {
+    vertical_roots(m, h, block, xs, ys, d.z_top + margin, d.z_base - margin, z);
+  }
   Grid2D out(g);
   out.v = std::move(z);
   return out;
@@ -98,20 +163,22 @@ Grid2D horizon_grid_block(const Model& m, int h, BlockCode block, const GridSpec
 // ---- faulted horizon -----------------------------------------------------------------------
 static void faulted_roots_chunk(const Model& m, int h, const std::vector<double>& xs, const std::vector<double>& ys,
                                 std::vector<double>& z, std::vector<BlockCode>& blk, std::size_t* gaps,
-                                std::size_t* overlaps);
+                                std::size_t* overlaps, const std::vector<double>* guess);
 
 void faulted_roots(const Model& m, int h, const std::vector<double>& xs, const std::vector<double>& ys,
-                   std::vector<double>& z, std::vector<BlockCode>& blk, std::size_t* gaps, std::size_t* overlaps) {
+                   std::vector<double>& z, std::vector<BlockCode>& blk, std::size_t* gaps, std::size_t* overlaps,
+                   const std::vector<double>* guess) {
   const std::size_t n = xs.size(), C = 16384;
-  if (n <= C) return faulted_roots_chunk(m, h, xs, ys, z, blk, gaps, overlaps);
+  if (n <= C) return faulted_roots_chunk(m, h, xs, ys, z, blk, gaps, overlaps, guess);
   z.assign(n, kNaN);
   blk.assign(n, 0);
   std::size_t g = 0, o = 0;
   for (std::size_t a = 0; a < n; a += C) {
     std::size_t b = std::min(n, a + C), gg = 0, oo = 0;
-    std::vector<double> cx(xs.begin() + a, xs.begin() + b), cy(ys.begin() + a, ys.begin() + b), cz;
+    std::vector<double> cx(xs.begin() + a, xs.begin() + b), cy(ys.begin() + a, ys.begin() + b), cz, cg;
+    if (guess) cg.assign(guess->begin() + a, guess->begin() + b);
     std::vector<BlockCode> cb;
-    faulted_roots_chunk(m, h, cx, cy, cz, cb, &gg, &oo);
+    faulted_roots_chunk(m, h, cx, cy, cz, cb, &gg, &oo, guess ? &cg : nullptr);
     std::copy(cz.begin(), cz.end(), z.begin() + a);
     std::copy(cb.begin(), cb.end(), blk.begin() + a);
     g += gg;
@@ -123,7 +190,7 @@ void faulted_roots(const Model& m, int h, const std::vector<double>& xs, const s
 
 static void faulted_roots_chunk(const Model& m, int h, const std::vector<double>& xs, const std::vector<double>& ys,
                                 std::vector<double>& z, std::vector<BlockCode>& blk, std::size_t* gaps,
-                                std::size_t* overlaps) {
+                                std::size_t* overlaps, const std::vector<double>* guess) {
   const Domain& d = m.info().domain;
   const std::size_t n = xs.size();
   z.assign(n, kNaN);
@@ -185,6 +252,9 @@ static void faulted_roots_chunk(const Model& m, int h, const std::vector<double>
   } else {
     // Optimised: iterate block -> root -> block of the root, grouped by block.
     std::vector<double> zm(n, 0.5 * (zt + zb));
+    if (guess)
+      for (std::size_t i = 0; i < n; ++i)
+        if (!std::isnan((*guess)[i])) zm[i] = (*guess)[i];
     std::vector<std::size_t> all(n);
     for (std::size_t i = 0; i < n; ++i) all[i] = i;
     std::vector<BlockCode> cur = blocks_at(all, zm);
@@ -196,9 +266,9 @@ static void faulted_roots_chunk(const Model& m, int h, const std::vector<double>
         if (!done[i]) by[cur[i]].push_back(i);
       if (by.empty()) break;
       for (auto& [b, idx] : by) {
-        std::vector<double> bx, byy, bz;
-        for (auto i : idx) { bx.push_back(xs[i]); byy.push_back(ys[i]); seen[i].push_back(b); }
-        vertical_roots(m, h, b, bx, byy, zt + 2000, zb - 2000, bz);
+        std::vector<double> bx, byy, bz, bg;
+        for (auto i : idx) { bx.push_back(xs[i]); byy.push_back(ys[i]); seen[i].push_back(b); bg.push_back(guess ? (*guess)[i] : kNaN); }
+        vertical_roots(m, h, b, bx, byy, zt + 2000, zb - 2000, bz, guess ? &bg : nullptr);
         std::vector<std::size_t> ok;
         std::vector<double> okz;
         for (std::size_t k = 0; k < idx.size(); ++k) {
@@ -227,7 +297,20 @@ FaultedSurface horizon_grid_faulted(const Model& m, int h, const GridSpec& g) {
     for (std::size_t i = 0; i < g.nx; ++i) { xs[g.index(i, j)] = g.x(i); ys[g.index(i, j)] = g.y(j); }
   FaultedSurface fs;
   fs.z = Grid2D(g);
-  faulted_roots(m, h, xs, ys, fs.z.v, fs.block, &fs.gap_nodes, &fs.overlap_nodes);
+  const std::size_t st = 4;
+  if (optimised_kernels() && g.nx > 4 * st && g.ny > 4 * st) {
+    // Coarse pass first; its (gap-free) values guide the fine pass.
+    GridSpec c = coarse_of(g, st);
+    std::vector<double> cx(c.size()), cy(c.size()), cz;
+    std::vector<BlockCode> cb;
+    for (std::size_t j = 0; j < c.ny; ++j)
+      for (std::size_t i = 0; i < c.nx; ++i) { cx[c.index(i, j)] = c.x(i); cy[c.index(i, j)] = c.y(j); }
+    faulted_roots(m, h, cx, cy, cz, cb, nullptr, nullptr);
+    auto guess = coarse_guess(g, st, cz, c);
+    faulted_roots(m, h, xs, ys, fs.z.v, fs.block, &fs.gap_nodes, &fs.overlap_nodes, &guess);
+  } else {
+    faulted_roots(m, h, xs, ys, fs.z.v, fs.block, &fs.gap_nodes, &fs.overlap_nodes);
+  }
   return fs;
 }
 

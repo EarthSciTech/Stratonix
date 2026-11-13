@@ -218,6 +218,7 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
     f.taper_dip = fd.profile_dip.taper.present ? fd.profile_dip.taper.si() : 0.25;
     f.taper_strike = fd.profile_strike.taper.present ? fd.profile_strike.taper.si() : 0.25;
     f.kin = reg.create<Kinematics>(registry::Kind::Kinematics, fd.slip_mode);
+    f.slip = f.kin->slip_vector(f.dd, f.dip);
     f.hw = reg.create<HangingWallField>(registry::Kind::HangingWall, fd.hw_type);
     f.influence = fd.influence_distance.present ? fd.influence_distance.si() : 0.0;
     if (!fd.abuts_fault.empty()) {
@@ -275,6 +276,16 @@ double FaultNetwork::level_in_frame(const Structure& st, int h, double x, double
   double z = expand_and_solve(s_at, z0, 25.0, 1.0e5, 1e-7);
   (void)dom;
   return std::isnan(z) ? z0 : z;
+}
+
+bool FaultNetwork::cannot_move(int fi, const Vec3& q) const {
+  const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  double a, b;
+  f.profile_coords(q, a, b);
+  if (std::fabs(a) >= 0.5 * f.length) return true;  // slip has no strike component
+  if (b + f.slip_b < f.b_lo || b - f.slip_b > f.b_hi) return true;
+  if (f.decays && std::fabs(f.sigma(q)) - f.slip_sigma >= f.influence) return true;
+  return false;
 }
 
 void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st, BuildLog& log) {
@@ -336,6 +347,20 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
     }
     if (clamped) log.note("fault " + f.name + ": tip rule level not met inside the search range at " + std::to_string(clamped) +
                           " strike positions; tips clamped (see checks)");
+    // Cached bounds for exact culling of points the fault cannot move.
+    f.b_lo = 1e300;
+    f.b_hi = -1e300;
+    for (std::size_t i = 0; i < K; ++i) {
+      double bu, bl;
+      f.tips(f.a_tab[i], bu, bl);
+      if (bl > bu) { f.b_lo = std::min(f.b_lo, bu); f.b_hi = std::max(f.b_hi, bl); }
+    }
+    if (f.upper_free()) f.b_lo = -1e300;
+    if (f.lower_free()) f.b_hi = 1e300;
+    double tabs = std::fabs(f.tmax);
+    f.slip_b = tabs * std::fabs(f.slip.z) / std::sin(f.dip) + 1e-9;
+    f.slip_sigma = tabs * std::fabs(dot(f.slip, f.n)) + 1e-9;
+    f.decays = f.hw->name() == "decay" && f.influence > 0;
     double bu0, bl0;
     f.tips(0, bu0, bl0);
     log.value("fault." + f.name + ".tips_depth_at_reference_m",
@@ -380,12 +405,12 @@ Vec3 FaultNetwork::relative_displacement(int fi, const Vec3& q, bool* active) co
   double sig = f.sigma(q);
   double next = f.hw->needs_next_fault() ? next_fault_distance(fi, q, sig) : kInf;
   double sc = f.hw->scale(sig, next, f.influence);
-  return f.kin->slip_vector(f.dd, f.dip) * (t * sc);
+  return f.slip * (t * sc);
 }
 
 Vec3 FaultNetwork::undo(int fi, const Vec3& q, int sgn, double* tau_out) const {
   const Fault& f = faults_[static_cast<std::size_t>(fi)];
-  Vec3 slip = f.kin->slip_vector(f.dd, f.dip);
+  const Vec3 slip = f.slip;
   // tau(q0) along the line q0 = q - sgn * slip * tau; g(tau) = tau - amount(q0(tau)).
   auto amount = [&](double tau) {
     Vec3 q0 = q - slip * (sgn * tau);
@@ -422,6 +447,7 @@ Vec3 FaultNetwork::undo(int fi, const Vec3& q, int sgn, double* tau_out) const {
 }
 
 Vec3 FaultNetwork::restore(const Vec3& p, BlockCode* block, const BlockCode* forced) const {
+  const bool fast = optimised_kernels();
   Vec3 q = p;
   BlockCode code = 0;
   for (int fi : order_) {
@@ -430,6 +456,7 @@ Vec3 FaultNetwork::restore(const Vec3& p, BlockCode* block, const BlockCode* for
     if (side) code |= (BlockCode(1) << fi);
     bool fixed_side = ((fixed_block_ >> fi) & 1u) != 0;
     if (side == fixed_side) continue;
+    if (fast && cannot_move(fi, q)) continue;
     q = undo(fi, q, side ? 1 : -1);
   }
   if (block) *block = code;
@@ -451,6 +478,7 @@ Vec3 FaultNetwork::restore_from_frame(const Vec3& p, int f, bool hw) const {
 }
 
 Vec3 FaultNetwork::to_fault_frame(const Vec3& p, int f) const {
+  const bool fast = optimised_kernels();
   Vec3 q = p;
   for (int fi : order_) {
     if (fi == f) break;
@@ -458,6 +486,7 @@ Vec3 FaultNetwork::to_fault_frame(const Vec3& p, int f) const {
     bool side = F.sigma(q) > 0;
     bool fixed_side = ((fixed_block_ >> fi) & 1u) != 0;
     if (side == fixed_side) continue;
+    if (fast && cannot_move(fi, q)) continue;
     q = undo(fi, q, side ? 1 : -1);
   }
   return q;

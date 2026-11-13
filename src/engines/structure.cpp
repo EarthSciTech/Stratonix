@@ -281,7 +281,33 @@ double Structure::z(std::size_t h, double x, double y) const {
 }
 
 void Structure::z_all(double x, double y, double* out) const {
-  for (std::size_t h = 0; h < kind_.size(); ++h) out[h] = z(h, x, y);
+  if (!optimised_kernels()) {  // reference: each horizon evaluated independently
+    for (std::size_t h = 0; h < kind_.size(); ++h) out[h] = z(h, x, y);
+    return;
+  }
+  // Optimised: shape, tilt and rim of each primitive once per (x, y); the per-horizon arithmetic
+  // is the same expression as FoldPrimitive::contribution, so results are bitwise identical.
+  const std::size_t np = prims_.size();
+  double shp[16], tlt[16], rm[16];
+  bool small = np <= 16;
+  if (small)
+    for (std::size_t k = 0; k < np; ++k) {
+      shp[k] = prims_[k].shape(x, y);
+      tlt[k] = prims_[k].tilt(x, y);
+      rm[k] = (prims_[k].rim_depth != 0 && prims_[k].relief_max > 0) ? prims_[k].rim(x, y) : 0.0;
+    }
+  for (std::size_t h = 0; h < kind_.size(); ++h) {
+    if (kind_[h] != Kind::Parametric || !small) { out[h] = z(h, x, y); continue; }
+    double sacc = zref_[h] + regional(x, y);
+    for (std::size_t k = 0; k < np; ++k) {
+      const auto& p = prims_[k];
+      double r = p.relief[h];
+      double c = r * shp[k] + tlt[k];
+      if (p.rim_depth != 0 && p.relief_max > 0) c -= p.rim_depth * (std::fabs(r) / p.relief_max) * rm[k] * (r >= 0 ? 1 : -1);
+      sacc += c;
+    }
+    out[h] = corr_[h].w.empty() ? sacc : sacc + correction(h, x, y);
+  }
 }
 
 }  // namespace stratonix
