@@ -1,6 +1,7 @@
 // Pipeline shared by the command line and the C API.
 #include "stratonix/package/pipeline.hpp"
 
+#include <algorithm>
 #include <sstream>
 
 #include "stratonix/checks/checks.hpp"
@@ -9,6 +10,7 @@
 #include "stratonix/figures/figures.hpp"
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/util.hpp"
+#include "stratonix/io/export.hpp"
 #include "stratonix/io/io.hpp"
 
 namespace stratonix {
@@ -131,6 +133,34 @@ void write_figures(const desc::Description& d, const Model& m, const std::vector
   fig::write_figure_set(c, secs, det, folder);
 }
 
+std::vector<std::string> resolve_export_ids(const desc::Description& d, const std::vector<std::string>& requested) {
+  std::vector<std::string> want = requested.empty() ? d.exports : requested;
+  std::vector<std::string> ids;
+  auto& reg = registry::Registry::global();
+  for (auto& w : want) {
+    if (w == "petrel") {
+      for (auto& p : io::petrel_set_ids())
+        if (std::find(ids.begin(), ids.end(), p) == ids.end()) ids.push_back(p);
+      continue;
+    }
+    if (!reg.find(registry::Kind::Exporter, w)) {
+      log(LogLevel::Warn, "export format '" + w + "' is not available in this version; skipped");
+      continue;
+    }
+    if (std::find(ids.begin(), ids.end(), w) == ids.end()) ids.push_back(w);
+  }
+  return ids;
+}
+
+std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Model& m, const std::vector<std::string>& ids,
+                                            const std::filesystem::path& folder, double grid_spacing) {
+  double sp = grid_spacing > 0 ? grid_spacing : d.grid_spacing.si();
+  double sticks = d.fault_stick_spacing.present ? d.fault_stick_spacing.si() : 250.0;  // Stratonix default when not given
+  io::ExportContext c(m, make_well_paths(d), GridSpec::covering(m.info().domain, sp), std::max(10.0, sp / 2), sticks);
+  std::string note = "Every parameter of the description carries a value, unit, evidence class and source (see manifest.json).";
+  return io::export_set(c, ids, folder, note);
+}
+
 BuildOutcome run_build(const std::filesystem::path& description, const std::filesystem::path& out_dir,
                        const BuildOptions& opt, const std::string& command) {
   auto d = desc::load_description(description);
@@ -148,6 +178,8 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     log(LogLevel::Error, "checks failed: exports and figures are not written (see checks_report.txt)");
   } else {
     if (opt.figures) write_figures(d, *o.model, keys, out_dir / "figures");
+    auto ids = resolve_export_ids(d, opt.exports);
+    if (!ids.empty()) write_exports(d, *o.model, ids, out_dir / "exports", 0);
   }
   Manifest man = Manifest::from_description(d, command);
   for (auto& [k, v] : o.log.values) man.extra.emplace_back(k, v);
@@ -191,6 +223,28 @@ BuildOutcome run_section(const std::filesystem::path& description, const std::fi
                       std::string("Evidence basis: ") + basis_label(o.model->info().basis) + ". Section length " + fmt_fixed(s.length, 0) + " m.");
   }
   Manifest man = Manifest::from_description(d, "section");
+  man.add_outputs(out_dir);
+  man.write(out_dir / "manifest.json");
+  return o;
+}
+
+BuildOutcome run_export(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::vector<std::string>& formats,
+                        double grid_spacing, const BuildOptions& opt) {
+  auto d = desc::load_description(description);
+  ensure_new_output_dir(out_dir);
+  BuildOutcome o = build_only(d, opt);
+  CheckContext ctx(*o.model, d, make_well_paths(d), d.grid_spacing.si());
+  CheckReport rep = run_checks(ctx);
+  o.checks_passed = rep.passed();
+  write_file(out_dir / "checks_report.txt", rep.text());
+  if (!o.checks_passed) {
+    log(LogLevel::Error, "checks failed: nothing exported (see checks_report.txt)");
+  } else {
+    auto ids = resolve_export_ids(d, formats);
+    if (ids.empty()) throw Error(ErrorCode::InvalidArgument, "no available export format requested");
+    write_exports(d, *o.model, ids, out_dir / "exports", grid_spacing);
+  }
+  Manifest man = Manifest::from_description(d, "export");
   man.add_outputs(out_dir);
   man.write(out_dir / "manifest.json");
   return o;

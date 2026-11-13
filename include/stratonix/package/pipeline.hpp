@@ -50,6 +50,14 @@ void write_figures(const desc::Description& d, const Model& m, const std::vector
 BuildOutcome run_section(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::string& name,
                          const Polyline& line, const BuildOptions& opt);
 
+/// Export ids from a request ("petrel" expands to the Petrel set; unknown ids are skipped with a
+/// warning); an empty request takes the description's outputs.exports.
+std::vector<std::string> resolve_export_ids(const desc::Description& d, const std::vector<std::string>& requested);
+/// Build, check and export (into out_dir/exports, with README); nothing is exported if a check fails.
+/// grid_spacing <= 0 takes the description's grid spacing.
+BuildOutcome run_export(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::vector<std::string>& formats,
+                        double grid_spacing, const BuildOptions& opt);
+
 /// Refuse to write into an existing non-empty folder.
 void ensure_new_output_dir(const std::filesystem::path& out_dir);
 

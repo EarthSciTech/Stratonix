@@ -1,0 +1,16 @@
+# Petrel well heads
+# Model: synthetic_fold_two_faults v1.0.0 (DESIGN)
+# Coordinate system: local engineering frame; vertical datum: model datum, z = 0
+# Units: m. Z is elevation (negative below the datum).
+# Written by Stratonix 0.8.0
+VERSION 1
+BEGIN HEADER
+Well name
+Surface X
+Surface Y
+KB
+TD (MD)
+END HEADER
+"W1" 3000.00 3000.00 0.00 2500.00
+"W2" 4300.00 3400.00 0.00 1900.00
+"W3" 5600.00 2600.00 0.00 1900.00

@@ -69,7 +69,16 @@ int cmd_section(Args& a) {
   std::cout << (r.checks_passed ? "section written to " : "checks FAILED; no section drawn: ") << a.get("o") << "\n";
   return r.checks_passed ? 0 : 2;
 }
-int cmd_export(Args&) { throw Error(ErrorCode::NotImplemented, "exporters arrive with the export stages"); }
+int cmd_export(Args& a) {
+  if (a.positional().empty() || !a.has("o"))
+    throw Error(ErrorCode::InvalidArgument, "usage: stratonix export <description.yaml> -o <new folder> [--formats petrel|id,id,...] [--grid-spacing m]");
+  BuildOptions o;
+  o.reference_kernels = a.flag("reference-kernels");
+  double sp = a.has("grid-spacing") ? parse_double(a.get("grid-spacing")) : 0.0;
+  auto r = run_export(a.positional()[0], a.get("o"), csv(a.get("formats")), sp, o);
+  std::cout << (r.checks_passed ? "exported to " : "checks FAILED; nothing exported: ") << a.get("o") << "\n";
+  return r.checks_passed ? 0 : 2;
+}
 int cmd_package(Args&) { throw Error(ErrorCode::NotImplemented, "packaging arrives with the packaging stage"); }
 
 int cmd_plugins(Args&) {

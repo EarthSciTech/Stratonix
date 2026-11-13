@@ -3,6 +3,36 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [0.8.0] - 2026-11-13 - Petrel export set (Prompt 8)
+
+### Added
+- Exporter plugins (`stratonix plugins` lists them): `irap_ascii` (faulted horizons with fault
+  gaps; per-block surfaces for horizons a fault offsets), `zmap` (faulted horizons),
+  `fault_polygons_irap` (per horizon, IRAP classic lines), `fault_sticks_irap`, `petrel_points`
+  (stick vertices with Fault and Stick attributes), `gocad_tsurf` (fault planes clipped to the tip
+  line; faulted horizons), `well_heads` (and paths of deviated wells), `well_tops`. The set name
+  `petrel` selects all of them.
+- Writers and readers for IRAP classic lines, GOCAD TSurf, Petrel points with attributes, well
+  heads and well tops (IRAP and ZMAP+ grids already had both).
+- `stratonix export <description> -o <folder> --formats petrel [--grid-spacing m]`; `build` writes
+  the description's export list into `exports/` when every check passes. Every export folder has a
+  `README.txt`: model, evidence basis, coordinate system, vertical datum, units, z convention,
+  grid geometry, undefined values, each file with its Petrel import option, block codes.
+- Tests: round trips against the model for every format (grids within 0.5e-4 m with identical gaps,
+  sticks and TSurf vertices on the fault within 0.01 m, tops on their horizons); determinism under
+  a decimal-comma locale; LF only, ASCII only; golden SHA-256 of the whole synthetic set
+  (`tests/data/petrel_synthetic_sha256.txt`, version string normalised) so any platform that
+  writes different bytes fails; `tests/tools/check_petrel_set.py` cross-checks the formats
+  independently (IRAP against ZMAP+, TSurf against IRAP, sticks against planes, every grid node
+  inside a fault polygon is a gap and every gap lies at a polygon, tops against grids).
+- `docs/format_samples/petrel_synthetic_250m`: a small export to inspect by eye.
+- Petrel import checklist: STX-TN-02 (project outputs).
+
+### Not done here
+- xtgeo is not installable here (no network); the independent check uses own Python parsers.
+- Byte identity with Windows is enforced by the golden-hash test but has not been run on Windows.
+- Import into Petrel not yet run (checklist ready; Prompt 13).
+
 ## [0.7.0] - 2026-11-13 - Figures (Prompt 7)
 
 ### Added

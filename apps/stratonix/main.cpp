@@ -34,7 +34,7 @@ std::map<std::string, Command>& commands() {
                    "stratonix section <description.yaml> -o <new folder> (--name <section> | --line x1,y1;x2,y2;...)",
                    cli::cmd_section}},
       {"export", {"Export a model in chosen formats",
-                  "stratonix export <description.yaml> -o <new folder> --formats irap_ascii,gocad_tsurf,...",
+                  "stratonix export <description.yaml> -o <new folder> [--formats petrel|irap_ascii,gocad_tsurf,...] [--grid-spacing m]",
                   cli::cmd_export}},
       {"package", {"Write a self-contained, checksummed delivery package",
                    "stratonix package <description.yaml> -o <new folder> [--zip] [--scan <patterns.txt>] "

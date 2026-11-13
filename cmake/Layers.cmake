@@ -29,6 +29,8 @@ stx_layer(stratonix_checks 5)
 # ---- Layer 5: input/output plugins ---------------------------------------------------------
 add_library(stratonix_io STATIC
   src/io/grids.cpp
+  src/io/formats.cpp
+  src/io/exporters.cpp
   src/io/register.cpp)
 target_link_libraries(stratonix_io PUBLIC stratonix_engines stratonix_repr)
 stx_layer(stratonix_io 5)
