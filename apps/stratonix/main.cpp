@@ -37,8 +37,8 @@ std::map<std::string, Command>& commands() {
                   "stratonix export <description.yaml> -o <new folder> [--formats petrel|irap_ascii,gocad_tsurf,...] [--grid-spacing m]",
                   cli::cmd_export}},
       {"package", {"Write a self-contained, checksummed delivery package",
-                   "stratonix package <description.yaml> -o <new folder> [--zip] [--scan <patterns.txt>] "
-                   "[--terms <file>] [--contact <text>]", cli::cmd_package}},
+                   "stratonix package <description.yaml> -o <new folder> [--config package.yaml] [--zip] "
+                   "[--formats petrel,vtk,...] [--no-figures]", cli::cmd_package}},
       {"plugins", {"List the registered plugins", "stratonix plugins", cli::cmd_plugins}},
       {"bench", {"Run timing benchmarks (reference and optimised kernels)",
                  "stratonix bench [description.yaml] [--spacing 50,25] [--mode both|reference|optimised] "

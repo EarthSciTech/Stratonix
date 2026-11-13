@@ -79,9 +79,11 @@ std::string Manifest::to_json() const {
   Node b = Node::make_map();
   b.set("version", Node::make_string(bi.version));
   b.set("git_commit", Node::make_string(bi.git_commit));
-  b.set("compiler", Node::make_string(bi.compiler));
-  b.set("platform", Node::make_string(bi.platform));
-  b.set("build_type", Node::make_string(bi.build_type));
+  if (!portable) {
+    b.set("compiler", Node::make_string(bi.compiler));
+    b.set("platform", Node::make_string(bi.platform));
+    b.set("build_type", Node::make_string(bi.build_type));
+  }
   r.set("stratonix", b);
   r.set("timestamp_utc", Node::make_string(timestamp_utc));
   Node mm = Node::make_map();
@@ -123,7 +125,7 @@ void Manifest::write(const std::filesystem::path& file) const { write_file(file,
 std::vector<std::string> verify_manifest(const std::filesystem::path& manifest_file) {
   std::vector<std::string> problems;
   auto doc = desc::parse_document(read_file(manifest_file), manifest_file.generic_string());
-  auto root = manifest_file.parent_path();
+  auto root = std::filesystem::absolute(manifest_file).parent_path();
   const desc::Node* outs = doc.get("outputs");
   if (!outs) return {"manifest has no outputs list"};
   std::size_t listed = 0;

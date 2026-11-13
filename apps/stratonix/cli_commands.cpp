@@ -8,6 +8,7 @@
 #include "stratonix/desc/description.hpp"
 #include "stratonix/model/model_suite.hpp"
 #include "stratonix/package/bench.hpp"
+#include "stratonix/package/delivery.hpp"
 #include "stratonix/package/pipeline.hpp"
 #include "stratonix/registry/registry.hpp"
 
@@ -79,7 +80,29 @@ int cmd_export(Args& a) {
   std::cout << (r.checks_passed ? "exported to " : "checks FAILED; nothing exported: ") << a.get("o") << "\n";
   return r.checks_passed ? 0 : 2;
 }
-int cmd_package(Args&) { throw Error(ErrorCode::NotImplemented, "packaging arrives with the packaging stage"); }
+int cmd_package(Args& a) {
+  if (a.positional().empty() || !a.has("o"))
+    throw Error(ErrorCode::InvalidArgument, "usage: stratonix package <description.yaml> -o <new folder> [--config package.yaml] [--zip] [--formats ...]");
+  PackageConfig cfg = a.has("config") ? PackageConfig::load(a.get("config")) : PackageConfig{};
+  if (a.flag("zip")) cfg.zip = true;
+  if (a.flag("no-figures")) cfg.figures = false;
+  if (a.has("formats")) cfg.formats = csv(a.get("formats"));
+  BuildOptions o;
+  o.reference_kernels = a.flag("reference-kernels");
+  auto d = desc::load_description(a.positional()[0]);
+  std::cout << "inputs and their sharing status:\n";
+  if (d.inputs.empty()) std::cout << "  (none recorded in the description)\n";
+  for (auto& in : d.inputs) std::cout << "  " << in.id << ": " << in.sharing << "  (" << in.path << ")\n";
+  auto r = run_package(a.positional()[0], a.get("o"), cfg, o);
+  if (!r.scan_passed) {
+    std::cout << "identifier scan FAILED (" << r.hits.size() << " hits); package rejected: " << r.folder.string() << "\n";
+    for (std::size_t i = 0; i < r.hits.size() && i < 10; ++i)
+      std::cout << "  " << r.hits[i].file << ":" << r.hits[i].line << "  " << r.hits[i].pattern << "\n";
+    return 6;
+  }
+  std::cout << "package written: " << r.folder.string() << (r.zip.empty() ? "" : " and " + r.zip.string()) << "\n";
+  return 0;
+}
 
 int cmd_plugins(Args&) {
   for (auto* e : registry::Registry::global().all())

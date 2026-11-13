@@ -3,6 +3,38 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [0.10.0] - 2026-11-13 - Delivery package (Prompt 10)
+
+### Added
+- `stratonix package <description> -o <folder> [--config package.yaml] [--zip]`: a self-contained
+  delivery folder with README (model and version, DESIGN or interpreted status, coordinate system,
+  vertical datum, z convention, units, grid spacing, horizons, units and faults, evidence classes in
+  plain words, assumptions, known limitations, terms of use, contact), `parameters.csv` (every
+  parameter with value, unit, evidence class, plain-words meaning and source), checks report,
+  summary table, the model description, exports in the chosen formats, figures, a portable
+  `manifest.json` with SHA-256 of every file, and optionally a deterministic zip.
+- Inputs and their sharing status are listed first; an input with status `unknown` stops the
+  command before anything is written. A failed check stops it too.
+- Identifier scan: built-in patterns (register identifiers, work-breakdown codes, internal note
+  identifiers, absolute local paths) plus configurable regular expressions are searched in every
+  text file, every file name and the package folder name; internal labels are translated at the
+  boundary first (configurable map). A package with a hit is renamed `<folder>_REJECTED_SCAN` with
+  `SCAN_FAILED.txt` and no zip.
+- Portable manifests (no compiler or platform), so the same package differs between machines only
+  by the manifest timestamp; golden SHA-256 of every text file of the synthetic package
+  (`tests/data/package_synthetic_sha256.txt`).
+- Tests (`test_package`): the example packages and verifies; a contaminated description fails the
+  scan and passes once translated; unknown sharing status is refused; two runs (1 and all threads)
+  are identical apart from the manifest timestamp; configuration file parsing.
+- `docs/package_config.md`.
+
+### Fixed
+- `stratonix verify manifest.json` with a relative path.
+
+### Waiting for the model owner
+- Terms-of-use text and the list of project codes to ban: packages are marked DRAFT until terms
+  are supplied.
+
 ## [0.9.0] - 2026-11-13 - Interoperability (Prompt 9)
 
 ### Added

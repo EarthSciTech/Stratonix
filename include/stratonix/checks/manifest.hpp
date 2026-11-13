@@ -29,6 +29,9 @@ struct Manifest {
   std::vector<std::string> plugins;  ///< "kind/name@version"
   std::vector<std::pair<std::string, std::string>> extra;  ///< key/value notes (e.g. corrections)
   std::string timestamp_utc;         ///< ISO 8601; the only time-dependent field
+  /// Portable manifests leave out the compiler, platform and build type, so the same package
+  /// built on different machines differs only by the timestamp.
+  bool portable = false;
 
   /// Fill description, inputs and build information from a description.
   static Manifest from_description(const desc::Description& d, const std::string& command);
