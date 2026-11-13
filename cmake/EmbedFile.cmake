@@ -1,0 +1,18 @@
+# stx_embed_file(<input> <output.cpp> <namespace> <function>)
+# Generates a .cpp defining `const std::string& <namespace>::<function>()` returning the file's
+# contents. The text is split into raw-string pieces below MSVC's literal length limit.
+function(stx_embed_file input output ns fn)
+  file(READ ${input} content)
+  string(LENGTH "${content}" len)
+  set(pieces "")
+  set(pos 0)
+  set(chunk 8000)
+  while(pos LESS len)
+    string(SUBSTRING "${content}" ${pos} ${chunk} piece)
+    string(APPEND pieces "    R\"stxembed(${piece})stxembed\",\n")
+    math(EXPR pos "${pos}+${chunk}")
+  endwhile()
+  file(WRITE ${output}.tmp "// Generated from ${input}. Do not edit.\n#include <string>\nnamespace ${ns} {\nconst std::string& ${fn}() {\n  static const char* parts[] = {\n${pieces}  };\n  static const std::string s = [] { std::string r; for (const char* p : parts) r += p; return r; }();\n  return s;\n}\n}  // namespace ${ns}\n")
+  configure_file(${output}.tmp ${output} COPYONLY)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${input})
+endfunction()

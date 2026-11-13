@@ -1,0 +1,18 @@
+# Compiler options shared by all targets.
+if(MSVC)
+  add_compile_options(/W4 /permissive- /utf-8 /Zc:__cplusplus /EHsc /bigobj)
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
+  if(STRATONIX_STATIC_RUNTIME)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
+else()
+  add_compile_options(-Wall -Wextra -Wpedantic -Wno-sign-compare -Wno-missing-field-initializers)
+  if(STRATONIX_SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
+    add_link_options(-fsanitize=address,undefined)
+  endif()
+  if(STRATONIX_STATIC_RUNTIME AND NOT STRATONIX_SANITIZE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_link_options(-static-libstdc++ -static-libgcc)
+  endif()
+endif()
+# Floating point: no fast-math anywhere (determinism and parity tests depend on it).

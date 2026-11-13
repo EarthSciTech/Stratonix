@@ -1,0 +1,11 @@
+Stratonix - internal use licence (v1)
+
+Copyright (c) 2026 the Stratonix workstream. All rights reserved.
+
+Stratonix v1 is for internal use within the owning organisation and its named collaborators.
+It is written so that it can be released under a permissive open-source licence later: it has
+no GPL dependencies, and its LGPL dependency (Cairo) is linked dynamically. Third-party
+components and their licences are listed in THIRD_PARTY.md.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. Models built with Stratonix are
+labelled DESIGN or INTERPRETED; a DESIGN model is not an interpretation of data.

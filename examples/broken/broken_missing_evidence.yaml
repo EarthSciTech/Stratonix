@@ -1,0 +1,115 @@
+# BROKEN on purpose: faults[0].throw.max has no evidence class.
+# Synthetic example: an asymmetric anticline with two faults, one blind (F1) and one reaching
+# the top of Unit_A (F2). DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: synthetic_fold_two_faults, version: "1.0.0", status: DESIGN,
+        title: "Synthetic asymmetric anticline with a blind and an upward-reaching fault"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0",
+      length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | synthetic example"
+  size:   "[8000, 6000] m | user_instruction | synthetic example"
+  depth_range: "[0, 2500] m | user_instruction | synthetic example"
+  grid_spacing: "50 m | user_instruction | synthetic example"
+wells:
+  - name: W1
+    role: control
+    head: "[3000, 3000] m | user_instruction | synthetic example"
+    tops:
+      H1: "800 m | user_instruction | synthetic example"
+      H2: "1000 m | user_instruction | synthetic example"
+      H3: "1150 m | user_instruction | synthetic example"
+      H4: "1350 m | user_instruction | synthetic example"
+      H5: "1600 m | user_instruction | synthetic example"
+  - name: W2
+    role: planned
+    head: "[4300, 3400] m | user_instruction | synthetic example: planned well near the crest"
+    total_depth: "1900 m | user_instruction | synthetic example"
+  - name: W3
+    role: planned
+    head: "[5600, 2600] m | user_instruction | synthetic example: planned well across F2"
+    total_depth: "1900 m | user_instruction | synthetic example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}, {name: H4}, {name: H5}]
+  units:
+    - {name: Unit_A, top: H1, base: H2}
+    - {name: Unit_B, top: H2, base: H3}
+    - {name: Unit_C, top: H3, base: H4}
+    - {name: Unit_D, top: H4, base: H5}
+structure:
+  regional: {type: flat}
+  base: {type: flat}                      # H5 has zero relief
+  primitives:
+    - type: anticline
+      name: A1
+      crest: "[4000, 3000] m | user_instruction | synthetic example"
+      axis_azimuth: "30 deg | user_instruction | synthetic example"
+      plunge: "0 deg | user_instruction | synthetic example"
+      half_length: "3500 m | user_instruction | synthetic example"
+      half_width_left: "2000 m | user_instruction | synthetic example"
+      half_width_right: "2800 m | user_instruction | synthetic example"
+      relief:
+        H1: "120 m | user_instruction | synthetic example"
+        H4: "80 m | user_instruction | synthetic example"
+faults:
+  - name: F1                               # blind fault
+    age: "1 ordinal | user_instruction | synthetic example"
+    geometry:
+      type: planar
+      reference_point: "[3600, 3000] m | user_instruction | synthetic example"
+      reference_depth: "1200 m | user_instruction | synthetic example"
+      strike: "30 deg | user_instruction | synthetic example"
+      dip: "60 deg | user_instruction | synthetic example"
+    extent:
+      upper_tip: {rule: within_unit, unit: Unit_B, fraction: "0.5 fraction | user_instruction | synthetic example"}
+      lower_tip: {rule: horizon, horizon: H5, offset: "150 m | user_instruction | synthetic example"}
+      length: "3000 m | user_instruction | synthetic example"
+      tip_line_shape: elliptical
+    throw:
+      max: {value: 40, unit: m, source: "synthetic example"}
+      profile_dip: {type: flat_topped, taper: "0.3 fraction | user_instruction | synthetic example"}
+      profile_strike: {type: elliptical}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+  - name: F2                               # reaches the top of Unit_A (tip at H1)
+    age: "2 ordinal | user_instruction | synthetic example"
+    geometry:
+      type: planar
+      reference_point: "[5000, 3200] m | user_instruction | synthetic example"
+      reference_depth: "1000 m | user_instruction | synthetic example"
+      strike: "210 deg | user_instruction | synthetic example"
+      dip: "65 deg | user_instruction | synthetic example"
+    extent:
+      upper_tip: {rule: horizon, horizon: H1, offset: "0 m | user_instruction | synthetic example"}
+      lower_tip: {rule: within_unit, unit: Unit_D, fraction: "0.5 fraction | user_instruction | synthetic example"}
+      length: "5000 m | user_instruction | synthetic example"
+      tip_line_shape: rectangular
+    throw:
+      max: "60 m | user_instruction | synthetic example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | synthetic example"}
+      profile_strike: {type: flat_topped, taper: "0.3 fraction | user_instruction | synthetic example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: decay, influence_distance: "1500 m | user_instruction | synthetic example"}
+frame: {fixed: {well: W1}}
+checks:
+  tolerances:
+    thickness_min: "0.5 m | user_instruction | synthetic example"
+    crossing: "0.01 m | user_instruction | synthetic example"
+    offset_outside_tips: "0.05 m | user_instruction | synthetic example"
+    throw: "0.5 m | user_instruction | synthetic example"
+    wells: "0.01 m | user_instruction | synthetic example"
+  closure:
+    horizon: H2
+    faults_seal: "false flag | assumed | synthetic example: faults treated as non-sealing"
+outputs:
+  sections:
+    - name: XS_A
+      polyline: "[[1500, 1500], [6500, 4500]] m | user_instruction | synthetic example: dip section"
+      detail_window: "[3000, 5600, 700, 1800] m | user_instruction | synthetic example: crest detail"
+    - name: XS_B
+      polyline: "[[2000, 4800], [6800, 1600]] m | user_instruction | synthetic example: oblique section"
+  vertical_exaggeration: "3 ratio | user_instruction | synthetic example"
+  voxel_spacing: "[100, 100, 25] m | user_instruction | synthetic example"
+  fault_stick_spacing: "250 m | user_instruction | synthetic example"
+  exports: [irap_ascii, zmap, fault_sticks_irap, fault_polygons_irap, petrel_points, gocad_tsurf, well_heads, well_tops, vtk, obj, stl, csv, geojson, gempy, loopstructural]

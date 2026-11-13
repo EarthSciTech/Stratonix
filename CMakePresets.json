@@ -1,0 +1,58 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {"major": 3, "minor": 24, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "generator": "Ninja"
+    },
+    {
+      "name": "linux-gcc-release",
+      "inherits": "base",
+      "displayName": "Linux GCC release (system packages)",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_CXX_COMPILER": "g++", "CMAKE_C_COMPILER": "gcc"}
+    },
+    {
+      "name": "linux-gcc-debug",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_CXX_COMPILER": "g++", "CMAKE_C_COMPILER": "gcc"}
+    },
+    {
+      "name": "linux-clang-release",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_CXX_COMPILER": "clang++", "CMAKE_C_COMPILER": "clang"}
+    },
+    {
+      "name": "linux-asan",
+      "inherits": "base",
+      "displayName": "Linux GCC with address and undefined-behaviour sanitisers",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "STRATONIX_SANITIZE": "ON", "CMAKE_CXX_COMPILER": "g++", "CMAKE_C_COMPILER": "gcc"}
+    },
+    {
+      "name": "windows-msvc",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {"value": "x64", "strategy": "set"},
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {"VCPKG_TARGET_TRIPLET": "x64-windows"},
+      "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows"}
+    },
+    {"name": "windows-msvc-release", "inherits": "windows-msvc", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}},
+    {"name": "windows-msvc-debug", "inherits": "windows-msvc", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}}
+  ],
+  "buildPresets": [
+    {"name": "linux-gcc-release", "configurePreset": "linux-gcc-release"},
+    {"name": "linux-gcc-debug", "configurePreset": "linux-gcc-debug"},
+    {"name": "linux-asan", "configurePreset": "linux-asan"},
+    {"name": "windows-msvc-release", "configurePreset": "windows-msvc-release", "configuration": "Release"},
+    {"name": "windows-msvc-debug", "configurePreset": "windows-msvc-debug", "configuration": "Debug"}
+  ],
+  "testPresets": [
+    {"name": "linux-gcc-release", "configurePreset": "linux-gcc-release", "output": {"outputOnFailure": true}},
+    {"name": "linux-asan", "configurePreset": "linux-asan", "output": {"outputOnFailure": true}},
+    {"name": "windows-msvc-release", "configurePreset": "windows-msvc-release", "configuration": "Release", "output": {"outputOnFailure": true}}
+  ]
+}

@@ -1,0 +1,74 @@
+# Stratonix
+
+Stratonix is a general 2D/3D geomodelling toolkit written in C++. It builds structural models
+(horizons and fault planes) from a parametric design, checks them, and exports them in formats
+other software can load, Petrel first. Version 1 is a design-and-export tool; the architecture is
+set up to grow towards implicit modelling, grids and properties, uncertainty and a graphical
+application.
+
+- Library: `libstratonix` (namespace `stratonix`), one static library per layer.
+- Program: `stratonix` (`stratonix.exe` on Windows).
+- C API: `stratonix_c.h` (shared library `stratonix_c`).
+
+## Quick start
+
+```
+stratonix validate examples/synthetic_fold_two_faults.yaml
+stratonix build    examples/synthetic_fold_two_faults.yaml -o out/synthetic_v1
+stratonix plugins
+stratonix version
+```
+
+A model description is YAML (or JSON). Every numeric parameter carries a value, a unit, an
+evidence class and a source, in full or compact form:
+
+```yaml
+throw_max: {value: 60, unit: m, evidence: assumed, source: "design case 2"}
+throw_max: "60 m | assumed | design case 2"
+```
+
+Evidence classes: measured, interpreted, calibrated, upscaled, literature_derived, assumed,
+user_instruction. A description with an unlabelled parameter is refused. Design models are
+labelled DESIGN in every exported file.
+
+## Building
+
+Linux (system packages):
+
+```
+sudo apt-get install cmake ninja-build g++ libyaml-dev libcairo2-dev zlib1g-dev
+cmake --preset linux-gcc-release
+cmake --build build/linux-gcc-release
+ctest --test-dir build/linux-gcc-release
+```
+
+Windows (Visual Studio 2022 and vcpkg):
+
+```
+set VCPKG_ROOT=C:\vcpkg
+cmake --preset windows-msvc-release
+cmake --build build/windows-msvc-release --config Release
+ctest --test-dir build/windows-msvc-release -C Release
+cd build/windows-msvc-release && cpack -C Release
+```
+
+Options: `STRATONIX_WITH_CAIRO` (PNG/TIFF figures, default ON), `STRATONIX_WITH_PROJ`
+(reprojection, default OFF), `STRATONIX_SANITIZE` (address/UB sanitisers).
+
+## Layout
+
+| Folder | Contents |
+|---|---|
+| `include/stratonix/` | public headers, one folder per layer |
+| `src/` | one folder and one CMake target per layer |
+| `apps/stratonix/` | command-line program |
+| `capi/` | C API, header and C test |
+| `tests/` | unit, interface-suite, regression, parity and round-trip tests |
+| `benchmarks/` | timing benchmarks |
+| `examples/` | synthetic descriptions only (`broken/` holds deliberately invalid ones) |
+| `schema/` | JSON Schema of model descriptions |
+| `tools/` | external test tools (Python), not part of the product |
+| `docs/` | Doxygen configuration and developer notes |
+
+See `CONTRIBUTING.md` for how to add a plugin or an optimised kernel, and the design
+specification STX-TN-01 for the architecture.

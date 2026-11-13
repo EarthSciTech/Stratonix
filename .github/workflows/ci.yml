@@ -1,0 +1,73 @@
+# Continuous integration: Windows (MSVC, vcpkg) and Linux (GCC, Clang, sanitisers), release and
+# debug; packages (portable zip, Windows installer, Linux archive) on every push to main.
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [linux-gcc-release, linux-gcc-debug, linux-clang-release, linux-asan]
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libyaml-dev libcairo2-dev zlib1g-dev clang python3-numpy python3-yaml python3-jsonschema python3-pil
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} || cmake --build build/${{ matrix.preset }}
+      - name: Test
+        run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure
+      - name: Package
+        if: matrix.preset == 'linux-gcc-release'
+        run: cd build/${{ matrix.preset }} && cpack
+      - uses: actions/upload-artifact@v4
+        if: matrix.preset == 'linux-gcc-release'
+        with:
+          name: stratonix-linux
+          path: build/${{ matrix.preset }}/stratonix-*.*
+
+  windows:
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Release, Debug]
+    env:
+      VCPKG_ROOT: C:/vcpkg
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      # The vcpkg baseline is pinned in vcpkg.json once a networked run has produced it:
+      #   vcpkg x-update-baseline --add-initial-baseline   (commit the result)
+      - name: Configure (MSVC + vcpkg)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }} --parallel
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure
+      - name: Package (zip and NSIS installer)
+        if: matrix.config == 'Release'
+        run: cd build && cpack -C Release
+      - name: Clean-machine smoke test (fresh folder, PATH stripped)
+        if: matrix.config == 'Release'
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem build/stratonix-*-win*.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath C:/stx_clean
+          $exe = Get-ChildItem C:/stx_clean -Recurse -Filter stratonix.exe | Select-Object -First 1
+          $env:PATH = "C:/Windows/System32;C:/Windows"
+          & $exe.FullName version
+          & $exe.FullName validate examples/synthetic_fold_two_faults.yaml
+      - uses: actions/upload-artifact@v4
+        if: matrix.config == 'Release'
+        with:
+          name: stratonix-windows
+          path: |
+            build/stratonix-*.zip
+            build/stratonix-*.exe

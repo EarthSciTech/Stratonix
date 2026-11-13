@@ -1,0 +1,70 @@
+# Third-party dependencies. Each is found through vcpkg/CMake config first, then pkg-config,
+# then a plain library search, and exposed as an stx:: alias target.
+find_package(PkgConfig QUIET)
+
+# libyaml (MIT): YAML and JSON reader. Prefer a static library so the program has no
+# runtime dependency to install.
+find_package(yaml CONFIG QUIET)
+if(NOT TARGET yaml AND NOT WIN32)
+  find_path(STX_YAML_INC_S yaml.h)
+  find_library(STX_YAML_LIB_S NAMES libyaml.a)
+  if(STX_YAML_INC_S AND STX_YAML_LIB_S)
+    add_library(stx_yaml_static STATIC IMPORTED)
+    set_target_properties(stx_yaml_static PROPERTIES IMPORTED_LOCATION ${STX_YAML_LIB_S}
+                          INTERFACE_INCLUDE_DIRECTORIES ${STX_YAML_INC_S})
+    add_library(stx::yaml ALIAS stx_yaml_static)
+  endif()
+endif()
+if(TARGET stx::yaml)
+elseif(TARGET yaml)
+  add_library(stx::yaml ALIAS yaml)
+else()
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(STX_YAML QUIET IMPORTED_TARGET yaml-0.1)
+  endif()
+  if(TARGET PkgConfig::STX_YAML)
+    add_library(stx::yaml ALIAS PkgConfig::STX_YAML)
+  else()
+    find_path(STX_YAML_INC yaml.h REQUIRED)
+    find_library(STX_YAML_LIB NAMES yaml libyaml REQUIRED)
+    add_library(stx_yaml_imported UNKNOWN IMPORTED)
+    set_target_properties(stx_yaml_imported PROPERTIES IMPORTED_LOCATION ${STX_YAML_LIB}
+                          INTERFACE_INCLUDE_DIRECTORIES ${STX_YAML_INC})
+    add_library(stx::yaml ALIAS stx_yaml_imported)
+  endif()
+endif()
+
+# zlib (zlib licence): PNG, zip and PPTX writers.
+set(ZLIB_USE_STATIC_LIBS ON)
+find_package(ZLIB QUIET)
+if(NOT ZLIB_FOUND)
+  set(ZLIB_USE_STATIC_LIBS OFF)
+  find_package(ZLIB REQUIRED)
+endif()
+add_library(stx::zlib ALIAS ZLIB::ZLIB)
+
+# Cairo (LGPL-2.1 / MPL-1.1): optional raster backend, linked dynamically.
+if(STRATONIX_WITH_CAIRO)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(STX_CAIRO QUIET IMPORTED_TARGET cairo)
+  endif()
+  if(TARGET PkgConfig::STX_CAIRO)
+    add_library(stx::cairo ALIAS PkgConfig::STX_CAIRO)
+  else()
+    find_path(STX_CAIRO_INC cairo.h PATH_SUFFIXES cairo)
+    find_library(STX_CAIRO_LIB NAMES cairo)
+    if(STX_CAIRO_INC AND STX_CAIRO_LIB)
+      add_library(stx_cairo_imported UNKNOWN IMPORTED)
+      set_target_properties(stx_cairo_imported PROPERTIES IMPORTED_LOCATION ${STX_CAIRO_LIB}
+                            INTERFACE_INCLUDE_DIRECTORIES ${STX_CAIRO_INC})
+      add_library(stx::cairo ALIAS stx_cairo_imported)
+    else()
+      message(WARNING "Cairo not found: PNG and TIFF figures disabled (SVG and PPTX still written)")
+      set(STRATONIX_WITH_CAIRO OFF)
+    endif()
+  endif()
+endif()
+
+if(STRATONIX_WITH_PROJ)
+  find_package(PROJ CONFIG REQUIRED)
+endif()

@@ -1,0 +1,18 @@
+# Minimal flat-layers example: three horizons, no structure, no faults.
+stratonix_schema: 1
+model: {name: flat_three_layers, version: "1.0.0", status: DESIGN}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | synthetic example"
+  size: "[2000, 2000] m | user_instruction | synthetic example"
+  depth_range: "[0, 1500] m | user_instruction | synthetic example"
+  grid_spacing: "50 m | user_instruction | synthetic example"
+stratigraphy:
+  reference: {point: "[1000, 1000] m | user_instruction | synthetic example"}
+  horizons:
+    - {name: Top, depth: "500 m | user_instruction | synthetic example"}
+    - {name: Middle, thickness_above: "200 m | user_instruction | synthetic example"}
+    - {name: Base, depth: "1000 m | user_instruction | synthetic example"}
+  units:
+    - {name: Upper, top: Top, base: Middle}
+    - {name: Lower, top: Middle, base: Base}

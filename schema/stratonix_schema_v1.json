@@ -1,0 +1,384 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "stratonix://schema/v1",
+  "title": "Stratonix model description, schema version 1",
+  "type": "object",
+  "required": ["stratonix_schema", "model", "crs", "domain", "stratigraphy"],
+  "additionalProperties": false,
+  "properties": {
+    "stratonix_schema": {"const": 1},
+    "model": {
+      "type": "object",
+      "required": ["name", "version", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$", "minLength": 1},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "status": {"enum": ["DESIGN", "INTERPRETED"]},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "contact": {"type": "string"}
+      }
+    },
+    "crs": {
+      "type": "object",
+      "required": ["name", "vertical_datum", "length_unit"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "epsg": {"type": "integer", "minimum": 0},
+        "wkt": {"type": "string"},
+        "vertical_datum": {"type": "string"},
+        "length_unit": {"enum": ["m"]}
+      }
+    },
+    "domain": {
+      "type": "object",
+      "required": ["origin", "size", "depth_range", "grid_spacing"],
+      "additionalProperties": false,
+      "properties": {
+        "origin": {"$ref": "#/$defs/param"},
+        "size": {"$ref": "#/$defs/param"},
+        "depth_range": {"$ref": "#/$defs/param"},
+        "grid_spacing": {"$ref": "#/$defs/param"}
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "role", "sharing", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "role": {"type": "string"},
+          "sharing": {"enum": ["internal", "shareable", "restricted", "unknown"]},
+          "source": {"type": "string", "minLength": 1},
+          "evidence": {"$ref": "#/$defs/evidence"}
+        }
+      }
+    },
+    "wells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "role", "head"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+          "role": {"enum": ["control", "check", "planned"]},
+          "head": {"$ref": "#/$defs/param"},
+          "datum_elevation": {"$ref": "#/$defs/param"},
+          "total_depth": {"$ref": "#/$defs/param"},
+          "trajectory": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["stations"],
+            "properties": {"stations": {"$ref": "#/$defs/param"}}
+          },
+          "tops": {"type": "object", "additionalProperties": {"$ref": "#/$defs/param"}}
+        }
+      }
+    },
+    "stratigraphy": {
+      "type": "object",
+      "required": ["reference", "horizons", "units"],
+      "additionalProperties": false,
+      "properties": {
+        "reference": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "well": {"type": "string"},
+            "point": {"$ref": "#/$defs/param"}
+          }
+        },
+        "horizons": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+              "depth": {"$ref": "#/$defs/param"},
+              "thickness_above": {"$ref": "#/$defs/param"},
+              "surface": {
+                "type": "object",
+                "required": ["input", "format"],
+                "additionalProperties": false,
+                "properties": {
+                  "input": {"type": "string"},
+                  "format": {"enum": ["irap_ascii", "zmap", "xyz"]},
+                  "z_is": {"enum": ["depth", "elevation"]}
+                }
+              },
+              "isochore": {
+                "type": "object",
+                "required": ["from"],
+                "additionalProperties": false,
+                "properties": {
+                  "from": {"type": "string"},
+                  "thickness": {"$ref": "#/$defs/param"},
+                  "input": {"type": "string"},
+                  "format": {"enum": ["irap_ascii", "zmap", "xyz"]}
+                }
+              },
+              "intended_offset": {"type": "boolean"}
+            }
+          }
+        },
+        "units": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "top", "base"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+              "top": {"type": "string"},
+              "base": {"type": "string"},
+              "role": {"type": "string"},
+              "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}
+            }
+          }
+        },
+        "above_top_name": {"type": "string"},
+        "below_base_name": {"type": "string"}
+      }
+    },
+    "structure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "regional": {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {"enum": ["flat", "planar"]},
+            "dip": {"$ref": "#/$defs/param"},
+            "dip_azimuth": {"$ref": "#/$defs/param"}
+          }
+        },
+        "base": {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {"type": {"enum": ["flat", "conformable"]}}
+        },
+        "primitives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type", "name", "crest", "relief"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {"enum": ["anticline", "dome", "syncline", "basin"]},
+              "name": {"type": "string"},
+              "crest": {"$ref": "#/$defs/param"},
+              "axis_azimuth": {"$ref": "#/$defs/param"},
+              "plunge": {"$ref": "#/$defs/param"},
+              "half_length": {"$ref": "#/$defs/param"},
+              "half_width_left": {"$ref": "#/$defs/param"},
+              "half_width_right": {"$ref": "#/$defs/param"},
+              "radius_major": {"$ref": "#/$defs/param"},
+              "radius_minor": {"$ref": "#/$defs/param"},
+              "rim_depth": {"$ref": "#/$defs/param"},
+              "rim_width": {"$ref": "#/$defs/param"},
+              "relief": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/param"}}
+            }
+          }
+        }
+      }
+    },
+    "faults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "age", "geometry", "extent", "throw", "slip_mode", "hanging_wall"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+          "age": {"$ref": "#/$defs/param"},
+          "geometry": {
+            "type": "object",
+            "required": ["type"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {"enum": ["planar", "listric"]},
+              "reference_point": {"$ref": "#/$defs/param"},
+              "reference_depth": {"$ref": "#/$defs/param"},
+              "strike": {"$ref": "#/$defs/param"},
+              "dip": {"$ref": "#/$defs/param"},
+              "trace": {"$ref": "#/$defs/param"},
+              "trace_depth": {"$ref": "#/$defs/param"},
+              "dip_side": {"enum": ["left", "right"]},
+              "decay_length": {"$ref": "#/$defs/param"}
+            }
+          },
+          "extent": {
+            "type": "object",
+            "required": ["upper_tip", "lower_tip", "length"],
+            "additionalProperties": false,
+            "properties": {
+              "upper_tip": {"$ref": "#/$defs/tip"},
+              "lower_tip": {"$ref": "#/$defs/tip"},
+              "length": {"$ref": "#/$defs/param"},
+              "tip_line_shape": {"enum": ["rectangular", "elliptical"]}
+            }
+          },
+          "throw": {
+            "type": "object",
+            "required": ["max"],
+            "additionalProperties": false,
+            "properties": {
+              "max": {"$ref": "#/$defs/param"},
+              "profile_dip": {"$ref": "#/$defs/profile"},
+              "profile_strike": {"$ref": "#/$defs/profile"}
+            }
+          },
+          "slip_mode": {"enum": ["dip_slip", "vertical_offset"]},
+          "hanging_wall": {
+            "type": "object",
+            "required": ["type"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {"enum": ["rigid", "decay", "linear_between_faults"]},
+              "influence_distance": {"$ref": "#/$defs/param"}
+            }
+          },
+          "abuts": {
+            "type": "object",
+            "required": ["fault", "side"],
+            "additionalProperties": false,
+            "properties": {
+              "fault": {"type": "string"},
+              "side": {"enum": ["hanging_wall", "footwall"]}
+            }
+          }
+        }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "required": ["fixed"],
+      "additionalProperties": false,
+      "properties": {
+        "fixed": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "well": {"type": "string"},
+            "point": {"$ref": "#/$defs/param"}
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tolerances": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thickness_min": {"$ref": "#/$defs/param"},
+            "crossing": {"$ref": "#/$defs/param"},
+            "offset_outside_tips": {"$ref": "#/$defs/param"},
+            "throw": {"$ref": "#/$defs/param"},
+            "wells": {"$ref": "#/$defs/param"},
+            "unoffset": {"$ref": "#/$defs/param"}
+          }
+        },
+        "closure": {
+          "type": "object",
+          "required": ["horizon", "faults_seal"],
+          "additionalProperties": false,
+          "properties": {
+            "horizon": {"type": "string"},
+            "faults_seal": {"$ref": "#/$defs/param"},
+            "targets": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "closure": {"$ref": "#/$defs/param"},
+                "area": {"$ref": "#/$defs/param"},
+                "spill_depth": {"$ref": "#/$defs/param"},
+                "tolerance_fraction": {"$ref": "#/$defs/param"}
+              }
+            }
+          }
+        },
+        "warn_only": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "polyline"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+              "polyline": {"$ref": "#/$defs/param"},
+              "detail_window": {"$ref": "#/$defs/param"}
+            }
+          }
+        },
+        "vertical_exaggeration": {"$ref": "#/$defs/param"},
+        "voxel_spacing": {"$ref": "#/$defs/param"},
+        "fault_stick_spacing": {"$ref": "#/$defs/param"},
+        "exports": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
+  "$defs": {
+    "evidence": {"enum": ["measured", "interpreted", "calibrated", "upscaled", "literature_derived", "assumed", "user_instruction"]},
+    "param": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[^|]+\\|[^|]+\\|.+$"},
+        {
+          "type": "object",
+          "required": ["value", "unit", "evidence", "source"],
+          "additionalProperties": false,
+          "properties": {
+            "value": {},
+            "unit": {"type": "string", "minLength": 1},
+            "evidence": {"$ref": "#/$defs/evidence"},
+            "source": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "tip": {
+      "type": "object",
+      "required": ["rule"],
+      "additionalProperties": false,
+      "properties": {
+        "rule": {"enum": ["horizon", "within_unit", "depth", "free"]},
+        "horizon": {"type": "string"},
+        "unit": {"type": "string"},
+        "offset": {"$ref": "#/$defs/param"},
+        "fraction": {"$ref": "#/$defs/param"},
+        "depth": {"$ref": "#/$defs/param"}
+      }
+    },
+    "profile": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {"enum": ["sine", "flat_topped", "elliptical", "linear"]},
+        "taper": {"$ref": "#/$defs/param"}
+      }
+    }
+  }
+}

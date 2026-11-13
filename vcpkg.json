@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "stratonix",
+  "version-semver": "0.2.0",
+  "description": "Stratonix geomodelling toolkit",
+  "dependencies": [
+    "libyaml",
+    "zlib",
+    {
+      "name": "cairo",
+      "default-features": false,
+      "platform": "!uwp"
+    }
+  ],
+  "features": {
+    "proj": {
+      "description": "Coordinate reprojection with PROJ",
+      "dependencies": ["proj"]
+    }
+  }
+}
