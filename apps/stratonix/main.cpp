@@ -41,7 +41,8 @@ std::map<std::string, Command>& commands() {
                    "[--terms <file>] [--contact <text>]", cli::cmd_package}},
       {"plugins", {"List the registered plugins", "stratonix plugins", cli::cmd_plugins}},
       {"bench", {"Run timing benchmarks (reference and optimised kernels)",
-                 "stratonix bench [--size small|medium|production] [--spacing <m>] [--threads N] [-o <folder>]",
+                 "stratonix bench [description.yaml] [--spacing 50,25] [--mode both|reference|optimised] "
+                 "[--voxel 200,25] [--threads N] [-o <folder>] | stratonix bench --write-model <file> [--spacing m]",
                  cli::cmd_bench}},
       {"suite", {"Run the model-interface conformance suite on a description's model",
                  "stratonix suite <description.yaml>", cli::cmd_suite}},

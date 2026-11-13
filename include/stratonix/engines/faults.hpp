@@ -122,6 +122,9 @@ class FaultNetwork {
   /// so the throw at a horizon is read where the horizon meets the fault before faulting and
   /// does not depend on which block the frame holds fixed. Returns q0; writes tau if asked.
   Vec3 undo(int f, const Vec3& q, int sgn, double* tau = nullptr) const;
+  /// Restore a point given in fault f's frame, on the stated wall of f, through f and the
+  /// faults older than it (used to measure throw in the fault's own frame).
+  Vec3 restore_from_frame(const Vec3& q, int f, bool hanging_wall) const;
   /// Ages, youngest first.
   const std::vector<int>& young_to_old() const { return order_; }
 

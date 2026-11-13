@@ -45,6 +45,9 @@ void parallel_for(std::size_t n, std::size_t chunk,
 void set_optimised_kernels(bool on);
 bool optimised_kernels();
 
+/// Peak resident memory of this process in bytes (0 if unknown on this platform).
+std::size_t peak_rss_bytes();
+
 // ---- Version and build information ---------------------------------------------------------
 struct BuildInfo {
   std::string version, git_commit, compiler, platform, build_type;

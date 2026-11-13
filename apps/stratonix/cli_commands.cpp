@@ -7,6 +7,7 @@
 #include "stratonix/core/util.hpp"
 #include "stratonix/desc/description.hpp"
 #include "stratonix/model/model_suite.hpp"
+#include "stratonix/package/bench.hpp"
 #include "stratonix/package/pipeline.hpp"
 #include "stratonix/registry/registry.hpp"
 
@@ -55,7 +56,6 @@ int cmd_build(Args& a) {
 int cmd_section(Args&) { throw Error(ErrorCode::NotImplemented, "sections arrive with the figures stage"); }
 int cmd_export(Args&) { throw Error(ErrorCode::NotImplemented, "exporters arrive with the export stages"); }
 int cmd_package(Args&) { throw Error(ErrorCode::NotImplemented, "packaging arrives with the packaging stage"); }
-int cmd_bench(Args&) { throw Error(ErrorCode::NotImplemented, "benchmarks arrive with the performance stage"); }
 
 int cmd_plugins(Args&) {
   for (auto* e : registry::Registry::global().all())
@@ -92,4 +92,35 @@ int cmd_version(Args&) {
   return 0;
 }
 
+}  // namespace stratonix::cli
+
+namespace stratonix::cli {
+int cmd_bench(Args& a) {
+  if (a.has("write-model")) {
+    write_file(a.get("write-model"), production_model_yaml(std::stod(a.get("spacing", "50"))));
+    std::cout << "wrote " << a.get("write-model") << "\n";
+    return 0;
+  }
+  BenchOptions o;
+  o.spacings.clear();
+  for (auto& x : csv(a.get("spacing", "50"))) o.spacings.push_back(parse_double(x));
+  std::string mode = a.get("mode", "both");
+  o.reference = mode != "optimised";
+  o.optimised = mode != "reference";
+  if (a.has("voxel")) {
+    auto v = csv(a.get("voxel"));
+    o.voxel_xy = parse_double(v.at(0));
+    o.voxel_z = parse_double(v.at(1));
+  }
+  if (!a.positional().empty()) o.description = a.positional()[0];
+  auto rows = run_benchmark(o);
+  std::string t = bench_table(rows);
+  std::cout << t;
+  if (a.has("o")) {
+    std::filesystem::create_directories(a.get("o"));
+    write_file(std::filesystem::path(a.get("o")) / "bench_report.txt", t);
+    write_file(std::filesystem::path(a.get("o")) / "bench_report.csv", bench_csv(rows));
+  }
+  return 0;
+}
 }  // namespace stratonix::cli

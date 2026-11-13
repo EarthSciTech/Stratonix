@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(stratonix VERSION 0.4.0 DESCRIPTION "Stratonix geomodelling toolkit" LANGUAGES C CXX)
+project(stratonix VERSION 0.5.0 DESCRIPTION "Stratonix geomodelling toolkit" LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +38,9 @@ target_compile_definitions(stratonix_core PRIVATE
   STRATONIX_BUILD_TYPE="$<CONFIG>")
 find_package(Threads REQUIRED)
 target_link_libraries(stratonix_core PUBLIC Threads::Threads)
+if(WIN32)
+  target_link_libraries(stratonix_core PUBLIC psapi)
+endif()
 stx_layer(stratonix_core 0)
 
 # ---- Layer 1: description and registry -----------------------------------------------------

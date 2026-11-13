@@ -35,6 +35,7 @@ stx_layer(stratonix_io 5)
 
 # ---- Layer 6: delivery packaging and pipeline ---------------------------------------------
 add_library(stratonix_package STATIC
-  src/package/pipeline.cpp)
+  src/package/pipeline.cpp
+  src/package/bench.cpp)
 target_link_libraries(stratonix_package PUBLIC stratonix_checks stratonix_io)
 stx_layer(stratonix_package 6)

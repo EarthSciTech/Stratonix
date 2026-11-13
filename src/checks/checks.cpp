@@ -7,7 +7,9 @@
 
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/util.hpp"
+#include "stratonix/core/roots.hpp"
 #include "stratonix/engines/faults.hpp"
+#include "stratonix/engines/structure.hpp"
 
 namespace stratonix {
 
@@ -214,60 +216,88 @@ class C3 final : public Check {
   }
 };
 
-/// C4 (parametric engine): throw at each horizon equals the fault's profile.
+/// C4 (parametric engine): throw at each horizon equals the fault's profile. Measured in the
+/// fault's own frame (younger faults undone), where the fault is a plane: on each wall the
+/// horizon's cut-off is found down dip from the scalar restored from that frame; the measured
+/// throw is the vertical separation of the cut-offs (dip-slip) or the moving cut-off against the
+/// fixed wall's horizon at the same map position (vertical offset). Expected: the profile at the
+/// restored position of the moving cut-off.
 class C4 final : public Check {
   std::vector<CheckResult> run(CheckContext& c) const override {
     const auto& inf = c.model().info();
     std::vector<CheckResult> out;
     auto* net = static_cast<const FaultNetwork*>(c.model().capability("faults"));
-    if (!net) return out;
+    auto* st = static_cast<const Structure*>(c.model().capability("structure"));
+    if (!net || !st) return out;
     std::string src;
     double tol = c.tolerance("throw", &src);
+    const double eps = 0.25, step = std::max(5.0, c.fault_spacing() / 4);
     for (std::size_t f = 0; f < inf.faults.size(); ++f) {
       const Fault& F = net->faults()[f];
+      const int fi = static_cast<int>(f);
       bool fixed_hw = ((net->fixed_block() >> f) & 1u) != 0;
+      double bmin = 1e300, bmax = -1e300;
+      for (std::size_t i = 0; i < F.a_tab.size(); ++i) {
+        double bu, bl;
+        F.tips(F.a_tab[i], bu, bl);
+        bmin = std::min(bmin, bu);
+        bmax = std::max(bmax, bl);
+      }
+      // wall scalar on the plane (extrapolated from eps and 2 eps off the plane)
+      auto wall_s = [&](std::size_t h, double a, double b, bool hw) {
+        double sg = hw ? 1 : -1;
+        Vec3 p = F.at(a, b);
+        Vec3 r1 = net->restore_from_frame(p + F.n * (sg * eps), fi, hw);
+        Vec3 r2 = net->restore_from_frame(p + F.n * (sg * 2 * eps), fi, hw);
+        double s1 = r1.z - st->z(h, r1.x, r1.y), s2 = r2.z - st->z(h, r2.x, r2.y);
+        return 2 * s1 - s2;
+      };
+      auto cutoff = [&](std::size_t h, double a, bool hw, double& b_out) {
+        double bu, bl;
+        F.tips(a, bu, bl);
+        if (!(bl > bu)) return false;
+        double b0 = bu, s0 = wall_s(h, a, b0, hw);
+        for (double b1 = bu + step;; b1 += step) {
+          b1 = std::min(b1, bl);
+          double s1 = wall_s(h, a, b1, hw);
+          if ((s0 >= 0) != (s1 >= 0)) {
+            b_out = illinois([&](double b) { return wall_s(h, a, b, hw); }, b0, b1, s0, s1, 1e-6);
+            return true;
+          }
+          if (b1 >= bl) return false;
+          b0 = b1;
+          s0 = s1;
+        }
+      };
+      const int NA = 60;
       for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
-        const auto& lines = c.cutoffs(static_cast<int>(f), static_cast<int>(h));
-        const repr::CutoffLine* hw = nullptr;
-        const repr::CutoffLine* fw = nullptr;
-        for (auto& l : lines) (l.hanging_wall ? hw : fw) = &l;
-        const repr::CutoffLine* mov = fixed_hw ? fw : hw;
         double worst = 0, tmax = 0;
         std::size_t n = 0;
-        std::vector<Vec3> probe;
-        std::vector<double> expect;
-        for (std::size_t i = 0; i < mov->by_column.size(); ++i) {
-          const Vec3& a = hw->by_column[i];
-          const Vec3& b = fw->by_column[i];
-          if (std::isnan(a.x) || std::isnan(b.x)) continue;
-          Vec3 cm = mov->by_column[i];
-          Vec3 q = net->to_fault_frame(cm, static_cast<int>(f));
-          // expected throw: the profile at the restored position of the moving wall's cut-off
-          double t = 0;
-          net->undo(static_cast<int>(f), q, fixed_hw ? -1 : 1, &t);
+        for (int k = 1; k < NA; ++k) {
+          double a = -0.5 * F.length + F.length * k / NA;
+          double bhw, bfw;
+          if (!cutoff(h, a, true, bhw) || !cutoff(h, a, false, bfw)) continue;
+          Vec3 chw = F.at(a, bhw), cfw = F.at(a, bfw);
+          Vec3 cm = fixed_hw ? cfw : chw;
+          double expect = 0;
+          net->undo(fi, cm, fixed_hw ? -1 : 1, &expect);
+          double meas;
           if (F.kin->name() == "dip_slip") {
-            double meas = b.z - a.z;
-            worst = std::max(worst, std::fabs(meas - t));
+            meas = cfw.z - chw.z;
           } else {
-            probe.push_back(cm);
-            expect.push_back(t);
+            // fixed wall's horizon on the vertical through the moving cut-off
+            bool hwfix = fixed_hw;
+            auto sv = [&](double z) {
+              Vec3 p{cm.x, cm.y, z};
+              Vec3 r = net->restore_from_frame(p, fi, hwfix);
+              return r.z - st->z(h, r.x, r.y);
+            };
+            double zf = expand_and_solve(sv, cm.z, 5.0, 1e4, 1e-7);
+            meas = fixed_hw ? cm.z - zf : zf - cm.z;
           }
-          tmax = std::max(tmax, std::fabs(t));
+          worst = std::max(worst, std::fabs(meas - expect));
+          tmax = std::max(tmax, std::fabs(expect));
           ++n;
-        }
-        if (!probe.empty()) {
-          // Vertical offset: compare the moving cut-off's elevation with the fixed wall's
-          // horizon at the same map position (root of the fixed block's scalar on the vertical).
-          std::vector<Vec3> side_pts;
-          for (auto& p : probe) side_pts.push_back(p + F.n * (fixed_hw ? 0.25 : -0.25));
-          EvalResult rb;
-          c.model().evaluate(side_pts, kEvalBlock, rb);
-          for (std::size_t k = 0; k < probe.size(); ++k) {
-            auto zf = repr::horizon_grid_block(c.model(), static_cast<int>(h), rb.block[k],
-                                               GridSpec{probe[k].x, probe[k].y, 1, 1, 1, 1});
-            double meas = fixed_hw ? probe[k].z - zf.v[0] : zf.v[0] - probe[k].z;
-            worst = std::max(worst, std::fabs(meas - expect[k]));
-          }
         }
         if (n == 0) continue;
         auto r = base(c, "C4", "throw at the horizon equals the fault profile", inf.faults[f].name + " / " + inf.horizons[h].name);
@@ -275,9 +305,11 @@ class C4 final : public Check {
         r.tolerance = tol;
         r.tolerance_source = src;
         r.passed = worst <= tol;
-        r.detail = std::to_string(n) + " strike positions; profile maximum " + fmt_fixed(tmax, 2) + " m";
+        r.detail = std::to_string(n) + " strike positions (fault frame); profile maximum " + fmt_fixed(tmax, 2) + " m";
         out.push_back(r);
       }
+      (void)bmin;
+      (void)bmax;
     }
     return out;
   }

@@ -203,7 +203,7 @@ std::vector<CutoffLine> cutoff_lines(const Model& m, const FaultSurface& fs, int
     std::vector<Vec3> p(N);
     for (std::size_t k = 0; k < N; ++k) p[k] = fs.nodes[k] + fi.normal * (sg * eps);
     EvalResult r;
-    m.evaluate(p, kEvalScalars, r);
+    m.evaluate(p, kEvalScalars | kEvalBlock, r);
     (void)nh;
     CutoffLine cl;
     cl.fault = fs.fault;
@@ -217,6 +217,13 @@ std::vector<CutoffLine> cutoff_lines(const Model& m, const FaultSurface& fs, int
       for (std::size_t j = 0; j + 1 < fs.nb; ++j) {
         std::size_t k1 = i + fs.na * j, k2 = i + fs.na * (j + 1);
         if (fs.extent[k1] > 1 || fs.extent[k2] > 1) continue;
+        // A segment whose ends lie in different blocks crosses another fault: the fault surface
+        // is offset between them, so no cut-off is interpolated there.
+        if (r.block[k1] != r.block[k2]) continue;
+        // Both samples must really lie on the intended wall (near offsets of a displaced fault
+        // surface the side samples can fall on the other wall).
+        bool on_hw = ((r.block[k1] >> fs.fault) & 1u) != 0;
+        if (on_hw != (side == 0)) continue;
         double s1 = r.s(static_cast<std::size_t>(h), k1), s2 = r.s(static_cast<std::size_t>(h), k2);
         if ((s1 >= 0) != (s2 >= 0)) { segs.push_back({i, k1, k2, 0.0, 1.0, s1 >= 0}); break; }
       }
@@ -239,10 +246,19 @@ std::vector<CutoffLine> cutoff_lines(const Model& m, const FaultSurface& fs, int
         ((v >= 0) == segs[k].s1pos ? segs[k].lo : segs[k].hi) = t;
       }
     }
-    for (auto& sgm : segs) {
-      double t = 0.5 * (sgm.lo + sgm.hi);
-      cl.by_column[sgm.col] = fs.nodes[sgm.k1] + (fs.nodes[sgm.k2] - fs.nodes[sgm.k1]) * t;
+    // Keep a cut-off only if its side samples lie in the same block as the bracketing nodes
+    // (rejects points where the fault surface is stepped by another fault between the nodes).
+    std::vector<Vec3> fin(segs.size());
+    for (std::size_t k = 0; k < segs.size(); ++k) {
+      double t = 0.5 * (segs[k].lo + segs[k].hi);
+      fin[k] = fs.nodes[segs[k].k1] + (fs.nodes[segs[k].k2] - fs.nodes[segs[k].k1]) * t;
     }
+    std::vector<Vec3> side_pts(fin.size());
+    for (std::size_t k = 0; k < fin.size(); ++k) side_pts[k] = fin[k] + fi.normal * (sg * eps);
+    EvalResult rf;
+    m.evaluate(side_pts, kEvalBlock, rf);
+    for (std::size_t k = 0; k < segs.size(); ++k)
+      if (rf.block[k] == r.block[segs[k].k1]) cl.by_column[segs[k].col] = fin[k];
     Polyline cur;
     for (std::size_t i = 0; i < fs.na; ++i) {
       if (isnan3(cl.by_column[i])) { if (cur.size() >= 2) cl.parts.push_back(cur); cur.clear(); continue; }

@@ -7,6 +7,7 @@
 #include <numeric>
 
 #include "stratonix/core/error.hpp"
+#include "stratonix/core/roots.hpp"
 #include "stratonix/core/util.hpp"
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/wells.hpp"
@@ -269,14 +270,11 @@ double FaultNetwork::level_in_frame(const Structure& st, int h, double x, double
     }
     return q.z - st.z(static_cast<std::size_t>(h), q.x, q.y);
   };
-  double hi = dom.z_top + 3000, lo = dom.z_base - 3000;
-  double shi = s_at(hi), slo = s_at(lo);
-  if (!(shi > 0 && slo < 0)) return st.z(static_cast<std::size_t>(h), x, y);
-  for (int it = 0; it < 60; ++it) {
-    double mid = 0.5 * (hi + lo);
-    (s_at(mid) > 0 ? hi : lo) = mid;
-  }
-  return 0.5 * (hi + lo);
+  // Start at the restored horizon and expand a bracket; older faults move it by at most their throws.
+  double z0 = st.z(static_cast<std::size_t>(h), x, y);
+  double z = expand_and_solve(s_at, z0, 25.0, 1.0e5, 1e-7);
+  (void)dom;
+  return std::isnan(z) ? z0 : z;
 }
 
 void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st, BuildLog& log) {
@@ -302,35 +300,39 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
     double sd = std::sin(f.dip);
     double b_top = (f.p0.z - dom.z_top) / sd, b_base = (f.p0.z - dom.z_base) / sd;
     double margin = 0.5 * (b_base - b_top) + 1000;
+    f.a_tab.assign(K, 0.0);
+    f.bu_tab.assign(K, 0.0);
+    f.bl_tab.assign(K, 0.0);
+    f.clamped_tab.assign(K, 0);
+    // Strike positions are independent: solve them in parallel (each entry written once).
+    parallel_for(K, 16, [&](std::size_t i0, std::size_t i1) {
+      for (std::size_t i = i0; i < i1; ++i) {
+        double a = -0.5 * f.length + f.length * static_cast<double>(i) / (K - 1);
+        auto solve = [&](const TipRule& r, bool upper) -> double {
+          if (r.kind == TipRule::Kind::Free) return upper ? b_top : b_base;
+          auto g = [&](double b) {
+            Vec3 p = f.at(a, b);
+            return p.z - level(r, p.x, p.y, upper);
+          };
+          double lo = b_top - margin, hi = b_base + margin;
+          double glo = g(lo), ghi = g(hi);
+          if (!(glo > 0 && ghi < 0)) {
+            f.clamped_tab[i] = 1;
+            return glo <= 0 ? lo : hi;
+          }
+          return illinois(g, lo, hi, glo, ghi, 1e-7);
+        };
+        f.a_tab[i] = a;
+        f.bu_tab[i] = solve(f.upper, true);
+        f.bl_tab[i] = solve(f.lower, false);
+      }
+    });
     int clamped = 0;
     for (std::size_t i = 0; i < K; ++i) {
-      double a = -0.5 * f.length + f.length * static_cast<double>(i) / (K - 1);
-      auto solve = [&](const TipRule& r, bool upper) -> double {
-        if (r.kind == TipRule::Kind::Free) return upper ? b_top : b_base;
-        auto g = [&](double b) {
-          Vec3 p = f.at(a, b);
-          return p.z - level(r, p.x, p.y, upper);
-        };
-        double lo = b_top - margin, hi = b_base + margin;
-        double glo = g(lo), ghi = g(hi);
-        if (!(glo > 0 && ghi < 0)) {
-          ++clamped;
-          f.clamped_tab.back() = 1;
-          return glo <= 0 ? lo : hi;
-        }
-        for (int it = 0; it < 100; ++it) {
-          double mid = 0.5 * (lo + hi);
-          (g(mid) > 0 ? lo : hi) = mid;
-        }
-        return 0.5 * (lo + hi);
-      };
-      f.a_tab.push_back(a);
-      f.clamped_tab.push_back(0);
-      f.bu_tab.push_back(solve(f.upper, true));
-      f.bl_tab.push_back(solve(f.lower, false));
-      if (f.bl_tab.back() <= f.bu_tab.back())
+      clamped += f.clamped_tab[i];
+      if (f.bl_tab[i] <= f.bu_tab[i])
         throw Error(ErrorCode::Build, "fault " + f.name + ": the upper tip lies below the lower tip at strike position " +
-                                          fmt_fixed(a, 1) + " m", "faults[" + std::to_string(k) + "].extent");
+                                          fmt_fixed(f.a_tab[i], 1) + " m", "faults[" + std::to_string(k) + "].extent");
     }
     if (clamped) log.note("fault " + f.name + ": tip rule level not met inside the search range at " + std::to_string(clamped) +
                           " strike positions; tips clamped (see checks)");
@@ -431,6 +433,20 @@ Vec3 FaultNetwork::restore(const Vec3& p, BlockCode* block, const BlockCode* for
     q = undo(fi, q, side ? 1 : -1);
   }
   if (block) *block = code;
+  return q;
+}
+
+Vec3 FaultNetwork::restore_from_frame(const Vec3& p, int f, bool hw) const {
+  Vec3 q = p;
+  bool fixed_side = ((fixed_block_ >> f) & 1u) != 0;
+  if (hw != fixed_side) q = undo(f, q, hw ? 1 : -1);
+  for (std::size_t k = static_cast<std::size_t>(rank_[static_cast<std::size_t>(f)]) + 1; k < order_.size(); ++k) {
+    int fi = order_[k];
+    const Fault& F = faults_[static_cast<std::size_t>(fi)];
+    bool side = F.sigma(q) > 0;
+    bool fs = ((fixed_block_ >> fi) & 1u) != 0;
+    if (side != fs) q = undo(fi, q, side ? 1 : -1);
+  }
   return q;
 }
 

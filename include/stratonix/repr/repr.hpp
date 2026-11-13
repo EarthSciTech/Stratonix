@@ -135,6 +135,11 @@ struct Closure {
 /// barriers; otherwise reaching a gap counts as spilling.
 Closure closure_analysis(const Grid2D& z, bool faults_seal);
 
+// ---- meshes from grids ---------------------------------------------------------------------
+/// Triangulated surface from a grid: two triangles per fully defined cell, one where exactly
+/// three corners are defined; nothing across gaps. Vertices only at defined nodes.
+TriMesh grid_to_mesh(const Grid2D& g);
+
 // ---- contours ------------------------------------------------------------------------------
 /// Contour lines of a grid at a level (marching squares; NaN cells skipped).
 std::vector<Polyline> contour_lines(const Grid2D& g, double level);

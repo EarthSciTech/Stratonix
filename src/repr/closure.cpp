@@ -1,5 +1,6 @@
 // Closure analysis (priority flood from the crest) and contour lines (marching squares).
 #include <cmath>
+#include <cstdint>
 #include <map>
 #include <queue>
 
@@ -89,6 +90,31 @@ Closure closure_analysis(const Grid2D& g, bool seal) {
   }
   c.area = static_cast<double>(count) * sp.dx * sp.dy;
   return c;
+}
+
+TriMesh grid_to_mesh(const Grid2D& g) {
+  const auto& sp = g.spec;
+  TriMesh m;
+  std::vector<std::uint32_t> id(sp.size(), UINT32_MAX);
+  for (std::size_t k = 0; k < sp.size(); ++k)
+    if (!std::isnan(g.v[k])) {
+      id[k] = static_cast<std::uint32_t>(m.v.size());
+      m.v.push_back({sp.x(k % sp.nx), sp.y(k / sp.nx), g.v[k]});
+    }
+  for (std::size_t j = 0; j + 1 < sp.ny; ++j)
+    for (std::size_t i = 0; i + 1 < sp.nx; ++i) {
+      std::uint32_t a = id[sp.index(i, j)], b = id[sp.index(i + 1, j)], c = id[sp.index(i + 1, j + 1)], d = id[sp.index(i, j + 1)];
+      int n = (a != UINT32_MAX) + (b != UINT32_MAX) + (c != UINT32_MAX) + (d != UINT32_MAX);
+      if (n == 4) { m.t.push_back({a, b, c}); m.t.push_back({a, c, d}); }
+      else if (n == 3) {
+        std::uint32_t v[3];
+        int k = 0;
+        for (auto x : {a, b, c, d})
+          if (x != UINT32_MAX) v[k++] = x;
+        m.t.push_back({v[0], v[1], v[2]});
+      }
+    }
+  return m;
 }
 
 std::vector<Polyline> contour_lines(const Grid2D& g, double level) {

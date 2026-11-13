@@ -3,6 +3,28 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [0.5.0] - 2026-11-13 - Evaluation and representations (Prompt 5)
+
+### Added
+- Horizon meshes from grids (no triangles across gaps); fault meshes checked for degenerate and
+  non-manifold triangles; fault sticks.
+- Tests: faulted and per-block surfaces lie on their horizons in the blocks they report; voxel
+  grid agrees with per-block surfaces; well tops on vertical and deviated wells; sections are
+  slices of the 3D model; contours; mesh quality.
+- `stratonix bench`: full build and kernel timings with peak memory on the synthetic
+  40 x 40 km, ten-fault production model (`--write-model` writes its description).
+- Bracketed root finding (Illinois) shared by the engines; tip tables resolved in parallel.
+
+### Changed
+- Cut-off lines: bracketing segments must lie in one block and on the intended wall, so a cut-off
+  is never interpolated across another fault.
+- Check C4 measures throw in the fault's own frame (younger faults undone), where the fault is a
+  plane, so faults cut by younger faults are measured correctly.
+
+### Measured
+- 40 x 40 km at 50 m, ten faults, 2 threads (GCC 13, Linux): full build and checks 32.6 s,
+  peak memory 139 MB; faulted grids of six horizons (801 x 801) 8.3 s.
+
 ## [0.4.0] - 2026-11-13 - Fault framework and kinematics (Prompt 4)
 
 ### Added

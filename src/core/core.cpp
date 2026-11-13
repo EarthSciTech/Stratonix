@@ -280,6 +280,28 @@ void parallel_for(std::size_t n, std::size_t chunk,
   if (err) std::rethrow_exception(err);
 }
 
+// ---- memory --------------------------------------------------------------------------------
+}  // namespace stratonix
+#if defined(_WIN32)
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
+#else
+#include <sys/resource.h>
+#endif
+namespace stratonix {
+std::size_t peak_rss_bytes() {
+#if defined(_WIN32)
+  PROCESS_MEMORY_COUNTERS pmc;
+  if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) return pmc.PeakWorkingSetSize;
+  return 0;
+#else
+  struct rusage ru;
+  if (getrusage(RUSAGE_SELF, &ru) == 0) return static_cast<std::size_t>(ru.ru_maxrss) * 1024u;  // KiB on Linux
+  return 0;
+#endif
+}
+
 // ---- build info ----------------------------------------------------------------------------
 const BuildInfo& build_info() {
   static const BuildInfo bi = [] {
