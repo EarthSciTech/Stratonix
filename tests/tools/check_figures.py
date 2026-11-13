@@ -26,12 +26,13 @@ def main(folder):
         print("FAIL: no figures in", folder); return 1
     bad = 0
     for svg in svgs:
-        base = svg.with_suffix("")
+        stem = svg.name[:-len(".svg")]
+        base = svg.parent / stem
         errs = []
         root = ET.parse(svg).getroot()
         texts = [t for t in root.iter() if t.tag.endswith("text")]
         if not texts: errs.append("SVG has no text elements")
-        png, tif, pptx = base.with_suffix(".png"), base.with_suffix(".tif"), base.with_suffix(".pptx")
+        png, tif, pptx = (svg.parent / (stem + e) for e in (".png", ".tif", ".pptx"))
         for f in (png, tif, pptx):
             if not f.exists(): errs.append("missing " + f.name)
         if not errs:
@@ -46,7 +47,7 @@ def main(folder):
                 if p.samplesperpixel != 3: errs.append(f"TIFF samples {p.samplesperpixel} (alpha?)")
                 xr = p.tags["XResolution"].value; yr = p.tags["YResolution"].value
                 if abs(xr[0] / xr[1] - 300) > 0.5 or abs(yr[0] / yr[1] - 300) > 0.5: errs.append(f"TIFF dpi {xr} {yr}")
-                b = p.asarray()
+            b = np.asarray(Image.open(tif))  # Pillow decodes LZW (tifffile needs imagecodecs)
             if a.shape != b.shape or not np.array_equal(a, b): errs.append("TIFF pixels differ from PNG")
             pr = Presentation(str(pptx))
             if abs(pr.slide_width / pr.slide_height - 16 / 9) > 1e-3: errs.append("slide not 16:9")
@@ -60,7 +61,7 @@ def main(folder):
             for sh in s.shapes:
                 if sh.left < 0 or sh.top < 0 or sh.left + sh.width > pr.slide_width or sh.top + sh.height > pr.slide_height:
                     errs.append("shape outside slide")
-        print(("FAIL " if errs else "ok   ") + base.name + ("" if not errs else ": " + "; ".join(errs)))
+        print(("FAIL " if errs else "ok   ") + stem + ("" if not errs else ": " + "; ".join(errs)))
         bad += bool(errs)
     print(f"{len(svgs) - bad}/{len(svgs)} figures pass")
     return 1 if bad else 0

@@ -37,6 +37,19 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
 /// Build only (no files written); used by the C API and tests.
 BuildOutcome build_only(const desc::Description& d, const BuildOptions& opt);
 
+/// Key numbers of a built model (summary table; also read by the figures).
+std::vector<std::pair<std::string, std::string>> key_numbers(const desc::Description& d, const Model& m, const struct CheckReport& rep,
+                                                             class CheckContext& ctx);
+std::string summary_csv(const std::vector<std::pair<std::string, std::string>>& keys);
+/// Write the figure set (sections from the description, maps, 3D views, fence) into a folder.
+void write_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
+                   const std::filesystem::path& folder);
+
+/// Draw one section (named in the description, or along `line` when it is not empty) in the
+/// four figure formats; the model is built and checked first and nothing is drawn if a check fails.
+BuildOutcome run_section(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::string& name,
+                         const Polyline& line, const BuildOptions& opt);
+
 /// Refuse to write into an existing non-empty folder.
 void ensure_new_output_dir(const std::filesystem::path& out_dir);
 

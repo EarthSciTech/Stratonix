@@ -53,7 +53,22 @@ int cmd_build(Args& a) {
   return 0;
 }
 
-int cmd_section(Args&) { throw Error(ErrorCode::NotImplemented, "sections arrive with the figures stage"); }
+int cmd_section(Args& a) {
+  if (a.positional().empty() || !a.has("o")) throw Error(ErrorCode::InvalidArgument, "usage: stratonix section <description.yaml> -o <new folder> (--name N | --line x1,y1;x2,y2;...)");
+  Polyline pl;
+  if (a.has("line"))
+    for (auto& v : split(a.get("line"), ';')) {
+      auto xy = csv(v);
+      if (xy.size() != 2) throw Error(ErrorCode::InvalidArgument, "--line expects x,y pairs separated by ';'");
+      pl.push_back({parse_double(xy[0]), parse_double(xy[1]), 0});
+    }
+  if (pl.empty() && !a.has("name")) throw Error(ErrorCode::InvalidArgument, "give --name or --line");
+  BuildOptions o;
+  o.reference_kernels = a.flag("reference-kernels");
+  auto r = run_section(a.positional()[0], a.get("o"), a.get("name", pl.empty() ? "" : "line"), pl, o);
+  std::cout << (r.checks_passed ? "section written to " : "checks FAILED; no section drawn: ") << a.get("o") << "\n";
+  return r.checks_passed ? 0 : 2;
+}
 int cmd_export(Args&) { throw Error(ErrorCode::NotImplemented, "exporters arrive with the export stages"); }
 int cmd_package(Args&) { throw Error(ErrorCode::NotImplemented, "packaging arrives with the packaging stage"); }
 

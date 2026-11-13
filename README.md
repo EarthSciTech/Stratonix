@@ -15,9 +15,16 @@ application.
 ```
 stratonix validate examples/synthetic_fold_two_faults.yaml
 stratonix build    examples/synthetic_fold_two_faults.yaml -o out/synthetic_v1
+stratonix section  examples/synthetic_fold_two_faults.yaml -o out/line_1 --line "500,500;4000,3000;7500,5500"
+stratonix bench    --spacing 100,50 --mode both -o out/bench
 stratonix plugins
 stratonix version
 ```
+
+`build` writes the model summary, the checks report, a summary table, a manifest with SHA-256
+checksums and, when every check passes, the figure set (sections, maps per horizon, two 3D views,
+a fence diagram) in SVG, PNG and TIFF at 300 dpi and PPTX. Nothing is drawn or exported when a
+check fails.
 
 A model description is YAML (or JSON). Every numeric parameter carries a value, a unit, an
 evidence class and a source, in full or compact form:

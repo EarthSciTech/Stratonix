@@ -33,9 +33,23 @@ add_library(stratonix_io STATIC
 target_link_libraries(stratonix_io PUBLIC stratonix_engines stratonix_repr)
 stx_layer(stratonix_io 5)
 
+# ---- Layer 5: figures ----------------------------------------------------------------------
+add_library(stratonix_figures STATIC
+  src/figures/canvas.cpp
+  src/figures/raster.cpp
+  src/figures/pptx.cpp
+  src/figures/render3d.cpp
+  src/figures/plots.cpp)
+target_link_libraries(stratonix_figures PUBLIC stratonix_repr PRIVATE stx::zlib)
+if(STRATONIX_WITH_CAIRO)
+  target_link_libraries(stratonix_figures PRIVATE stx::cairo)
+  target_compile_definitions(stratonix_figures PRIVATE STRATONIX_HAVE_CAIRO=1)
+endif()
+stx_layer(stratonix_figures 5)
+
 # ---- Layer 6: delivery packaging and pipeline ---------------------------------------------
 add_library(stratonix_package STATIC
   src/package/pipeline.cpp
   src/package/bench.cpp)
-target_link_libraries(stratonix_package PUBLIC stratonix_checks stratonix_io)
+target_link_libraries(stratonix_package PUBLIC stratonix_checks stratonix_io stratonix_figures)
 stx_layer(stratonix_package 6)

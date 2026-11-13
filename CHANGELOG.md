@@ -3,6 +3,43 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [0.7.0] - 2026-11-13 - Figures (Prompt 7)
+
+### Added
+- Figures layer (`stratonix_figures`, level 5): a display list drawn to SVG by Stratonix itself
+  (text kept as text) and rasterised with Cairo to PNG (300 dpi, pHYs) and TIFF (300 dpi, LZW,
+  RGB, no alpha, own encoder); PPTX written by Stratonix (one 16:9 slide per figure with title,
+  picture, caption and speaker notes) plus a deck of the whole set.
+- Sections along any polyline (unit fills per fault block without seams, fault traces between
+  tips, wells and tops within 300 m, optional detail panel, legend grouped by role, key-numbers box
+  from the summary table, marked bends); maps per horizon (depth shading and contours, fault gaps
+  drawn where the model has them, cut-off polygons, wells, closure outline, crest and spill point);
+  3D views at two camera presets with vertical exaggeration (software renderer, see-through
+  shallower horizons); fence diagram through the wells with tops and a depth scale.
+- Every figure carries a footer with coordinate system, vertical datum and evidence basis
+  (DESIGN models are also stamped "DESIGN MODEL - not an interpretation"); names follow
+  `STX_<model>_v<version>_<kind>_<name>`.
+- `stratonix build` writes `figures/` and `summary_table.csv`; `stratonix section` draws one
+  section by name or along `--line x1,y1;x2,y2;...`.
+- Tests: encoders (PNG pHYs, TIFF LZW round trip, PPTX parts), figure set of the example;
+  `tests/tools/check_figures.py` checks every figure independently (Pillow, tifffile,
+  python-pptx); `cli_build_example` requires the example to build with every check passing.
+
+### Fixed
+- Fault restoration: when the throw sits on the profile's plateau the root of the restoration
+  equation is at the end of the bracket, and rounding could give it the wrong sign there, so the
+  restoration fell back to the throw at the present position. Ends within 1e-9 of zero are now
+  taken as the root. This made check C4 fail at five strike positions of F2 in the example.
+
+### Added (validation)
+- Build refuses a fault whose throw changes by 1 m or more per metre of slip (the wall would
+  overlap itself and the model would not be unique); a note is written above 0.8.
+
+### Not done here
+- VTK is not available in the build environment; 3D views use Stratonix's own renderer.
+- Windows rendering not run (no Windows host); SVG is platform independent, rasters depend on the
+  fonts Cairo finds.
+
 ## [0.6.0] - 2026-11-13 - Performance: optimised kernels and parity (Prompt 6)
 
 ### Added

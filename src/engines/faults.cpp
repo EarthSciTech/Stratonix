@@ -361,6 +361,37 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
     f.slip_b = tabs * std::fabs(f.slip.z) / std::sin(f.dip) + 1e-9;
     f.slip_sigma = tabs * std::fabs(dot(f.slip, f.n)) + 1e-9;
     f.decays = f.hw->name() == "decay" && f.influence > 0;
+    // Throw gradient along the slip: material moved by tau samples the profile tau * slip_b / tmax
+    // further along dip. If the throw changes faster than one metre per metre of slip, two
+    // restored positions map to one present position (the wall would overlap itself) and the
+    // model is not unique, so the build is refused.
+    {
+      double gmax = 0;
+      const double per_tau = std::fabs(f.slip.z) / std::sin(f.dip);
+      for (std::size_t i = 0; i < K; i += 4) {
+        double bu, bl;
+        f.tips(f.a_tab[i], bu, bl);
+        if (!(bl > bu) || !std::isfinite(bu) || !std::isfinite(bl)) continue;
+        const int NB = 800;
+        double db = (bl - bu) / NB;
+        double prev = f.throw_at(f.a_tab[i], bu);
+        for (int k = 1; k <= NB; ++k) {
+          double t = f.throw_at(f.a_tab[i], bu + k * db);
+          gmax = std::max(gmax, std::fabs(t - prev) / db * per_tau);
+          prev = t;
+        }
+      }
+      f.max_slip_gradient = gmax;
+      log.value("fault." + f.name + ".max_throw_gradient_along_slip", fmt_fixed(gmax, 3));
+      if (gmax >= 1.0)
+        throw Error(ErrorCode::Build,
+                    "fault " + f.name + ": the throw changes by " + fmt_fixed(gmax, 2) +
+                        " m per metre of slip near a tip (must be below 1): the hanging wall would overlap itself. "
+                        "Lengthen the down-dip taper, move the tips apart or reduce the throw.",
+                    "faults." + f.name + ".throw");
+      if (gmax >= 0.8)
+        log.note("fault " + f.name + ": throw gradient along slip " + fmt_fixed(gmax, 2) + " is close to the limit of 1");
+    }
     double bu0, bl0;
     f.tips(0, bu0, bl0);
     log.value("fault." + f.name + ".tips_depth_at_reference_m",
@@ -421,26 +452,15 @@ Vec3 FaultNetwork::undo(int fi, const Vec3& q, int sgn, double* tau_out) const {
   double lo = std::min(0.0, tmax), hi = std::max(0.0, tmax);
   double glo = lo - amount(lo), ghi = hi - amount(hi);
   double tau;
-  if (glo == 0) tau = lo;
-  else if (ghi == 0) tau = hi;
-  else if ((glo < 0) == (ghi < 0)) tau = amount(0.0);  // no bracket (cannot happen for |amount| <= |tmax|)
+  // |amount| <= |tmax|, so g(lo) <= 0 <= g(hi) in exact arithmetic. When the root sits at an
+  // end of the bracket (the profile's plateau at tmax), rounding can give g a few ulps of the
+  // wrong sign there; such an end is the root.
+  const double gtol = 1e-9 * std::max(1.0, std::fabs(tmax));
+  if (std::fabs(glo) <= gtol) tau = lo;
+  else if (std::fabs(ghi) <= gtol) tau = hi;
+  else if ((glo < 0) == (ghi < 0)) tau = std::fabs(glo) < std::fabs(ghi) ? lo : hi;  // not reached
   else {
-    int side = 0;
-    tau = 0;
-    for (int it = 0; it < 100; ++it) {
-      tau = (lo * ghi - hi * glo) / (ghi - glo);
-      double gt = tau - amount(tau);
-      if (std::fabs(gt) < 1e-11 || hi - lo < 1e-11) break;
-      if ((gt < 0) == (glo < 0)) {
-        lo = tau; glo = gt;
-        if (side == -1) ghi *= 0.5;
-        side = -1;
-      } else {
-        hi = tau; ghi = gt;
-        if (side == 1) glo *= 0.5;
-        side = 1;
-      }
-    }
+    tau = illinois([&](double t) { return t - amount(t); }, lo, hi, glo, ghi, 1e-11, 1e-11, 200);
   }
   if (tau_out) *tau_out = tau;
   return q - slip * (sgn * tau);

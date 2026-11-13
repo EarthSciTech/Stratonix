@@ -78,6 +78,7 @@ struct Fault {
   double slip_b = 0;         ///< max change of profile b caused by a displacement of tmax
   double slip_sigma = 0;     ///< max change of sigma caused by a displacement of tmax
   bool decays = false;       ///< hanging-wall field vanishes beyond the influence distance
+  double max_slip_gradient = 0;  ///< max |d throw / d slip| over the fault (must be < 1)
   bool abut_hw_side = true;  ///< active on the hanging-wall side of the abutted fault
 
   double sigma(const Vec3& p) const { return dot(p - p0, n); }

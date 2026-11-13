@@ -1,0 +1,5 @@
+# LeakSanitizer suppressions: process-lifetime caches in system libraries, freed only at exit.
+# fontconfig and Cairo's toy-font cache (used for text in PNG/TIFF/PPTX rasters).
+leak:libfontconfig.so
+leak:libcairo.so
+leak:libexpat.so
