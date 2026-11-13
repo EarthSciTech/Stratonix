@@ -1,7 +1,7 @@
 ---
 title: Stratonix user guide
 doc_id: STX-UG
-version: 1.1
+version: 1.2
 date: 2026-11-13
 ---
 
@@ -117,6 +117,18 @@ base, with a blind fault on its east flank. Points to note:
   and the remedy). Any profile is refused when the throw changes by 1 m or more per metre of slip.
 - `faults_seal: "false flag | ..."`: with the fault open, the closure on H2 spills at the fault
   (44.3 m of closure, 5.72 km2) instead of at the dome's own rim.
+
+## 2.4 Data-conditioned models (implicit builder, from 1.1)
+
+`examples/implicit_from_samples.yaml` builds the same anticline from data instead of parameters:
+surface points and orientations (CSV with X, Y, Z, surface and, for orientations, G_x, G_y, G_z),
+the control-well tops, and fault sticks (`geometry: {type: sticks, input: ..., input_format:
+irap_lines}`; tips and throw as in v1). The `implicit` section lists the data inputs and the
+interpolation settings (nugget, vertical stretch, surface spacing, maximum restoration passes),
+each with unit, evidence and source. The build writes `data_misfit.csv`: the misfit at every data
+point with the evidence class of its input; exports and packages carry it and the provenance of
+every input. Data are never adjusted to improve the fit. Method and accuracy: the note on the
+implicit builder.
 
 # 3. Running
 

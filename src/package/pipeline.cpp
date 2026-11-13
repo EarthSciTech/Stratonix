@@ -86,6 +86,16 @@ std::vector<std::pair<std::string, std::string>> key_numbers(const desc::Descrip
   return k;
 }
 
+std::string data_misfit_csv(const Model& m) {
+  auto* mis = static_cast<const std::vector<DataMisfit>*>(m.capability("data_misfit"));
+  if (!mis) return {};
+  std::string s = "input,evidence,horizon,kind,x,y,z,misfit,misfit_unit\n";
+  for (auto& r : *mis)
+    s += r.input + "," + r.evidence + "," + r.label + "," + r.kind + "," + fmt_fixed(r.p.x, 2) + "," + fmt_fixed(r.p.y, 2) + "," + fmt_fixed(r.p.z, 2) +
+         "," + fmt_fixed(r.misfit, 4) + "," + (r.kind == "orientation" ? "deg" : "m") + "\n";
+  return s;
+}
+
 std::string summary_csv(const std::vector<std::pair<std::string, std::string>>& k) {
   std::string s = "key,value\n";
   for (auto& [a, b] : k) s += "\"" + a + "\",\"" + b + "\"\n";
@@ -173,6 +183,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
   ensure_new_output_dir(out_dir);
   BuildOutcome o = build_only(d, opt);
   write_file(out_dir / "model_summary.txt", summary_text(d, *o.model, o.log));
+  if (auto mc = data_misfit_csv(*o.model); !mc.empty()) write_file(out_dir / "data_misfit.csv", mc);
   CheckContext ctx(*o.model, d, make_well_paths(d), d.grid_spacing.si());
   CheckReport rep = run_checks(ctx);
   o.checks_passed = rep.passed();

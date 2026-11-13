@@ -41,6 +41,8 @@ BuildOutcome build_only(const desc::Description& d, const BuildOptions& opt);
 std::vector<std::pair<std::string, std::string>> key_numbers(const desc::Description& d, const Model& m, const struct CheckReport& rep,
                                                              class CheckContext& ctx);
 std::string summary_csv(const std::vector<std::pair<std::string, std::string>>& keys);
+/// Misfit at every data point of a data-conditioned model (empty if the model has no data).
+std::string data_misfit_csv(const Model& m);
 /// Write the figure set (sections from the description, maps, 3D views, fence) into a folder.
 void write_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
                    const std::filesystem::path& folder);

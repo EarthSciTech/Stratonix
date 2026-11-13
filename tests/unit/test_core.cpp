@@ -31,6 +31,7 @@ TEST_CASE("units") {
   CHECK(find_unit("km")->to_si == 1000);
   CHECK(find_unit("deg")->dim == Dimension::Angle);
   CHECK(!find_unit("furlong"));
+  CHECK(find_unit("km2")->dim == Dimension::Area && find_unit("km2")->to_si == 1e6);  // closure-area targets
 }
 
 TEST_CASE("grid bilinear sampling") {

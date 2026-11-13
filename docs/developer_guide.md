@@ -1,7 +1,7 @@
 ---
 title: Stratonix developer guide
 doc_id: STX-DG
-version: 1.1
+version: 1.2
 date: 2026-11-13
 ---
 
@@ -83,6 +83,11 @@ build the description; `build(description, inputs, log)` returns a `ModelPtr`. R
 `StructureBuilder`. The model it returns must pass the model suite (add a test that runs
 `run_model_suite` on it) and the checks C1-C9 that apply. `build_model` picks the first builder that
 accepts a description, or the one named with `--builder`.
+
+The implicit builder (`engines/implicit.cpp`, plugin `implicit-rbf`) is an example of a builder
+that reuses the parametric engine: it interpolates a scalar field from data, turns it into
+horizon surfaces in the restored frame, and hands them to `ParametricModel` with the fault network;
+`ImplicitModel` adds provenance and the capability `data_misfit`.
 
 ## 4.2 A kinematics model or hanging-wall field
 

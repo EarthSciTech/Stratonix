@@ -21,9 +21,20 @@ struct BuildLog {
   void value(std::string k, std::string v) { values.emplace_back(std::move(k), std::move(v)); }
 };
 
-/// Grids read from description inputs, keyed by input id (filled by the pipeline's importers).
+/// A data point for data-conditioned builders: position, optional unit normal (orientation
+/// data, pointing up), and a label (horizon or fault name; empty if the data entry names it).
+struct DataPoint {
+  Vec3 p;
+  Vec3 n{0, 0, 0};
+  bool oriented = false;
+  std::string label;
+};
+
+/// Data read from description inputs, keyed by input id (filled by the pipeline's importers).
 struct BuildInputs {
   std::map<std::string, Grid2D> grids;
+  std::map<std::string, std::vector<DataPoint>> data;    ///< points and orientations
+  std::map<std::string, std::vector<Polyline>> lines;    ///< fault sticks
 };
 
 /// Structure builder plugin interface.

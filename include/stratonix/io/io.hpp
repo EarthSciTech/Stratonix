@@ -27,6 +27,8 @@ struct ImportedData {
   std::vector<NamedLine> lines;
   std::vector<NamedMesh> meshes;
   std::vector<ImportedTop> tops;
+  std::vector<Vec3> normals;          ///< orientation data (unit normals), parallel to points
+  std::vector<std::string> labels;    ///< per point (for example the surface name), parallel to points
   std::string z_is = "as_written";  ///< "elevation", "depth" or "as_written"
   std::vector<std::string> notes;
 };

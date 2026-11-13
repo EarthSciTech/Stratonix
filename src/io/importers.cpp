@@ -1,3 +1,4 @@
+#include <cctype>
 // Importer plugins for the data v2 needs: points, fault sticks, triangulated surfaces, well tops.
 // (Grid importers irap_ascii, zmap and xyz are in grids.cpp.)
 #include <map>
@@ -93,8 +94,56 @@ class WellTopsImporter final : public Importer {
     return d;
   }
 };
+/// CSV with a header naming X, Y, Z and optionally surface (GemPy surface points) and, for
+/// orientations, G_x, G_y, G_z (GemPy orientations). Column names are matched case-insensitively.
+class CsvDataImporter final : public Importer {
+ public:
+  explicit CsvDataImporter(bool orient) : orient_(orient) {}
+  std::string data_kind() const override { return "points"; }
+  ImportedData read(const std::filesystem::path& f) const override {
+    auto t = read_csv(read_file(f));
+    auto col = [&](std::initializer_list<const char*> names) -> int {
+      for (std::size_t c = 0; c < t.header.size(); ++c) {
+        std::string h = t.header[c];
+        for (auto& ch : h) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        for (auto* n : names)
+          if (h == n) return static_cast<int>(c);
+      }
+      return -1;
+    };
+    int cx = col({"x"}), cy = col({"y"}), cz = col({"z"}), cs = col({"surface", "formation", "feature_name"});
+    int gx = col({"g_x", "gx", "nx"}), gy = col({"g_y", "gy", "ny"}), gz = col({"g_z", "gz", "nz"});
+    if (cx < 0 || cy < 0 || cz < 0) throw Error(ErrorCode::Parse, "CSV data: columns X, Y and Z are required: " + f.string());
+    if (orient_ && (gx < 0 || gy < 0 || gz < 0)) throw Error(ErrorCode::Parse, "CSV orientations: columns G_x, G_y and G_z are required: " + f.string());
+    ImportedData d;
+    d.kind = "points";
+    d.z_is = "elevation";
+    for (auto& r : t.rows) {
+      auto at = [&](int c) { return parse_double(r.at(static_cast<std::size_t>(c))); };
+      d.points.push_back({at(cx), at(cy), at(cz)});
+      d.labels.push_back(cs >= 0 ? r.at(static_cast<std::size_t>(cs)) : std::string());
+      if (orient_) {
+        Vec3 n{at(gx), at(gy), at(gz)};
+        double l = norm(n);
+        if (!(l > 0)) throw Error(ErrorCode::Parse, "CSV orientations: zero gradient vector in " + f.string());
+        n = n * (1.0 / l);
+        if (n.z < 0) n = n * -1.0;  // normals point up
+        d.normals.push_back(n);
+      }
+    }
+    return d;
+  }
+
+ private:
+  bool orient_;
+};
 }  // namespace
 
+STRATONIX_REGISTER(imp_csv_points, registry::Kind::Importer, "csv_points", "1.0.0", "CSV points with X, Y, Z and surface columns (GemPy layout)",
+                   [] { return std::make_unique<CsvDataImporter>(false); })
+STRATONIX_REGISTER(imp_csv_orientations, registry::Kind::Importer, "csv_orientations", "1.0.0",
+                   "CSV orientations with X, Y, Z, G_x, G_y, G_z and surface columns (GemPy layout)",
+                   [] { return std::make_unique<CsvDataImporter>(true); })
 STRATONIX_REGISTER(imp_xyz_points, registry::Kind::Importer, "xyz_points", "1.0.0", "XYZ points (x y z per line)",
                    [] { return std::make_unique<XyzPointsImporter>(); })
 STRATONIX_REGISTER(imp_irap_lines, registry::Kind::Importer, "irap_lines", "1.0.0", "IRAP classic lines (fault sticks, polygons)",
@@ -108,6 +157,8 @@ STRATONIX_REGISTER(imp_well_tops, registry::Kind::Importer, "well_tops", "1.0.0"
                    [] { return std::make_unique<WellTopsImporter>(); })
 
 void register_importers() {
+  STRATONIX_PLUGIN_ANCHOR(imp_csv_points);
+  STRATONIX_PLUGIN_ANCHOR(imp_csv_orientations);
   STRATONIX_PLUGIN_ANCHOR(imp_xyz_points);
   STRATONIX_PLUGIN_ANCHOR(imp_irap_lines);
   STRATONIX_PLUGIN_ANCHOR(imp_petrel_points);

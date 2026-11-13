@@ -3,6 +3,31 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [1.1.0] - 2026-11-13 - Opening v2: data-conditioned implicit builder (Prompt 14)
+
+### Added
+- Structure builder `implicit-rbf`: one stratigraphic scalar field interpolated by Hermite radial
+  basis functions (cubic kernel, linear drift) from surface points, orientations (tangent
+  constraints: direction only) and control-well tops, with a vertical stretch for anisotropy;
+  surfaces extracted as level sets in the restored frame; faults from the v1 fault network, data
+  restored through it until no datum moves by more than 1 cm. Faults may be given by sticks
+  (plane fitted to the stick points). The model passes the model-interface suite and every v1
+  command (build, section, export, package, suite) works on it unchanged.
+- Misfit at every data point (`data_misfit.csv`; `data/data_misfit.csv` in exports) with the
+  evidence class of its input; provenance of every input in export and package READMEs.
+- Dense solvers in core: reference Gaussian elimination and a blocked, parallel LU with parity
+  tests (identical for any thread count); 3 x 3 symmetric eigen-solver.
+- Importers `csv_points` and `csv_orientations` (GemPy layout); description section `implicit`
+  (rules I1-I3), fault geometry type `sticks` (rule F9); units `m2` and `km2` for closure-area
+  targets (an area target could not be written before: no area unit existed).
+- `examples/implicit_from_samples.yaml` with data sampled from the synthetic parametric example;
+  tests J1-J5 and command-line tests on the implicit model. Method note STX-TN-04.
+
+### Fixed
+- Imported surfaces and isochores hold their edge value outside their grid
+  (`Grid2D::sample_clamped`); before, fault-tip resolution near the domain edge met undefined
+  values and stopped the build.
+
 ## [1.0.0] - 2026-11-13 - Release 1.0 (Prompt 11)
 
 ### Added

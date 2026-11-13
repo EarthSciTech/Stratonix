@@ -59,6 +59,20 @@ struct ModelInfo {
   std::vector<HorizonInfo> horizons;  ///< ordered top to base
   std::vector<UnitInfo> units;        ///< unit k lies between horizons k-1 and k (k = 0: above top)
   std::vector<FaultInfo> faults;
+  /// Data the model was conditioned on, one line per input with its evidence class and source
+  /// (empty for purely parametric models). Carried into export READMEs and packages.
+  std::vector<std::string> provenance;
+};
+
+/// Misfit of a data-conditioned model at one data point (capability "data_misfit" returns a
+/// const std::vector<DataMisfit>*).
+struct DataMisfit {
+  std::string input;      ///< input id
+  std::string evidence;   ///< evidence class of the input
+  std::string label;      ///< horizon (or fault) the datum belongs to
+  std::string kind;       ///< "point", "orientation" or "well_top"
+  Vec3 p;                 ///< present-day position
+  double misfit = 0;      ///< points: vertical distance to the horizon (m, + above); orientations: angle (deg)
 };
 
 /// Which fields evaluate() should fill.

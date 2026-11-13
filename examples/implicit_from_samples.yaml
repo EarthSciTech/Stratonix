@@ -1,0 +1,112 @@
+# Example: data-conditioned (implicit) model. The data were sampled from the synthetic parametric
+# example (examples/synthetic_fold_two_faults.yaml) with
+#   stratonix export synthetic_fold_two_faults.yaml -o out --formats gempy,fault_sticks_irap --grid-spacing 100
+# and are rebuilt here from data alone: surface points, orientations, the control-well tops and the
+# fault sticks (fault planes fitted to the sticks; tips, length and throw as in the parametric example).
+stratonix_schema: 1
+model: {name: synthetic_implicit_from_samples, version: "1.0.0", status: DESIGN,
+        title: "Synthetic anticline with two faults rebuilt from sampled data (implicit builder)"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | synthetic example"
+  size:   "[8000, 6000] m | user_instruction | synthetic example"
+  depth_range: "[0, 2500] m | user_instruction | synthetic example"
+  grid_spacing: "50 m | user_instruction | synthetic example"
+inputs:
+  - {id: POINTS, path: data/implicit_samples/surface_points.csv, role: surface points, sharing: shareable, source: "sampled from synthetic_fold_two_faults v1.0.0 every 500 m", evidence: user_instruction}
+  - {id: ORIENT, path: data/implicit_samples/orientations.csv, role: orientations, sharing: shareable, source: "sampled from synthetic_fold_two_faults v1.0.0", evidence: user_instruction}
+  - {id: STICKS_F1, path: data/implicit_samples/F1_sticks.dat, role: fault sticks, sharing: shareable, source: "sticks of F1 from synthetic_fold_two_faults v1.0.0", evidence: user_instruction}
+  - {id: STICKS_F2, path: data/implicit_samples/F2_sticks.dat, role: fault sticks, sharing: shareable, source: "sticks of F2 from synthetic_fold_two_faults v1.0.0", evidence: user_instruction}
+wells:
+  - name: W1
+    role: control
+    head: "[3000, 3000] m | user_instruction | synthetic example"
+    tops:
+      H1: "800 m | user_instruction | synthetic example"
+      H2: "1000 m | user_instruction | synthetic example"
+      H3: "1150 m | user_instruction | synthetic example"
+      H4: "1350 m | user_instruction | synthetic example"
+      H5: "1600 m | user_instruction | synthetic example"
+  - name: W2
+    role: planned
+    head: "[4300, 3400] m | user_instruction | synthetic example"
+    total_depth: "1900 m | user_instruction | synthetic example"
+  - name: W3
+    role: planned
+    head: "[5600, 2600] m | user_instruction | synthetic example"
+    total_depth: "1900 m | user_instruction | synthetic example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}, {name: H4}, {name: H5}]
+  units:
+    - {name: Unit_A, top: H1, base: H2}
+    - {name: Unit_B, top: H2, base: H3}
+    - {name: Unit_C, top: H3, base: H4}
+    - {name: Unit_D, top: H4, base: H5}
+implicit:
+  data:
+    - {input: POINTS, kind: points, format: csv_points}
+    - {input: ORIENT, kind: orientations, format: csv_orientations}
+  use_well_tops: true
+  kernel: cubic
+  nugget: "0 m | assumed | exact interpolation of the data"
+  surface_spacing: "100 m | assumed | twice the grid spacing"
+  iterations: "10 ordinal | assumed | maximum restoration passes; stops when no datum moves by more than 0.01 m"
+  vertical_stretch: "5 ratio | assumed | anisotropy: horizons vary slowly laterally compared with their spacing; 3 to 30 give similar results on this example"
+faults:
+  - name: F1                               # blind fault
+    age: "1 ordinal | user_instruction | synthetic example"
+    geometry:
+      type: sticks
+      input: STICKS_F1
+      input_format: irap_lines
+    extent:
+      upper_tip: {rule: within_unit, unit: Unit_B, fraction: "0.5 fraction | user_instruction | synthetic example"}
+      lower_tip: {rule: within_unit, unit: Unit_D, fraction: "0.7 fraction | user_instruction | synthetic example"}
+      length: "3000 m | user_instruction | synthetic example"
+      tip_line_shape: elliptical
+    throw:
+      max: "40 m | user_instruction | synthetic example"
+      profile_dip: {type: flat_topped, taper: "0.3 fraction | user_instruction | synthetic example"}
+      profile_strike: {type: elliptical}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+  - name: F2                               # reaches the top of Unit_A (tip at H1)
+    age: "2 ordinal | user_instruction | synthetic example"
+    geometry:
+      type: sticks
+      input: STICKS_F2
+      input_format: irap_lines
+    extent:
+      upper_tip: {rule: horizon, horizon: H1, offset: "0 m | user_instruction | synthetic example"}
+      lower_tip: {rule: within_unit, unit: Unit_D, fraction: "0.5 fraction | user_instruction | synthetic example"}
+      length: "5000 m | user_instruction | synthetic example"
+      tip_line_shape: rectangular
+    throw:
+      max: "60 m | user_instruction | synthetic example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | synthetic example"}
+      profile_strike: {type: flat_topped, taper: "0.3 fraction | user_instruction | synthetic example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: decay, influence_distance: "1500 m | user_instruction | synthetic example"}
+frame: {fixed: {well: W1}}
+checks:
+  tolerances:
+    thickness_min: "0.5 m | user_instruction | synthetic example"
+    crossing: "0.01 m | user_instruction | synthetic example"
+    offset_outside_tips: "0.05 m | user_instruction | synthetic example"
+    throw: "0.5 m | user_instruction | synthetic example"
+    wells: "0.01 m | user_instruction | synthetic example"
+  closure:
+    horizon: H2
+    faults_seal: "true flag | assumed | synthetic example: faults treated as sealing"
+outputs:
+  sections:
+    - name: XS_A
+      polyline: "[[1500, 1500], [6500, 4500]] m | user_instruction | synthetic example: dip section"
+      detail_window: "[3000, 5600, 700, 1800] m | user_instruction | synthetic example: crest detail"
+    - name: XS_B
+      polyline: "[[2000, 4800], [6800, 1600]] m | user_instruction | synthetic example: oblique section"
+  vertical_exaggeration: "3 ratio | user_instruction | synthetic example"
+  voxel_spacing: "[100, 100, 25] m | user_instruction | synthetic example"
+  fault_stick_spacing: "250 m | user_instruction | synthetic example"
+  exports: [petrel, vtk, csv]

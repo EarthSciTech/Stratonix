@@ -205,6 +205,36 @@ void load_build_inputs(const desc::Description& d, BuildInputs& in) {
     load(h.surface_input, h.surface_format);
     load(h.iso_input, h.iso_format);
   }
+  auto input_of = [&](const std::string& id) {
+    for (auto& x : d.inputs)
+      if (x.id == id) return &x;
+    throw Error(ErrorCode::Build, "input '" + id + "' is not listed under inputs");
+  };
+  // Data for the implicit builder: points and orientations.
+  for (auto& x : d.implicit.data) {
+    auto data = reg.create<Importer>(registry::Kind::Importer, x.format)->read(input_of(x.input)->resolved);
+    if (data.z_is == "depth")
+      for (auto& p : data.points) p.z = -p.z;
+    auto& out = in.data[x.input];
+    for (std::size_t i = 0; i < data.points.size(); ++i) {
+      DataPoint dp;
+      dp.p = data.points[i];
+      if (i < data.normals.size()) { dp.n = data.normals[i]; dp.oriented = true; }
+      dp.label = !x.horizon.empty() ? x.horizon : (i < data.labels.size() ? data.labels[i] : std::string());
+      out.push_back(dp);
+    }
+    if (out.empty()) throw Error(ErrorCode::Build, "input '" + x.input + "' holds no data points");
+  }
+  // Fault sticks for faults given by sticks.
+  for (auto& f : d.faults) {
+    if (f.geom_type != "sticks" || in.lines.count(f.geom_input)) continue;
+    auto data = reg.create<Importer>(registry::Kind::Importer, f.geom_input_format)->read(input_of(f.geom_input)->resolved);
+    std::vector<Polyline> ls;
+    for (auto& l : data.lines)
+      if (l.name == f.name || data.lines.size() == 1 || f.geom_input_format == "irap_lines") ls.push_back(l.pts);
+    if (ls.empty()) throw Error(ErrorCode::Build, "input '" + f.geom_input + "' holds no sticks for fault " + f.name);
+    in.lines[f.geom_input] = std::move(ls);
+  }
 }
 
 void register_grid_importers() {

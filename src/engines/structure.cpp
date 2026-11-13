@@ -142,9 +142,9 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
         if (n == hd.name) ref_depth_[h] = p.si();
     if (std::isnan(ref_depth_[h]) && hd.depth.present) ref_depth_[h] = hd.depth.si();
     if (std::isnan(ref_depth_[h]) && hd.thickness_above.present && h > 0) ref_depth_[h] = ref_depth_[h - 1] + hd.thickness_above.si();
-    if (std::isnan(ref_depth_[h]) && kind_[h] == Kind::Surface) ref_depth_[h] = -surf_sign_[h] * surf_[h]->sample(rx, ry);
+    if (std::isnan(ref_depth_[h]) && kind_[h] == Kind::Surface) ref_depth_[h] = -surf_sign_[h] * surf_[h]->sample_clamped(rx, ry);
     if (std::isnan(ref_depth_[h]) && kind_[h] == Kind::Isochore) {
-      double t = iso_grid_[h] ? iso_grid_[h]->sample(rx, ry) : iso_const_[h];
+      double t = iso_grid_[h] ? iso_grid_[h]->sample_clamped(rx, ry) : iso_const_[h];
       ref_depth_[h] = ref_depth_[static_cast<std::size_t>(iso_from_[h])] + t;
     }
     if (std::isnan(ref_depth_[h]))
@@ -256,9 +256,9 @@ double Structure::z_uncorrected(std::size_t h, double x, double y) const {
       for (auto& p : prims_) s += p.contribution(h, x, y);
       return s;
     }
-    case Kind::Surface: return surf_sign_[h] * surf_[h]->sample(x, y);
+    case Kind::Surface: return surf_sign_[h] * surf_[h]->sample_clamped(x, y);
     case Kind::Isochore: {
-      double t = iso_grid_[h] ? iso_grid_[h]->sample(x, y) : iso_const_[h];
+      double t = iso_grid_[h] ? iso_grid_[h]->sample_clamped(x, y) : iso_const_[h];
       return z(static_cast<std::size_t>(iso_from_[h]), x, y) - t;
     }
   }

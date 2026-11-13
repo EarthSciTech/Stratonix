@@ -49,6 +49,12 @@ struct Grid2D {
     double a = at(i, j), b = at(i + 1, j), c = at(i, j + 1), d = at(i + 1, j + 1);
     return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
   }
+  /// As sample(), but outside the grid the nearest edge value is held (constant extrapolation).
+  double sample_clamped(double x, double y) const {
+    double xc = std::clamp(x, spec.x0, spec.x(spec.nx ? spec.nx - 1 : 0));
+    double yc = std::clamp(y, spec.y0, spec.y(spec.ny ? spec.ny - 1 : 0));
+    return sample(xc, yc);
+  }
 };
 
 }  // namespace stratonix

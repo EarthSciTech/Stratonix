@@ -364,6 +364,11 @@ std::string export_readme(const ExportContext& c, const std::vector<ExportedFile
   s += "Line separator:     IRAP lines use '999.000000 999.000000 999.000000' between lines\n";
   s += "Fault sticks:       every " + fmt_shortest(c.stick_spacing()) + " m along strike\n";
   s += "Written by:         Stratonix " + build_info().version + "\n\n";
+  if (!i.provenance.empty()) {
+    s += "Data the model honours (engine " + i.engine + ")\n----------------------------\n";
+    for (auto& p : i.provenance) s += p + "\n";
+    s += "Misfit at every data point, with the evidence class of its input: data/data_misfit.csv\n\n";
+  }
   s += "Files\n-----\n";
   std::size_t w = 4;
   for (auto& f : files) w = std::max(w, f.path.size());
@@ -396,6 +401,15 @@ std::vector<ExportedFile> export_set(ExportContext& c, const std::vector<std::st
     auto e = reg.create<Exporter>(registry::Kind::Exporter, id);
     auto files = e->write(c, folder);
     all.insert(all.end(), files.begin(), files.end());
+  }
+  if (auto* mis = static_cast<const std::vector<DataMisfit>*>(c.model().capability("data_misfit"))) {
+    std::string t = "input,evidence,horizon,kind,x,y,z,misfit,misfit_unit\n";
+    for (auto& r : *mis)
+      t += r.input + "," + r.evidence + "," + r.label + "," + r.kind + "," + fmt_fixed(r.p.x, 2) + "," + fmt_fixed(r.p.y, 2) + "," +
+           fmt_fixed(r.p.z, 2) + "," + fmt_fixed(r.misfit, 4) + "," + (r.kind == "orientation" ? "deg" : "m") + "\n";
+    fs::create_directories(folder / "data");
+    write_file(folder / "data/data_misfit.csv", t);
+    all.push_back({"data/data_misfit.csv", "CSV", "-", "misfit of the model at every data point, with the evidence class of the input"});
   }
   write_file(folder / "README.txt", export_readme(c, all, evidence_note));
   return all;

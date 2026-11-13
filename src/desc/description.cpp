@@ -101,7 +101,8 @@ std::vector<const Param*> Description::all_params() const {
                   &regional_dip_azimuth, &frame_point, &tol_thickness_min, &tol_crossing,
                   &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
-                  &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing})
+                  &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
+                  &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch})
     add(*p);
   for (auto& w : wells) {
     add(w.head); add(w.datum_elevation); add(w.total_depth); add(w.stations);
@@ -375,10 +376,13 @@ struct Typer {
         const Node* g = f.get("geometry");
         fd.geom_type = S(g, "type", "planar");
         bool by_trace = g && g->get("trace");
-        fd.reference_point = P(g, "reference_point", b + ".geometry", Dimension::Length, !by_trace, 2);
-        fd.reference_depth = P(g, "reference_depth", b + ".geometry", Dimension::Length, !by_trace, 1);
-        fd.strike = P(g, "strike", b + ".geometry", Dimension::Angle, !by_trace, 1);
-        fd.dip = P(g, "dip", b + ".geometry", Dimension::Angle, true, 1);
+        bool by_sticks = fd.geom_type == "sticks";
+        fd.geom_input = S(g, "input");
+        fd.geom_input_format = S(g, "input_format", "irap_lines");
+        fd.reference_point = P(g, "reference_point", b + ".geometry", Dimension::Length, !by_trace && !by_sticks, 2);
+        fd.reference_depth = P(g, "reference_depth", b + ".geometry", Dimension::Length, !by_trace && !by_sticks, 1);
+        fd.strike = P(g, "strike", b + ".geometry", Dimension::Angle, !by_trace && !by_sticks, 1);
+        fd.dip = P(g, "dip", b + ".geometry", Dimension::Angle, !by_sticks, 1);
         fd.trace = P(g, "trace", b + ".geometry", Dimension::Length, false, 2, 2);
         fd.trace_depth = P(g, "trace_depth", b + ".geometry", Dimension::Length, by_trace, 1);
         fd.dip_side = S(g, "dip_side");
@@ -439,7 +443,7 @@ struct Typer {
         if (const Node* tg = cl->get("targets")) {
           std::string b = "checks.closure.targets";
           d.target_closure = P(tg, "closure", b, Dimension::Length, false, 1);
-          d.target_area = P(tg, "area", b, Dimension::Any, false, 1);
+          d.target_area = P(tg, "area", b, Dimension::Area, false, 1);
           d.target_spill_depth = P(tg, "spill_depth", b, Dimension::Length, false, 1);
           d.target_tolerance = P(tg, "tolerance_fraction", b, Dimension::Dimensionless, false, 1);
         }
@@ -448,6 +452,17 @@ struct Typer {
         for (auto& x : wo->seq) d.warn_only.push_back(x.str);
     }
 
+    if (const Node* im = root.get("implicit")) {
+      d.implicit.present = true;
+      if (const Node* data = im->get("data"))
+        for (auto& x : data->seq) d.implicit.data.push_back({S(&x, "input"), S(&x, "kind"), S(&x, "format"), S(&x, "horizon")});
+      if (const Node* u = im->get("use_well_tops")) d.implicit.use_well_tops = u->boolean || u->str == "true";
+      d.implicit.kernel = S(im, "kernel", "cubic");
+      d.implicit.nugget = P(im, "nugget", "implicit", Dimension::Length, false, 1);
+      d.implicit.surface_spacing = P(im, "surface_spacing", "implicit", Dimension::Length, false, 1);
+      d.implicit.iterations = P(im, "iterations", "implicit", Dimension::Ordinal, false, 1);
+      d.implicit.vertical_stretch = P(im, "vertical_stretch", "implicit", Dimension::Dimensionless, false, 1);
+    }
     if (const Node* o = root.get("outputs")) {
       if (const Node* ss = o->get("sections"))
         for (std::size_t k = 0; k < ss->seq.size(); ++k) {
@@ -590,12 +605,35 @@ struct Typer {
       for (auto& [h, p] : d.primitives[k].relief)
         if (d.horizon_index(h) < 0)
           c.err("structure.primitives[" + std::to_string(k) + "].relief." + h, "R1", "unknown horizon '" + h + "'");
+    // implicit (data-conditioned) builder
+    if (d.implicit.present) {
+      for (std::size_t k = 0; k < d.implicit.data.size(); ++k) {
+        auto& x = d.implicit.data[k];
+        std::string b = "implicit.data[" + std::to_string(k) + "]";
+        if (std::none_of(d.inputs.begin(), d.inputs.end(), [&](const InputDesc& i) { return i.id == x.input; }))
+          c.err(b + ".input", "I1", "input '" + x.input + "' is not listed under inputs");
+        if (!x.horizon.empty() && d.horizon_index(x.horizon) < 0) c.err(b + ".horizon", "I2", "unknown horizon '" + x.horizon + "'");
+      }
+      if (d.implicit.nugget.present && d.implicit.nugget.si() < 0) c.err("implicit.nugget", "I3", "nugget must be zero or positive");
+      if (d.implicit.surface_spacing.present && d.implicit.surface_spacing.si() <= 0)
+        c.err("implicit.surface_spacing", "I3", "surface spacing must be positive");
+      if (d.implicit.vertical_stretch.present && !(d.implicit.vertical_stretch.si() >= 1 && d.implicit.vertical_stretch.si() <= 100))
+        c.err("implicit.vertical_stretch", "I3", "vertical stretch must be between 1 and 100");
+      if (d.implicit.iterations.present && (d.implicit.iterations.si() < 1 || d.implicit.iterations.si() > 10))
+        c.err("implicit.iterations", "I3", "iterations must be between 1 and 10");
+    }
     // faults
     std::map<double, std::vector<std::size_t>> ages;
     double base_depth = d.depth_range.present && d.depth_range.values.size() == 2 ? d.depth_range.si(1) : kNaN;
     for (std::size_t k = 0; k < d.faults.size(); ++k) {
       auto& f = d.faults[k];
       std::string b = "faults[" + std::to_string(k) + "]";
+      if (f.geom_type == "sticks") {
+        if (f.geom_input.empty()) c.err(b + ".geometry.input", "F9", "a fault given by sticks needs geometry.input (an input id)");
+        else if (std::none_of(d.inputs.begin(), d.inputs.end(), [&](const InputDesc& i) { return i.id == f.geom_input; }))
+          c.err(b + ".geometry.input", "F9", "input '" + f.geom_input + "' is not listed under inputs");
+        if (!d.implicit.present) c.err(b + ".geometry.type", "F9", "faults given by sticks need the implicit (data-conditioned) builder: add an implicit section");
+      }
       if (f.geom_type == "listric")
         c.err(b + ".geometry.type", "F5", "listric faults are reserved in schema v1 but not implemented in Stratonix v1");
       if (f.trace.present && f.dip_side.empty())

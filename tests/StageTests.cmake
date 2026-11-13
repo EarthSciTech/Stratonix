@@ -10,6 +10,7 @@ stx_test(test_figures stratonix_package)
 stx_test(test_export stratonix_package)
 stx_test(test_interop stratonix_package)
 stx_test(test_package stratonix_package)
+stx_test(test_implicit stratonix_package)
 # Independent check of the figure files (Python: Pillow, tifffile, python-pptx); skipped if absent.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
@@ -35,8 +36,17 @@ add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:str
 get_property(_stx_tests DIRECTORY PROPERTY TESTS)
 set_tests_properties(${_stx_tests} PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 # The worked examples of the user guide build with every check passing.
-foreach(ex one_fault dome_blind_fault)
+foreach(ex one_fault dome_blind_fault implicit_from_samples)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
 endforeach()
+# Every v1 command works unchanged on a data-conditioned (implicit) model.
+set(_imp ${PROJECT_SOURCE_DIR}/examples/implicit_from_samples.yaml)
+add_test(NAME cli_implicit_section COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_implicit_section
+         "-DARGS=section;${_imp};--line;500,500\;7500,5500" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
+add_test(NAME cli_implicit_export COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_implicit_export
+         "-DARGS=export;${_imp};--formats;petrel,vtk,csv,gempy" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
+add_test(NAME cli_implicit_package COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_implicit_package
+         "-DARGS=package;${_imp};--formats;petrel;--no-figures;--zip" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
+add_test(NAME cli_implicit_suite COMMAND stratonix suite ${_imp})

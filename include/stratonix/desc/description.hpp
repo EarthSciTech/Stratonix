@@ -74,6 +74,7 @@ struct FaultDesc {
   TipDesc upper, lower;
   Param length;
   std::string tip_line_shape = "rectangular";
+  std::string geom_input, geom_input_format;  ///< geometry type "sticks": fault data input
   Param throw_max;
   ProfileDesc profile_dip, profile_strike;
   std::string slip_mode, hw_type;
@@ -81,6 +82,15 @@ struct FaultDesc {
   std::string abuts_fault, abuts_side;
 };
 struct SectionDesc { std::string name; Param polyline, detail_window; };
+/// Data-conditioned (implicit) structure: data inputs and interpolation settings.
+struct ImplicitData { std::string input, kind, format, horizon; };
+struct ImplicitDesc {
+  bool present = false;
+  std::vector<ImplicitData> data;
+  bool use_well_tops = true;
+  std::string kernel = "cubic";
+  Param nugget, surface_spacing, iterations, vertical_stretch;
+};
 
 /// A complete, validated model description.
 struct Description {
@@ -112,6 +122,7 @@ struct Description {
   std::string closure_horizon;
   Param closure_faults_seal, target_closure, target_area, target_spill_depth, target_tolerance;
   std::vector<std::string> warn_only;
+  ImplicitDesc implicit;
   // outputs
   std::vector<SectionDesc> sections;
   Param vertical_exaggeration, voxel_spacing, fault_stick_spacing;

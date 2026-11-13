@@ -116,7 +116,7 @@ void ParametricModel::restore(std::span<const Vec3> pts, std::span<Vec3> out) co
 namespace {
 class ParametricBuilder final : public StructureBuilder {
  public:
-  bool accepts(const desc::Description&) const override { return true; }
+  bool accepts(const desc::Description& d) const override { return !d.implicit.present; }
   ModelPtr build(const desc::Description& d, const BuildInputs& in, BuildLog& log) const override {
     return std::make_shared<ParametricModel>(d, in, log);
   }

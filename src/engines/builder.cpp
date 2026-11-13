@@ -54,7 +54,7 @@ namespace {
 class FlatLayersBuilder final : public StructureBuilder {
  public:
   bool accepts(const desc::Description& d) const override {
-    if (!d.primitives.empty() || !d.faults.empty() || d.regional_type != "flat") return false;
+    if (d.implicit.present || !d.primitives.empty() || !d.faults.empty() || d.regional_type != "flat") return false;
     for (auto& h : d.horizons)
       if (!h.surface_input.empty() || !h.iso_input.empty()) return false;
     return true;

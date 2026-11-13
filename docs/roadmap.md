@@ -1,7 +1,7 @@
 ---
 title: Stratonix roadmap v2 to v5
 doc_id: STX-RM
-version: 1.0
+version: 1.1
 date: 2026-11-13
 ---
 
@@ -19,6 +19,7 @@ starts with its own specification.
 | Optimised kernels gave 22 to 31 times on the full build, almost all in faulted grids and checks; parity tests caught nothing wrong but made the changes safe. | Keep the reference-and-parity rule; the implicit engine's solver is the next heavy kernel. |
 | Golden hashes made byte identity testable; the C++ number formatting (`to_chars`) is the only formatting used in files. GCC and Clang wrote identical bytes. | Keep golden hashes for every new format; run them on Windows in CI. |
 | The external cross-check showed that an interpolator without faults is unusable within about 500 m of the faults and that block-wise interpolation is good to 0.1 m away from faults and 0.5 m near them on the synthetic model. | v2 must be fault-aware from the start (per-block fields or fault-displacement functions), and its tests should use the same cross-check. |
+| The implicit builder showed that unit-gradient orientation constraints conflict with interface values where layer thickness varies, and that an isotropic kernel bends the surfaces between data; tangent constraints and a vertical stretch fixed both. | Keep orientation data as directions; expose anisotropy as a labelled parameter. |
 | No network, no Windows host: VTK, PROJ, Eigen, FESAPI, xtgeo, LoopStructural and Petrel were unavailable, so their parts were replaced by own code or deferred. | Before v2: one networked Windows and Linux build with vcpkg pinned; RESQML through FESAPI; Petrel import validated. |
 
 # 2. v2: implicit modelling
@@ -31,11 +32,20 @@ reused from v1.
 importers for points, grids, sticks, TSurf and tops; evidence classes on inputs; the model suite;
 checks C1-C9; the cross-check script as an acceptance test.
 
-**Interface changes.** None required for the model interface. Additions: an `ImplicitBuilder`
-structure-builder plugin; a solver kernel (reference dense, optimised sparse or matrix-free) with
-parity tests; `Param` for interpolation settings (range, nugget, regularisation) with evidence
-`assumed` or `calibrated`; per-point uncertainty on inputs (an optional field on imported data).
-Prompt 14 starts this stage.
+**Status (1.1.0).** Opened: the `implicit-rbf` builder (Hermite cubic RBF with tangent
+constraints, vertical stretch, iterated restoration through the v1 fault network, faults from
+sticks) passes the model suite, rebuilds the synthetic example from sampled data to 0.06-0.17 m
+away from faults and 0.4-0.5 m near them, and every v1 command works on its output (STX-TN-04).
+
+**Interface changes made.** Additive only: `ModelInfo::provenance`; the `DataMisfit` record and
+the `data_misfit` capability; `BuildInputs` carries data points and fault sticks; importers
+`csv_points` and `csv_orientations`; description section `implicit` and fault geometry type
+`sticks`; `Grid2D::sample_clamped` (imported and implicit surfaces hold their edge value outside
+the grid, which fault-tip resolution needs near the domain edge). The `Model` interface itself did
+not change.
+
+**Still to do in v2.** A sparse or partition-of-unity solver for large data sets; throws and tips
+estimated from data; per-point uncertainty on inputs; cross-check against LoopStructural itself.
 
 # 3. v3: grids and properties
 

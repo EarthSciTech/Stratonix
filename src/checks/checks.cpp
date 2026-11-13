@@ -489,7 +489,7 @@ class C9 final : public Check {
     };
     target(d.target_closure, cl.closure, "closure", 1.0, "m");
     target(d.target_spill_depth, -cl.spill_z, "spill depth", 1.0, "m");
-    // area target is given in m2 (length unit squared) or km2 via unit 'ratio'? use the value as m2
+    // area target: unit m2 or km2 (SI value in m2), reported in km2
     target(d.target_area, cl.area / 1e6, "closure area", 1e-6, "km2");
     return out;
   }

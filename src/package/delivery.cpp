@@ -206,6 +206,11 @@ std::string readme(const desc::Description& d, const Model& m, const PackageConf
     s += "  - " + std::string(desc::evidence_name(e)) + " (" + std::to_string(n) + (n == 1 ? " parameter" : " parameters") +
          "): " + evidence_in_plain_words(e) + "\n";
 
+  if (!inf.provenance.empty()) {
+    s += "\nData the model honours\n----------------------\n";
+    for (auto& p : inf.provenance) s += wrap(p, 94, "    ").replace(0, 4, "  - ");
+    s += "  Misfit at every data point, with the evidence class of its input: exports/data/data_misfit.csv\n";
+  }
   s += "\nAssumptions\n-----------\n";
   std::vector<std::string> as = cfg.assumptions;
   if (count.count(desc::Evidence::Assumed))
