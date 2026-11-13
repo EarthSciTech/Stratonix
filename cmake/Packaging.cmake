@@ -17,6 +17,8 @@ else()
 endif()
 set(CPACK_PACKAGE_FILE_NAME "stratonix-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 install(FILES README.md CHANGELOG.md LICENSE.txt THIRD_PARTY.md DESTINATION share/doc/stratonix)
+install(FILES docs/user_guide.md docs/developer_guide.md docs/api_reference.md docs/roadmap.md docs/package_config.md
+              docs/performance_and_threading.md DESTINATION share/doc/stratonix)
 install(DIRECTORY examples/ DESTINATION share/stratonix/examples PATTERN "broken" EXCLUDE)
 install(FILES schema/stratonix_schema_v1.json DESTINATION share/stratonix/schema)
 include(CPack)
