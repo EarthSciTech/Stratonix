@@ -1,7 +1,7 @@
 ---
 title: Stratonix developer guide
 doc_id: STX-DG
-version: 1.0
+version: 1.1
 date: 2026-11-13
 ---
 

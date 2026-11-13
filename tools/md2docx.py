@@ -58,6 +58,14 @@ def parse_front(lines):
     return meta, lines
 
 
+def continued(lines, i, text):
+    """Join indented continuation lines of a list item (not a new item, not blank)."""
+    while i < len(lines) and lines[i].startswith("  ") and lines[i].strip() and not re.match(r"^\s*([-*]|\d+\.) ", lines[i]):
+        text += " " + lines[i].strip()
+        i += 1
+    return text, i
+
+
 def build(src: Path, out: Path):
     lines = src.read_text(encoding="utf-8").splitlines()
     lines = [l.rstrip("\n") for l in lines]
@@ -142,14 +150,14 @@ def build(src: Path, out: Path):
         m = re.match(r"^(\s*)[-*] (.*)", line)
         if m:
             p = doc.add_paragraph(style="List Bullet" if len(m.group(1)) < 2 else "List Bullet 2")
-            add_runs(p, m.group(2))
-            i += 1
+            text, i = continued(lines, i + 1, m.group(2))
+            add_runs(p, text)
             continue
         m = re.match(r"^(\s*)\d+\. (.*)", line)
         if m:
             p = doc.add_paragraph(style="List Number")
-            add_runs(p, m.group(2))
-            i += 1
+            text, i = continued(lines, i + 1, m.group(2))
+            add_runs(p, text)
             continue
         if not line.strip():
             i += 1
