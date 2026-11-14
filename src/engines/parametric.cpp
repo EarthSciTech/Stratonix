@@ -52,6 +52,9 @@ ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& 
         fi.profile.emplace_back(u, f.curved->zf(u));
       }
     }
+    const auto& all = faults_->faults();
+    if (f.abuts >= 0) fi.relations.push_back((f.transfer ? "splay of " : "abuts ") + all[static_cast<std::size_t>(f.abuts)].name);
+    if (f.relay_with >= 0) fi.relations.push_back("relays with " + all[static_cast<std::size_t>(f.relay_with)].name);
     info_.faults.push_back(fi);
   }
 }

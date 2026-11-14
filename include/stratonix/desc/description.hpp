@@ -94,6 +94,12 @@ struct FaultDesc {
   Param shear_angle;               ///< inclined_shear: angle of the shear lines from vertical
   std::string shear_sense;         ///< inclined_shear: antithetic | synthetic
   bool curved() const { return geom_type == "listric" || geom_type == "ramp_flat"; }
+  // Interaction (STX-TN-05 sections 3 and 4).
+  bool abuts_transfer = false;     ///< abuts.transfer: a linked splay of the abutted fault
+  std::string drag_type;           ///< normal | reverse (empty: no drag)
+  Param drag_fraction, drag_width;
+  std::string relay_fault;         ///< relay.fault: soft-linked relay with this fault
+  bool relay_breached = false;
 };
 struct SectionDesc { std::string name; Param polyline, detail_window; };
 /// Section sheet (presentation page) settings.
@@ -157,6 +163,7 @@ struct Description {
   Param frame_point;
   // checks
   Param tol_thickness_min, tol_crossing, tol_offset_outside_tips, tol_throw, tol_wells, tol_unoffset, tol_rollover;
+  Param scaling_min_ratio, scaling_max_ratio;  ///< checks.fault_scaling (C10)
   std::string closure_horizon;
   Param closure_faults_seal, target_closure, target_area, target_spill_depth, target_tolerance;
   std::vector<std::string> warn_only;

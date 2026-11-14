@@ -53,6 +53,9 @@ struct FaultInfo {
   /// Curved faults: the profile in the dip plane, (u, depth) with u the horizontal distance from
   /// the reference point along the dip direction; the plane fields above are then its chord.
   std::vector<std::pair<double, double>> profile;
+  /// Recorded relations with other faults: "abuts F", "splay of F" (abutting with transfer),
+  /// "relays with F".
+  std::vector<std::string> relations;
 };
 /// Description of a model, independent of the engine.
 struct ModelInfo {

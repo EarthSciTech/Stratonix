@@ -220,7 +220,12 @@ double Fault::throw_at(double a, double b) const {
   if (upper_free() && eta < 0.5) eta = 0.5;
   if (lower_free() && eta > 0.5) eta = 0.5;
   double xi = (a + L2) / length;
-  return tmax * profile_value(pdip, taper_dip, eta) * profile_value(pstrike, taper_strike, xi);
+  double fs;
+  if (relay_with >= 0 && a >= std::min(ra_one, ra_zero) && a <= std::max(ra_one, ra_zero))
+    fs = (a - ra_zero) / (ra_one - ra_zero);
+  else
+    fs = profile_value(pstrike, taper_strike, xi);
+  return tmax * profile_value(pdip, taper_dip, eta) * fs;
 }
 
 double Fault::heave_at(double a) const {
@@ -363,8 +368,32 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
     if (!fd.abuts_fault.empty()) {
       f.abuts = d.fault_index(fd.abuts_fault);
       f.abut_hw_side = fd.abuts_side == "hanging_wall";
+      f.transfer = fd.abuts_transfer;
+    }
+    if (!fd.drag_type.empty()) {
+      f.drag = fd.drag_type == "reverse" ? -1 : 1;
+      f.drag_fraction = fd.drag_fraction.si();
+      f.drag_width = fd.drag_width.si();
     }
     faults_.push_back(std::move(f));
+  }
+  // Relays: complementary linear ramps of the strike factor over the overlap (STX-TN-05 s.4.2).
+  for (std::size_t k = 0; k < d.faults.size(); ++k) {
+    if (d.faults[k].relay_fault.empty()) continue;
+    Fault& F = faults_[k];
+    Fault& G = faults_[static_cast<std::size_t>(d.fault_index(d.faults[k].relay_fault))];
+    double c2 = dot(G.p0 - F.p0, F.s);
+    double lo = std::max(-0.5 * F.length, c2 - 0.5 * G.length), hi = std::min(0.5 * F.length, c2 + 0.5 * G.length);
+    // F's inner tip is the end of F inside the overlap; F is full at the other end of the overlap.
+    bool f_ends_high = hi >= 0.5 * F.length - 1e-6;
+    F.relay_with = G.index;
+    G.relay_with = F.index;
+    F.ra_one = f_ends_high ? lo : hi;
+    F.ra_zero = f_ends_high ? hi : lo;
+    auto g_coord = [&](double aF) { return dot(F.p0 + F.s * aF - G.p0, G.s); };
+    G.ra_one = g_coord(F.ra_zero);
+    G.ra_zero = g_coord(F.ra_one);
+    log.value("fault." + F.name + ".relay." + G.name + ".overlap_m", fmt_fixed(hi - lo, 2));
   }
   st_ = &st;
   {
@@ -406,6 +435,29 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
     Vec3 q = fixed_;  // the fixed point never moves
     if (faults_[static_cast<std::size_t>(f)].sigma(q) > 0) fixed_block_ |= (BlockCode(1) << f);
   }
+  // Linked splays (abutting with transfer): the block beyond the branch line slides on both faults,
+  // so as a rigid block it can only move parallel to the branch line; the splay's slip vector is
+  // the branch-line direction, scaled to a vertical component of one (STX-TN-05 section 4.1).
+  for (auto& f : faults_) {
+    if (!f.transfer || f.abuts < 0 || f.curved) continue;
+    const Fault& m = faults_[static_cast<std::size_t>(f.abuts)];
+    if (m.curved) continue;
+    Vec3 dir = cross(m.n, f.n);
+    double ln = norm(dir);
+    if (ln < 1e-9)
+      throw Error(ErrorCode::Build, "fault " + f.name + " (rule F15): a linked splay must not be parallel to its master", "faults");
+    dir = dir / ln;
+    if (dir.z > 0) dir = dir * -1.0;
+    double plunge = std::asin(-dir.z);
+    if (plunge < deg2rad(10))
+      throw Error(ErrorCode::Build, "fault " + f.name + " (rule F15): the branch line with " + m.name + " plunges " +
+                                        fmt_fixed(rad2deg(plunge), 1) + " degrees; a linked splay slips along it, which needs a plunge of "
+                                        "at least 10 degrees. Declare the splay without transfer, or change its strike or dip",
+                  "faults");
+    // hanging wall moves down along the branch line for a normal splay
+    f.slip = dir / (-dir.z) * (f.kin->slip_vector(f.dd, f.dip).z < 0 ? 1.0 : -1.0);
+    log.value("fault." + f.name + ".slip_vector_per_m_throw", fmt_fixed(f.slip.x, 4) + ", " + fmt_fixed(f.slip.y, 4) + ", " + fmt_fixed(f.slip.z, 4));
+  }
   for (auto& f : faults_)
     if (f.curved && ((fixed_block_ >> f.index) & 1u))
       throw Error(ErrorCode::Build,
@@ -413,6 +465,30 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
                   "shear construction moves the hanging wall over a fixed footwall, so fix a point or well in the footwall",
                   "frame.fixed");
   resolve_tips(d, st, log);
+  // Branch lines of splays (STX-TN-05 section 4.1): the line along the cross product of the normals.
+  for (auto& f : faults_) {
+    if (f.abuts < 0 || f.curved) continue;
+    const Fault& m = faults_[static_cast<std::size_t>(f.abuts)];
+    if (m.curved) continue;
+    Vec3 dir = cross(m.n, f.n);
+    double ln = norm(dir);
+    if (ln < 1e-9) continue;  // parallel planes: no branch line
+    dir = dir / ln;
+    if (dir.z > 0) dir = dir * -1.0;
+    // the point of the line in the plane through the splay's reference point normal to the line
+    // solves n_m.x = n_m.p0_m, n_f.x = n_f.p0_f, dir.x = dir.p0_f (Cramer's rule)
+    Vec3 r0{dot(m.n, m.p0), dot(f.n, f.p0), dot(dir, f.p0)};
+    auto det3 = [](const Vec3& a, const Vec3& b, const Vec3& c) { return dot(a, cross(b, c)); };
+    Vec3 c0{m.n.x, f.n.x, dir.x}, c1{m.n.y, f.n.y, dir.y}, c2{m.n.z, f.n.z, dir.z};
+    double D = det3(c0, c1, c2);
+    Vec3 pt{det3(r0, c1, c2) / D, det3(c0, r0, c2) / D, det3(c0, c1, r0) / D};
+    std::string key = f.name + ".branch." + m.name;
+    double trend = std::fmod(rad2deg(std::atan2(dir.x, dir.y)) + 360.0, 360.0);
+    log.value(key + ".trend", fmt_fixed(trend, 4));
+    log.value(key + ".plunge", fmt_fixed(rad2deg(std::asin(-dir.z)), 4));
+    log.value(key + ".point", fmt_fixed(pt.x, 2) + ", " + fmt_fixed(pt.y, 2) + ", " + fmt_fixed(-pt.z, 2));
+    if (f.transfer) log.note("fault " + f.name + " is a linked splay of " + m.name + " (throw transfer across the branch line)");
+  }
 }
 
 /// Elevation of horizon h at (x, y) in the frame of fault `rank` (stratigraphy displaced by the
@@ -428,10 +504,7 @@ double FaultNetwork::level_in_frame(const Structure& st, int h, double x, double
     }
     for (std::size_t k = r_older; k < order_.size(); ++k) {
       int fi = order_[k];
-      const Fault& F = faults_[static_cast<std::size_t>(fi)];
-      bool side = F.sigma(q) > 0;
-      bool fixed_side = ((fixed_block_ >> fi) & 1u) != 0;
-      if (side != fixed_side) q = undo(fi, q, side ? 1 : -1);
+      q = step(fi, q, faults_[static_cast<std::size_t>(fi)].sigma(q) > 0, false);
     }
     return q.z - st.z(static_cast<std::size_t>(h), q.x, q.y);
   };
@@ -446,6 +519,7 @@ bool FaultNetwork::cannot_move(int fi, const Vec3& q) const {
   const Fault& f = faults_[static_cast<std::size_t>(fi)];
   double a, b;
   f.profile_coords(q, a, b);
+  if (f.transfer) return false;  // slip along the branch line has a strike component
   if (std::fabs(a) >= 0.5 * f.length) return true;  // slip has no strike component
   if (f.layered || f.curved) return false;  // a layer can meet the fault far from the point
   if (b + f.slip_b < f.b_lo || b - f.slip_b > f.b_hi) return true;
@@ -827,6 +901,48 @@ Vec3 FaultNetwork::undo(int fi, const Vec3& q, int sgn, double* tau_out) const {
   return q - slip * (sgn * tau);
 }
 
+Vec3 FaultNetwork::drag_forward(int fi, const Vec3& p1, bool hw) const {
+  const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  if (!f.drag) return {0, 0, 0};
+  double w = f.drag_shape(f.sigma(p1));
+  if (w == 0) return {0, 0, 0};
+  if (f.abuts >= 0 && (faults_[static_cast<std::size_t>(f.abuts)].sigma(p1) > 0) != f.abut_hw_side) return {0, 0, 0};
+  double a, b;
+  f.profile_coords(p1, a, b);
+  // normal drag: the hanging wall moves against its slip, the footwall with it
+  double sg = (hw ? -1.0 : 1.0) * f.drag;
+  return f.slip * (sg * w * f.throw_at(a, b));
+}
+
+Vec3 FaultNetwork::drag_inverse(int fi, const Vec3& q, bool hw) const {
+  const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  if (!f.drag) return q;
+  double w = f.drag_shape(f.sigma(q));  // sigma is unchanged by a displacement along the slip
+  if (w == 0) return q;
+  if (f.abuts >= 0 && (faults_[static_cast<std::size_t>(f.abuts)].sigma(q) > 0) != f.abut_hw_side) return q;
+  const double c = (hw ? -1.0 : 1.0) * f.drag * w;
+  // q = q1 + slip * c * T(q1), q1 = q - slip * t: solve t = c * T(q - slip t); the throw gradient
+  // along the slip is below 1 and |c| <= 1, so the root is unique.
+  auto g = [&](double t) {
+    double a, b;
+    f.profile_coords(q - f.slip * t, a, b);
+    return t - c * f.throw_at(a, b);
+  };
+  double lim = std::fabs(c * f.tmax) + 1e-9;
+  double glo = g(-lim), ghi = g(lim);
+  double t = (glo == 0) ? -lim : (ghi == 0) ? lim : illinois(g, -lim, lim, glo, ghi, 1e-11, 1e-11, 200);
+  return q - f.slip * t;
+}
+
+Vec3 FaultNetwork::step(int fi, const Vec3& q, bool side, bool fast) const {
+  const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  Vec3 r = f.drag ? drag_inverse(fi, q, side) : q;
+  bool fixed_side = ((fixed_block_ >> fi) & 1u) != 0;
+  if (side == fixed_side) return r;
+  if (fast && cannot_move(fi, r)) return r;
+  return undo(fi, r, side ? 1 : -1);
+}
+
 Vec3 FaultNetwork::restore(const Vec3& p, BlockCode* block, const BlockCode* forced) const {
   if (layered_) {
     double s = solve_layer(p, 0, forced, 0);
@@ -839,10 +955,7 @@ Vec3 FaultNetwork::restore(const Vec3& p, BlockCode* block, const BlockCode* for
     const Fault& f = faults_[static_cast<std::size_t>(fi)];
     bool side = forced ? ((*forced >> fi) & 1u) != 0 : f.sigma(q) > 0;
     if (side) code |= (BlockCode(1) << fi);
-    bool fixed_side = ((fixed_block_ >> fi) & 1u) != 0;
-    if (side == fixed_side) continue;
-    if (fast && cannot_move(fi, q)) continue;
-    q = undo(fi, q, side ? 1 : -1);
+    q = step(fi, q, side, fast);
   }
   if (block) *block = code;
   return q;
@@ -854,15 +967,10 @@ Vec3 FaultNetwork::restore_from_frame(const Vec3& p, int f, bool hw) const {
     double s = solve_layer(p, r, nullptr, hw ? 2 : -2);
     return chain(p, r, order_.size(), s, nullptr, nullptr, hw ? 2 : -2);
   }
-  Vec3 q = p;
-  bool fixed_side = ((fixed_block_ >> f) & 1u) != 0;
-  if (hw != fixed_side) q = undo(f, q, hw ? 1 : -1);
+  Vec3 q = step(f, p, hw, false);
   for (std::size_t k = static_cast<std::size_t>(rank_[static_cast<std::size_t>(f)]) + 1; k < order_.size(); ++k) {
     int fi = order_[k];
-    const Fault& F = faults_[static_cast<std::size_t>(fi)];
-    bool side = F.sigma(q) > 0;
-    bool fs = ((fixed_block_ >> fi) & 1u) != 0;
-    if (side != fs) q = undo(fi, q, side ? 1 : -1);
+    q = step(fi, q, faults_[static_cast<std::size_t>(fi)].sigma(q) > 0, false);
   }
   return q;
 }
@@ -876,12 +984,7 @@ Vec3 FaultNetwork::to_fault_frame(const Vec3& p, int f) const {
   Vec3 q = p;
   for (int fi : order_) {
     if (fi == f) break;
-    const Fault& F = faults_[static_cast<std::size_t>(fi)];
-    bool side = F.sigma(q) > 0;
-    bool fixed_side = ((fixed_block_ >> fi) & 1u) != 0;
-    if (side == fixed_side) continue;
-    if (fast && cannot_move(fi, q)) continue;
-    q = undo(fi, q, side ? 1 : -1);
+    q = step(fi, q, faults_[static_cast<std::size_t>(fi)].sigma(q) > 0, fast);
   }
   return q;
 }

@@ -1,0 +1,96 @@
+# Worked example 7: a fault system (stage 2A). A master normal fault F1 with drag, a linked splay F2
+# in its hanging wall, and a soft-linked relay ramp where F1 hands its throw over to F3.
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_fault_system, version: "1.0.0", status: DESIGN,
+        title: "Fault system: master fault, linked splay and relay ramp"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[12000, 12000] m | user_instruction | worked example"
+  depth_range: "[0, 2500] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1500, 3000] m | user_instruction | worked example: control well in the footwall"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+      H4: "1600 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]   # the faults cut top and base on purpose
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example: master fault"
+    geometry:
+      type: planar
+      reference_point: "[5000, 3000] m | user_instruction | worked example"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: dips east"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "8000 m | user_instruction | worked example: from 1 km south of the model to y = 7000 m"
+    throw:
+      max: "120 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.1 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+    relay: {fault: F3}
+  - name: F3
+    age: "2 ordinal | user_instruction | worked example: takes over F1's throw to the north"
+    geometry:
+      type: planar
+      reference_point: "[6500, 9000] m | user_instruction | worked example: stepped 1.5 km east"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "8000 m | user_instruction | worked example: from y = 5000 m to 1 km north of the model"
+    throw:
+      max: "120 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.1 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+  - name: F2
+    age: "3 ordinal | user_instruction | worked example: splay, youngest"
+    geometry:
+      type: planar
+      reference_point: "[5250, 2500] m | user_instruction | worked example"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "15 deg | user_instruction | worked example"
+      dip: "75 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "5000 m | user_instruction | worked example"
+    throw:
+      max: "50 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: sine}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+    abuts: {fault: F1, side: hanging_wall, transfer: true}
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_South
+      polyline: "[[500, 2500], [11500, 2500]] m | user_instruction | worked example: across master and splay"
+    - name: XS_Relay
+      polyline: "[[500, 6000], [11500, 6000]] m | user_instruction | worked example: across the relay ramp"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

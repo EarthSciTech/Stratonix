@@ -121,6 +121,19 @@ struct Fault {
   /// at(), tips(), ab() and profile_coords() is the horizontal distance u along the dip direction.
   std::shared_ptr<const CurvedFault> curved;
   std::string hw_name;          ///< hanging-wall plugin name
+  // Interaction (STX-TN-05 sections 3 and 4).
+  int drag = 0;                 ///< 0 none, +1 normal drag, -1 reverse drag
+  double drag_fraction = 0, drag_width = 0;
+  bool transfer = false;        ///< linked splay of the abutted fault
+  int relay_with = -1;          ///< soft-linked relay partner, or -1
+  /// Relay window in this fault's strike coordinate: the strike factor of the throw is replaced by
+  /// a linear ramp from 1 at ra_one to 0 at ra_zero (complementary on the partner).
+  double ra_one = 0, ra_zero = 0;
+  /// Drag shape at signed distance sigma: f (1 - |sigma| / W)^2 inside W, 0 beyond.
+  double drag_shape(double sigma) const {
+    double a = std::fabs(sigma);
+    return a < drag_width ? drag_fraction * (1 - a / drag_width) * (1 - a / drag_width) : 0.0;
+  }
   /// Heave of a curved fault at strike position a (tapered by the strike profile).
   double heave_at(double a) const;
 
@@ -200,6 +213,13 @@ class FaultNetwork {
   /// Restore a point given in fault f's frame, on the stated wall of f, through f and the
   /// faults older than it (used to measure throw in the fault's own frame).
   Vec3 restore_from_frame(const Vec3& q, int f, bool hanging_wall) const;
+  /// Drag (STX-TN-05 section 3). Forward drag displacement of material at its pre-drag position
+  /// p1 on the given wall, and its inverse for a present position q.
+  Vec3 drag_forward(int f, const Vec3& p1, bool hanging_wall) const;
+  Vec3 drag_inverse(int f, const Vec3& q, bool hanging_wall) const;
+  /// One step of restoration through fault f: drag on either wall, then the fault itself when q is
+  /// on the moving side.
+  Vec3 step(int f, const Vec3& q, bool side, bool fast) const;
   /// Ages, youngest first.
   const std::vector<int>& young_to_old() const { return order_; }
   /// Layer-rigid networks: displacement magnitude of fault f for the material at present

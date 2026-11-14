@@ -43,6 +43,17 @@ Figure map_figure(const FigureContext& c, int horizon, const repr::FaultedSurfac
                   const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const repr::Closure* closure);
 Figure view3d_figure(const FigureContext& c, double azimuth_deg, double elevation_deg, const std::string& preset_name);
 Figure fence_figure(const FigureContext& c, const std::vector<repr::Section>& legs);
+/// Throw along strike of a fault system: points (strike distance, throw) per series.
+struct StrikeThrowSeries {
+  std::string label;
+  Color color;
+  bool summed = false;
+  std::vector<std::pair<double, double>> points;
+};
+Figure strike_throw_figure(const FigureContext& c, const std::vector<StrikeThrowSeries>& series, const std::string& system_name);
+/// Displacement on one fault surface (lattice of fault_surface) with the cut-offs of each horizon.
+Figure fault_plane_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<double>& displacement,
+                          const std::vector<std::vector<repr::CutoffLine>>& cutoffs);
 
 struct WrittenFigure {
   std::string basename;

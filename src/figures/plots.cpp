@@ -715,6 +715,124 @@ Figure fence_figure(const FigureContext& c, const std::vector<repr::Section>& le
 // =========================================================================================
 // Writing
 // =========================================================================================
+// =========================================================================================
+// Fault systems (stage 2A): throw along strike, and the displacement on a fault surface
+// =========================================================================================
+Figure strike_throw_figure(const FigureContext& c, const std::vector<StrikeThrowSeries>& series, const std::string& system_name) {
+  Figure f(842, 520);
+  double x0 = 1e300, x1 = -1e300, y1 = 0;
+  for (auto& s : series)
+    for (auto& [t, v] : s.points) { x0 = std::min(x0, t); x1 = std::max(x1, t); if (!std::isnan(v)) y1 = std::max(y1, v); }
+  if (!(x1 > x0)) { x0 = 0; x1 = 1; }
+  if (!(y1 > 0)) y1 = 1;
+  y1 *= 1.1;
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - throw along strike, " + system_name,
+        "Cut-off separation per horizon along the first fault's strike; solid: summed over the system (open where throw passes "
+        "between faults), dashed: each fault");
+  const double px = 70, py = 60, pw = 842 - 70 - 250, ph = 520 - 60 - 70;
+  auto X = [&](double t) { return px + (t - x0) / (x1 - x0) * pw; };
+  auto Y = [&](double v) { return py + ph - v / y1 * ph; };
+  for (double t : nice_ticks(x0, x1, 8)) {
+    f.line({X(t), py}, {X(t), py + ph}, kGrid, 0.4);
+    f.text({X(t), py + ph + 11}, km_or_m(t), 7, Anchor::Middle, false, kInk);
+  }
+  for (double v : nice_ticks(0, y1, 6)) {
+    f.line({px, Y(v)}, {px + pw, Y(v)}, kGrid, 0.4);
+    f.text({px - 4, Y(v) + 2.5}, fmt_fixed(v, 0), 7, Anchor::End, false, kInk);
+  }
+  f.rect(px, py, pw, ph, none(), kInk, 0.6);
+  f.text({px + pw / 2, py + ph + 26}, "Distance along strike (m)", 8, Anchor::Middle, false, kInk);
+  f.text({px - 40, py + ph / 2}, "Throw (m)", 8, Anchor::Middle, false, kInk, -90);
+  std::vector<LegendEntry> es;
+  for (auto& s : series) {
+    std::vector<Pt> pts;
+    auto flush = [&] {
+      if (pts.size() >= 2) f.path(pts, false, none(), s.color, s.summed ? 1.4 : 0.9, s.summed ? std::vector<double>{} : std::vector<double>{3, 2});
+      pts.clear();
+    };
+    for (auto& [t, v] : s.points) {
+      if (std::isnan(v)) { flush(); continue; }
+      pts.push_back({X(t), Y(v)});
+    }
+    flush();
+    es.push_back({s.summed ? "Summed throw" : "Each fault", s.label, none(), true, s.color, s.summed ? 1.4 : 0.9});
+  }
+  double ly = legend(f, 842 - 214, 56, 196, es, 520.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 214, ly, 196);
+  footer(f, c);
+  return f;
+}
+
+Figure fault_plane_figure(const FigureContext& c, int ff, const repr::FaultSurface& fs, const std::vector<double>& disp,
+                          const std::vector<std::vector<repr::CutoffLine>>& cutoffs) {
+  Figure f(842, 560);
+  const auto& inf = c.model->info();
+  const auto& fi = inf.faults.at(static_cast<std::size_t>(ff));
+  double a0 = fs.a.front(), a1 = fs.a.back(), b0 = fs.b.front(), b1 = fs.b.back();
+  // only the part inside the tip line and the domain
+  double ia0 = 1e300, ia1 = -1e300, ib0 = 1e300, ib1 = -1e300, dmax = 0;
+  for (std::size_t j = 0; j < fs.nb; ++j)
+    for (std::size_t i = 0; i < fs.na; ++i) {
+      std::size_t k = i + fs.na * j;
+      if (fs.extent[k] > 1) continue;
+      ia0 = std::min(ia0, fs.a[i]); ia1 = std::max(ia1, fs.a[i]);
+      ib0 = std::min(ib0, fs.b[j]); ib1 = std::max(ib1, fs.b[j]);
+      dmax = std::max(dmax, disp[k]);
+    }
+  if (ia1 > ia0) { a0 = ia0; a1 = ia1; }
+  if (ib1 > ib0) { b0 = ib0; b1 = ib1; }
+  if (!(dmax > 0)) dmax = 1;
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - displacement on fault " + fi.name,
+        "Fault surface seen from the hanging wall, along strike and down dip; colour: displacement magnitude (m); "
+        "lines: hanging-wall (solid) and footwall (dashed) cut-offs of each horizon");
+  const double px = 70, py = 60, maxw = 842 - 70 - 260, maxh = 560 - 60 - 80;
+  double sc = std::min(maxw / (a1 - a0), maxh / (b1 - b0));
+  const double pw = (a1 - a0) * sc, ph = (b1 - b0) * sc;
+  auto P = [&](double a, double b) { return Pt{px + (a - a0) * sc, py + (b - b0) * sc}; };
+  auto colour = [](double t) {  // light (small) to dark red (large)
+    t = std::clamp(t, 0.0, 1.0);
+    return rgb(static_cast<int>(255 - 75 * t), static_cast<int>(245 - 205 * t), static_cast<int>(220 - 190 * t));
+  };
+  for (std::size_t j = 0; j + 1 < fs.nb; ++j)
+    for (std::size_t i = 0; i + 1 < fs.na; ++i) {
+      std::size_t k = i + fs.na * j;
+      if (fs.extent[k] > 1 || fs.extent[k + 1] > 1 || fs.extent[k + fs.na] > 1 || fs.extent[k + fs.na + 1] > 1) continue;
+      double v = 0.25 * (disp[k] + disp[k + 1] + disp[k + fs.na] + disp[k + fs.na + 1]);
+      Pt q = P(fs.a[i], fs.b[j]), r = P(fs.a[i + 1], fs.b[j + 1]);
+      f.rect(q.x, q.y, r.x - q.x + 0.3, r.y - q.y + 0.3, colour(v / dmax), none());
+    }
+  f.rect(px, py, pw, ph, none(), kInk, 0.6);
+  for (double t : nice_ticks(a0, a1, 7)) f.text({P(t, b0).x, py + ph + 11}, km_or_m(t), 7, Anchor::Middle, false, kInk);
+  for (double t : nice_ticks(b0, b1, 6)) f.text({px - 4, P(a0, t).y + 2.5}, km_or_m(t), 7, Anchor::End, false, kInk);
+  f.text({px + pw / 2, py + ph + 26}, "Along strike from the reference point (m)", 8, Anchor::Middle, false, kInk);
+  f.text({px - 44, py + ph / 2}, "Down dip (m)", 8, Anchor::Middle, false, kInk, -90);
+  std::vector<LegendEntry> es;
+  for (std::size_t h = 0; h < cutoffs.size(); ++h)
+    for (auto& cl : cutoffs[h]) {
+      for (auto& part : cl.parts) {
+        std::vector<Pt> pts;
+        for (auto& p : part) pts.push_back(P(dot(p - fi.ref_point, fi.strike_dir), dot(p - fi.ref_point, fi.dip_dir)));
+        if (pts.size() >= 2)
+          f.path(pts, false, none(), rgb(40, 40, 40), 0.8,
+                 cl.hanging_wall ? std::vector<double>{} : std::vector<double>{3, 2});
+      }
+    }
+  // colour bar
+  double cbx = 842 - 214, cby = 60;
+  f.text({cbx, cby + 8}, "Displacement (m)", 7.5, Anchor::Start, true, kInk);
+  for (int k = 0; k < 100; ++k) f.rect(cbx + 1.6 * k, cby + 14, 1.7, 10, colour(k / 99.0), none());
+  f.rect(cbx, cby + 14, 160, 10, none(), kInk, 0.4);
+  f.text({cbx, cby + 34}, "0", 7, Anchor::Start, false, kInk);
+  f.text({cbx + 160, cby + 34}, fmt_fixed(dmax, 1), 7, Anchor::End, false, kInk);
+  es.push_back({"Cut-offs", "Hanging wall", none(), true, rgb(40, 40, 40), 0.8});
+  es.push_back({"Cut-offs", "Footwall (dashed)", none(), true, rgb(40, 40, 40), 0.8});
+  for (auto& r : fi.relations) es.push_back({"Relations", r, none(), true, kFault, 0.8});
+  double ly = legend(f, cbx, cby + 44, 196, es, 560.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, cbx, ly, 196);
+  footer(f, c);
+  return f;
+}
+
 WrittenFigure write_figure(const Figure& f, const std::filesystem::path& folder, const std::string& base, const std::string& t,
                            const std::string& caption, const std::string& notes) {
   WrittenFigure w;
@@ -791,6 +909,101 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
     auto fgr = fence_figure(c, legs);
     out.push_back(write_figure(fgr, folder, figure_basename(c, "fence", "wells"), c.model_name + " - fence diagram through wells",
                                "Fence diagram through the wells in description order.", notes_common));
+  }
+  // Fault-plane displacement maps and throw along strike of linked fault systems (stage 2A).
+  if (!inf.faults.empty()) {
+    const double fsp = std::max(10.0, std::max(d.sx, d.sy) / 300);
+    std::vector<repr::FaultSurface> surfs;
+    std::vector<std::vector<std::vector<repr::CutoffLine>>> cuts(inf.faults.size());
+    for (std::size_t ff = 0; ff < inf.faults.size(); ++ff) {
+      surfs.push_back(repr::fault_surface(*c.model, static_cast<int>(ff), fsp));
+      for (std::size_t h = 0; h < inf.horizons.size(); ++h) cuts[ff].push_back(repr::cutoff_lines(*c.model, surfs[ff], static_cast<int>(h)));
+      FaultEval fe;
+      c.model->evaluate_fault(static_cast<int>(ff), surfs[ff].nodes, fe);
+      auto fgr = fault_plane_figure(c, static_cast<int>(ff), surfs[ff], fe.displacement, cuts[ff]);
+      out.push_back(write_figure(fgr, folder, figure_basename(c, "fault-plane", inf.faults[ff].name),
+                                 c.model_name + " - displacement on fault " + inf.faults[ff].name,
+                                 "Displacement on fault " + inf.faults[ff].name + " with the cut-offs of every horizon.", notes_common));
+    }
+    // fault systems: faults joined by recorded relations
+    std::vector<int> group(inf.faults.size());
+    for (std::size_t ff = 0; ff < group.size(); ++ff) group[ff] = static_cast<int>(ff);
+    auto find = [&](int x) { while (group[static_cast<std::size_t>(x)] != x) x = group[static_cast<std::size_t>(x)]; return x; };
+    for (std::size_t ff = 0; ff < inf.faults.size(); ++ff)
+      for (auto& r : inf.faults[ff].relations) {
+        std::string other = r.substr(r.rfind(' ') + 1);
+        for (std::size_t gg = 0; gg < inf.faults.size(); ++gg)
+          if (inf.faults[gg].name == other) group[static_cast<std::size_t>(find(static_cast<int>(ff)))] = find(static_cast<int>(gg));
+      }
+    for (std::size_t root = 0; root < inf.faults.size(); ++root) {
+      std::vector<int> members;
+      for (std::size_t ff = 0; ff < inf.faults.size(); ++ff)
+        if (find(static_cast<int>(ff)) == static_cast<int>(root)) members.push_back(static_cast<int>(ff));
+      if (members.size() < 2) continue;
+      const auto& f0 = inf.faults[static_cast<std::size_t>(members[0])];
+      std::vector<StrikeThrowSeries> series;
+      std::string name;
+      for (int m : members) name += (name.empty() ? "" : "-") + inf.faults[static_cast<std::size_t>(m)].name;
+      for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
+        // each fault's throw against the strike coordinate of the first fault
+        std::vector<std::vector<std::pair<double, double>>> per;
+        double lo = 1e300, hi = -1e300;
+        for (int m : members) {
+          std::vector<std::pair<double, double>> pts;
+          const repr::CutoffLine* hw = nullptr;
+          const repr::CutoffLine* fw = nullptr;
+          for (auto& l : cuts[static_cast<std::size_t>(m)][h]) (l.hanging_wall ? hw : fw) = &l;
+          if (hw && fw)
+            for (std::size_t i = 0; i < hw->by_column.size() && i < fw->by_column.size(); ++i) {
+              const Vec3 &a = hw->by_column[i], &b = fw->by_column[i];
+              if (std::isnan(a.x) || std::isnan(b.x)) continue;
+              // the footwall cut-off: those of linked faults meet at the branch line
+              pts.push_back({dot(b - f0.ref_point, f0.strike_dir), b.z - a.z});
+            }
+          std::sort(pts.begin(), pts.end());
+          if (!pts.empty()) { lo = std::min(lo, pts.front().first); hi = std::max(hi, pts.back().first); }
+          per.push_back(pts);
+        }
+        if (!(hi > lo)) continue;
+        Color col = unit_color(c, h + 1);
+        col = rgb(col.r * 6 / 10, col.g * 6 / 10, col.b * 6 / 10);
+        StrikeThrowSeries sum{inf.horizons[h].name, col, true, {}};
+        // Where a fault's throw jumps between neighbouring samples (the branch line of a linked
+        // splay hands throw over between faults) the sum of separately sampled faults is not
+        // defined: the summed line is left open there instead of drawing a spike.
+        std::vector<std::pair<double, double>> jumps;  // (position, half width)
+        for (auto& pts : per)
+          for (std::size_t q = 1; q < pts.size(); ++q)
+            if (std::fabs(pts[q].second - pts[q - 1].second) > 5.0)
+              jumps.push_back({0.5 * (pts[q].first + pts[q - 1].first), 1.5 * (pts[q].first - pts[q - 1].first) + 1.0});
+        for (int k = 0; k <= 400; ++k) {
+          double t = lo + (hi - lo) * k / 400.0, v = 0;
+          bool open = false;
+          for (auto& [jt, jw] : jumps) open = open || std::fabs(t - jt) <= jw;
+          if (open) { sum.points.push_back({t, std::nan("")}); continue; }
+          for (auto& pts : per) {
+            if (pts.size() < 2 || t < pts.front().first || t > pts.back().first) continue;
+            auto it = std::lower_bound(pts.begin(), pts.end(), std::pair<double, double>{t, -1e300});
+            if (it == pts.begin()) { v += it->second; continue; }
+            auto pv = it - 1;
+            double w = it->first > pv->first ? (t - pv->first) / (it->first - pv->first) : 0;
+            v += pv->second + w * (it->second - pv->second);
+          }
+          sum.points.push_back({t, v});
+        }
+        series.push_back(sum);
+        if (h == 0 || per.empty()) {
+          for (std::size_t q = 0; q < per.size(); ++q)
+            series.push_back({inf.faults[static_cast<std::size_t>(members[q])].name + " at " + inf.horizons[h].name,
+                              q % 4 == 0 ? kFault : q % 4 == 1 ? rgb(60, 90, 160) : q % 4 == 2 ? rgb(40, 130, 70) : rgb(150, 90, 20),
+                              false, per[q]});
+        }
+      }
+      if (series.empty()) continue;
+      auto fgr = strike_throw_figure(c, series, name);
+      out.push_back(write_figure(fgr, folder, figure_basename(c, "strike-throw", name), c.model_name + " - throw along strike, " + name,
+                                 "Throw along strike of the linked faults " + name + ", summed and per fault.", notes_common));
+    }
   }
   // Combined deck of all figures.
   if (raster_available()) {

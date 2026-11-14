@@ -647,6 +647,47 @@
                   "hanging_wall",
                   "footwall"
                 ]
+              },
+              "transfer": {
+                "type": "boolean"
+              }
+            }
+          },
+          "drag": {
+            "type": "object",
+            "required": [
+              "type",
+              "fraction",
+              "width"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "enum": [
+                  "normal",
+                  "reverse"
+                ]
+              },
+              "fraction": {
+                "$ref": "#/$defs/param"
+              },
+              "width": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          },
+          "relay": {
+            "type": "object",
+            "required": [
+              "fault"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "fault": {
+                "type": "string"
+              },
+              "breached": {
+                "type": "boolean"
               }
             }
           }
@@ -743,6 +784,18 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "fault_scaling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "min_ratio": {
+              "$ref": "#/$defs/param"
+            },
+            "max_ratio": {
+              "$ref": "#/$defs/param"
+            }
           }
         }
       }

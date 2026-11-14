@@ -18,6 +18,25 @@ has its own version (`stratonix_schema`).
   (fixed point in the footwall), F12 (shear lines cross the fault once) and F14 (curved faults
   are normal dip-slip, take heave, no down-dip profile) refuse what the construction cannot
   invert. New tolerance `checks.tolerances.rollover`. Worked example `listric_rollover.yaml`.
+- Fault interaction (Prompt 17): `drag: {type: normal | reverse, fraction, width}` bends both
+  walls along the slip, scaled by the local throw (rule F13 keeps horizons from crossing the
+  fault); `abuts: {..., transfer: true}` makes a linked splay, whose slip follows the branch line
+  so the block beyond it stays in contact with both faults (rule F15 refuses branch lines
+  plunging less than 10 degrees); the branch line is reported (trend, plunge, point);
+  `relay: {fault: F2}` gives two overlapping faults complementary throw ramps over the overlap.
+  Relations are recorded in `FaultInfo.relations`.
+- Checks C10 (displacement-length scaling, a warning; range `checks.fault_scaling`, default
+  0.001 to 0.1) and C11 (fault-system consistency across branch lines and relays). The checks
+  report is now in numeric order of the check ids.
+- Figures: a displacement map on every fault surface with the horizons' cut-offs, and the throw
+  along strike of each linked fault system. Worked example `fault_system_relay_splay.yaml`.
+
+### Changed
+- Check C4 measures faults whose slip has a strike component against the footwall horizon where
+  the moving cut-off came from.
+- Golden package hashes: the checks report and summary gain the C10 lines and every figure's
+  key numbers the new check count; the figure set gains the fault-plane maps. Exports are
+  unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`),
   expected to fail until their features are built.
 

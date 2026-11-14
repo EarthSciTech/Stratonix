@@ -84,7 +84,7 @@ TEST_CASE("F4 figure set of the synthetic example in four formats with footer") 
       for (const char* ext : {".png", ".tif", ".pptx"}) CHECK(fs::exists(fd / (stem + ext)));
     }
   }
-  CHECK(svgs == 10);  // 2 sections, 5 maps, 2 3D views, 1 fence
+  CHECK(svgs == 12);  // 2 sections, 5 maps, 2 3D views, 1 fence, 2 fault-plane maps
 }
 
 STX_TEST_MAIN()

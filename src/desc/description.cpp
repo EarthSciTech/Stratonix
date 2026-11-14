@@ -99,7 +99,7 @@ std::vector<const Param*> Description::all_params() const {
   auto add = [&](const Param& p) { if (p.present) r.push_back(&p); };
   for (auto* p : {&origin, &size, &depth_range, &grid_spacing, &ref_point, &regional_dip, &correction_range,
                   &regional_dip_azimuth, &frame_point, &tol_thickness_min, &tol_crossing,
-                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover,
+                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &scaling_min_ratio, &scaling_max_ratio,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
                   &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
                   &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch})
@@ -121,7 +121,7 @@ std::vector<const Param*> Description::all_params() const {
                     &f.trace_depth, &f.decay_length, &f.upper.offset, &f.upper.fraction, &f.upper.depth,
                     &f.lower.offset, &f.lower.fraction, &f.lower.depth, &f.length, &f.throw_max,
                     &f.profile_dip.taper, &f.profile_strike.taper, &f.influence_distance, &f.detachment_depth,
-                    &f.profile, &f.heave, &f.shear_angle})
+                    &f.profile, &f.heave, &f.shear_angle, &f.drag_fraction, &f.drag_width})
       add(*q);
   }
   for (auto& s : sections) { add(s.polyline); add(s.detail_window); }
@@ -456,7 +456,20 @@ struct Typer {
         fd.influence_distance = P(hw, "influence_distance", b + ".hanging_wall", Dimension::Length, fd.hw_type == "decay", 1);
         fd.shear_angle = P(hw, "shear_angle", b + ".hanging_wall", Dimension::Angle, fd.hw_type == "inclined_shear", 1);
         fd.shear_sense = S(hw, "shear_sense");
-        if (const Node* ab = f.get("abuts")) { fd.abuts_fault = S(ab, "fault"); fd.abuts_side = S(ab, "side"); }
+        if (const Node* ab = f.get("abuts")) {
+          fd.abuts_fault = S(ab, "fault");
+          fd.abuts_side = S(ab, "side");
+          if (const Node* t = ab->get("transfer")) fd.abuts_transfer = t->type == Node::Type::Bool && t->boolean;
+        }
+        if (const Node* dg = f.get("drag")) {
+          fd.drag_type = S(dg, "type");
+          fd.drag_fraction = P(dg, "fraction", b + ".drag", Dimension::Dimensionless, true, 1);
+          fd.drag_width = P(dg, "width", b + ".drag", Dimension::Length, true, 1);
+        }
+        if (const Node* rl = f.get("relay")) {
+          fd.relay_fault = S(rl, "fault");
+          if (const Node* t = rl->get("breached")) fd.relay_breached = t->type == Node::Type::Bool && t->boolean;
+        }
         d.faults.push_back(std::move(fd));
       }
 
@@ -476,6 +489,10 @@ struct Typer {
         d.tol_wells = P(t, "wells", b, Dimension::Length, false, 1);
         d.tol_unoffset = P(t, "unoffset", b, Dimension::Length, false, 1);
         d.tol_rollover = P(t, "rollover", b, Dimension::Length, false, 1);
+      }
+      if (const Node* fsc = ch->get("fault_scaling")) {
+        d.scaling_min_ratio = P(fsc, "min_ratio", "checks.fault_scaling", Dimension::Dimensionless, false, 1);
+        d.scaling_max_ratio = P(fsc, "max_ratio", "checks.fault_scaling", Dimension::Dimensionless, false, 1);
       }
       if (const Node* cl = ch->get("closure")) {
         d.closure_horizon = S(cl, "horizon");
@@ -857,6 +874,48 @@ struct Typer {
         c.err(b + ".extent", "F3", "upper tip is not above the lower tip at the reference location");
       if (f.upper.rule == "free" && f.lower.rule == "free")
         c.warn(b + ".extent", "F3", "both tips free: the fault cuts the whole model");
+      if (!f.drag_type.empty()) {
+        // STX-TN-05 section 3: drag moves material parallel to the slip, inside the fault surface.
+        if (f.curved()) c.err(b + ".drag", "F13", "drag applies to planar faults (curved faults deform their hanging wall by shear)");
+        if (f.slip_mode == "vertical_offset")
+          c.err(b + ".drag", "F13", "drag needs the slip to lie in the fault surface (dip_slip, oblique or strike_slip)");
+        if (f.hw_type == "layer_rigid") c.err(b + ".drag", "F13", "drag is not combined with layer_rigid hanging walls");
+        if (f.drag_width.present && !(f.drag_width.si() > 0)) c.err(b + ".drag.width", "F13", "the drag width must be positive");
+        if (f.drag_fraction.present) {
+          double fr = f.drag_fraction.si();
+          if (f.drag_type == "normal" && !(fr >= 0 && fr < 0.5))
+            c.err(b + ".drag.fraction", "F13", "normal drag needs a fraction in [0, 0.5): at " + fmt_fixed(fr, 3) +
+                                                   " a horizon would be carried across the fault (apparent throw T (1 - 2f))");
+          if (f.drag_type == "reverse" && !(fr >= 0 && fr <= 1))
+            c.err(b + ".drag.fraction", "F13", "reverse drag needs a fraction in [0, 1]");
+        }
+      }
+      if (!f.relay_fault.empty()) {
+        int o = d.fault_index(f.relay_fault);
+        if (o < 0) c.err(b + ".relay.fault", "R1", "unknown fault '" + f.relay_fault + "'");
+        else if (static_cast<std::size_t>(o) == k) c.err(b + ".relay.fault", "F15", "a fault cannot relay with itself");
+        else {
+          const auto& g = d.faults[static_cast<std::size_t>(o)];
+          if (g.slip_mode != f.slip_mode) c.err(b + ".relay", "F15", "relay faults must share the slip mode");
+          if (f.curved() || g.curved()) c.err(b + ".relay", "F15", "relays are between planar faults in stage 2A");
+          if (!g.relay_fault.empty()) c.err(b + ".relay", "F15", "declare a relay on one of the two faults only");
+          if (f.strike.present && g.strike.present && f.reference_point.present && g.reference_point.present &&
+              f.length.present && g.length.present) {
+            // overlap along F's strike between the two strike extents
+            double st = f.strike.si(), sx = std::sin(st), sy = std::cos(st);
+            double c2 = (g.reference_point.si(0) - f.reference_point.si(0)) * sx + (g.reference_point.si(1) - f.reference_point.si(1)) * sy;
+            double lo = std::max(-0.5 * f.length.si(), c2 - 0.5 * g.length.si()), hi = std::min(0.5 * f.length.si(), c2 + 0.5 * g.length.si());
+            if (!(hi > lo)) c.err(b + ".relay", "F15", "the two faults do not overlap along strike");
+            else if (lo <= -0.5 * f.length.si() + 1e-6 && hi >= 0.5 * f.length.si() - 1e-6)
+              c.err(b + ".relay", "F15", "one fault lies wholly inside the other's strike extent; a relay needs overlapping tips");
+            double ds = std::fabs(std::remainder(st - g.strike.si(), 2 * kPi));
+            if (ds > kPi / 6) c.err(b + ".relay", "F15", "relay faults must strike within 30 degrees of each other");
+          }
+          if (f.relay_breached)
+            c.err(b + ".relay.breached", "F15", "breached relays are not implemented yet: declare the connecting fault "
+                                                "explicitly, abutting both faults (open item in STX-TN-05)");
+        }
+      }
       if (!f.abuts_fault.empty()) {
         int a = d.fault_index(f.abuts_fault);
         if (a < 0) c.err(b + ".abuts.fault", "R1", "unknown fault '" + f.abuts_fault + "'");

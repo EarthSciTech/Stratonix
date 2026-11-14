@@ -17,7 +17,6 @@ stx_test(test_sheet stratonix_package)
 stx_test(test_v2_curved stratonix_package)
 stx_test(test_v2_interaction stratonix_package)
 stx_test(test_v2_movement stratonix_package)
-set_tests_properties(test_v2_interaction PROPERTIES WILL_FAIL TRUE)  # until Prompt 17
 set_tests_properties(test_v2_movement PROPERTIES WILL_FAIL TRUE)     # until Prompt 18
 # Independent check of the figure files (Python: Pillow, tifffile, python-pptx); skipped if absent.
 find_package(Python3 COMPONENTS Interpreter QUIET)
@@ -44,7 +43,7 @@ add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:str
 get_property(_stx_tests DIRECTORY PROPERTY TESTS)
 set_tests_properties(${_stx_tests} PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 # The worked examples of the user guide build with every check passing.
-foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover)
+foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <sstream>
 
 #include "stratonix/core/error.hpp"
@@ -21,6 +22,8 @@ STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c6);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c7);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c8);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c9);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c10);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c11);
 
 namespace stratonix {
 
@@ -267,6 +270,16 @@ class C4 final : public Check {
       auto cutoff = [&](std::size_t h, double a, bool hw, double& b_out) {
         double bu, bl;
         F.tips(a, bu, bl);
+        if (F.abuts >= 0 && !F.curved && !net->faults()[static_cast<std::size_t>(F.abuts)].curved) {
+          // only the part of the fault on its active side of the abutted fault
+          const Fault& M = net->faults()[static_cast<std::size_t>(F.abuts)];
+          double den = dot(M.n, F.dd);
+          if (std::fabs(den) > 1e-12) {
+            double bb = -M.sigma(F.at(a, 0)) / den;
+            bool above_active = (M.sigma(F.at(a, bb - 1)) > 0) == F.abut_hw_side;
+            if (above_active) bl = std::min(bl, bb - 0.5); else bu = std::max(bu, bb + 0.5);
+          }
+        }
         if (!(bl > bu)) return false;
         double b0 = bu, s0 = wall_s(h, a, b0, hw);
         for (double b1 = bu + step;; b1 += step) {
@@ -292,15 +305,26 @@ class C4 final : public Check {
           Vec3 chw = F.at(a, bhw), cfw = F.at(a, bfw);
           Vec3 cm = fixed_hw ? cfw : chw;
           double expect = 0;
-          net->undo(fi, cm, fixed_hw ? -1 : 1, &expect);
+          if (F.drag) {
+            // drag moves both cut-offs along the slip (STX-TN-05 section 3): undo it first, then
+            // add its vertical parts to the expected separation
+            Vec3 p_hw = net->drag_inverse(fi, chw, true), p_fw = net->drag_inverse(fi, cfw, false);
+            net->undo(fi, fixed_hw ? p_fw : p_hw, fixed_hw ? -1 : 1, &expect);
+            expect += net->drag_forward(fi, p_fw, false).z - net->drag_forward(fi, p_hw, true).z;
+          } else {
+            net->undo(fi, cm, fixed_hw ? -1 : 1, &expect);
+          }
           double meas;
-          if (F.kin->name() == "dip_slip") {
+          const bool along_dip = F.kin->name() == "dip_slip" && std::fabs(dot(F.slip, F.s)) < 1e-9;
+          if (along_dip) {
             meas = cfw.z - chw.z;
           } else {
-            // fixed wall's horizon on the vertical through the moving cut-off
+            // fixed wall's horizon on the vertical through the position the moving cut-off came
+            // from (the cut-off itself for vertical offsets; slip with a strike component moves it)
+            Vec3 from = net->undo(fi, cm, fixed_hw ? -1 : 1);
             bool hwfix = fixed_hw;
             auto sv = [&](double z) {
-              Vec3 p{cm.x, cm.y, z};
+              Vec3 p{from.x, from.y, z};
               Vec3 r = net->restore_from_frame(p, fi, hwfix);
               return r.z - st->z(h, r.x, r.y);
             };
@@ -322,6 +346,135 @@ class C4 final : public Check {
       }
       (void)bmin;
       (void)bmax;
+    }
+    return out;
+  }
+};
+
+/// C10: displacement-length scaling (STX-TN-05 section 4.4). A warning: a stated throw is never
+/// changed. Faults longer than the model diagonal are reported for information.
+class C10 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    const auto& inf = c.model().info();
+    const auto& d = c.description();
+    std::vector<CheckResult> out;
+    auto* net = static_cast<const FaultNetwork*>(c.model().capability("faults"));
+    const double lo = d.scaling_min_ratio.present ? d.scaling_min_ratio.si() : 0.001;
+    const double hi = d.scaling_max_ratio.present ? d.scaling_max_ratio.si() : 0.1;
+    const std::string src = d.scaling_min_ratio.present || d.scaling_max_ratio.present
+                                ? std::string("checks.fault_scaling")
+                                : std::string("Stratonix default (Schultz et al. 2008; Lathrop et al. 2022)");
+    const double diag = std::hypot(inf.domain.sx, inf.domain.sy);
+    for (std::size_t f = 0; f < inf.faults.size() && f < d.faults.size(); ++f) {
+      const auto& fd = d.faults[f];
+      double L = fd.length.present ? fd.length.si() : 0.0;
+      double D = net && f < net->size() ? std::fabs(net->faults()[f].tmax) : (fd.throw_max.present ? std::fabs(fd.throw_max.si()) : 0.0);
+      if (!(L > 0)) continue;
+      auto r = base(c, "C10", "displacement-length scaling", inf.faults[f].name);
+      r.unit = "ratio";
+      r.value = D / L;
+      r.tolerance = hi;
+      r.tolerance_source = src;
+      r.warn_only = true;
+      if (L > diag) {
+        r.info = true;
+        r.passed = true;
+        r.detail = "length " + fmt_fixed(L, 0) + " m exceeds the model diagonal; reported for information";
+      } else {
+        r.passed = r.value >= lo && r.value <= hi;
+        r.detail = "maximum displacement " + fmt_fixed(D, 1) + " m over length " + fmt_fixed(L, 0) + " m; range " +
+                   fmt_fixed(lo, 4) + " to " + fmt_fixed(hi, 4);
+      }
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
+/// C11: fault-system consistency (STX-TN-05 section 4.4). Splays with transfer: the splay's
+/// displacement continues on the block beyond the branch line. Relays: the summed throw through
+/// the overlap equals the equivalent single fault's (a linear blend of the two throws).
+class C11 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* net = static_cast<const FaultNetwork*>(c.model().capability("faults"));
+    if (!net) return out;
+    std::string src;
+    const double tol = c.tolerance("throw", &src);
+    const auto& fs = net->faults();
+    const Domain& dom = c.model().info().domain;
+    auto mid_b = [](const Fault& F, double a) {
+      double bu, bl;
+      F.tips(a, bu, bl);
+      return 0.5 * (bu + bl);
+    };
+    for (const Fault& F : fs) {
+      if (F.transfer && F.abuts >= 0 && !F.curved) {
+        const Fault& M = fs[static_cast<std::size_t>(F.abuts)];
+        Vec3 dir = cross(M.n, F.n);
+        if (norm(dir) < 1e-9) continue;
+        dir = normalized(dir);
+        Vec3 away = normalized(M.dd - dir * dot(M.dd, dir));
+        double worst = 0;
+        int n = 0;
+        // points of the branch line inside the domain: intersect the two planes along the splay's strike
+        for (int k = 1; k < 40; ++k) {
+          double a = -0.5 * F.length + F.length * k / 40.0;
+          // the splay's down-dip line at strike position a meets the master
+          Vec3 o = F.at(a, 0);
+          double den = dot(M.n, F.dd);
+          if (std::fabs(den) < 1e-12) continue;
+          double b = -M.sigma(o) / den;
+          Vec3 B = F.at(a, b);
+          if (!dom.inside_xy(B.x, B.y) || B.z > dom.z_top || B.z < dom.z_base) continue;
+          double am, bm;
+          M.profile_coords(B, am, bm);
+          if (std::fabs(am) >= 0.5 * M.length) continue;
+          double ta, tb;
+          F.profile_coords(B, ta, tb);
+          double ts = F.throw_at(ta, tb);
+          Vec3 beyond = B + away * 2.0 + M.n * 2.0;
+          bool active = true;
+          Vec3 r = net->relative_displacement(F.index, beyond, &active);
+          double carried = active && F.sigma(beyond) > 0 ? -r.z : 0.0;
+          worst = std::max(worst, std::fabs(ts - carried));
+          ++n;
+        }
+        if (n == 0) continue;
+        auto r = base(c, "C11", "fault-system consistency", F.name + " splay of " + M.name);
+        r.value = worst;
+        r.tolerance = tol;
+        r.tolerance_source = src;
+        r.passed = worst <= tol;
+        r.detail = std::to_string(n) + " points of the branch line; splay throw against the throw carried beyond it";
+        out.push_back(r);
+      }
+      if (F.relay_with > F.index) {
+        const Fault& G = fs[static_cast<std::size_t>(F.relay_with)];
+        // throws just outside the overlap on each fault's full side
+        double span = F.ra_zero - F.ra_one, ext = 0.02 * std::fabs(span);
+        double aF_full = F.ra_one - (span > 0 ? ext : -ext);
+        double tF = F.throw_at(aF_full, mid_b(F, aF_full));
+        double aG_full = G.ra_one - ((G.ra_zero - G.ra_one) > 0 ? ext : -ext);
+        double tG = G.throw_at(aG_full, mid_b(G, aG_full));
+        double worst = 0;
+        for (int k = 0; k <= 40; ++k) {
+          double w = k / 40.0;
+          double aF = F.ra_one + w * span;
+          Vec3 p = F.at(aF, mid_b(F, aF));
+          double aG = dot(p - G.p0, G.s);
+          double sum = F.throw_at(aF, mid_b(F, aF)) + G.throw_at(aG, mid_b(G, aG));
+          worst = std::max(worst, std::fabs(sum - ((1 - w) * tF + w * tG)));
+        }
+        auto r = base(c, "C11", "fault-system consistency", F.name + " relays with " + G.name);
+        r.value = worst;
+        r.tolerance = tol;
+        r.tolerance_source = src;
+        r.passed = worst <= tol;
+        r.detail = "summed throw through the overlap against the equivalent single fault (" + fmt_fixed(tF, 1) + " to " +
+                   fmt_fixed(tG, 1) + " m)";
+        out.push_back(r);
+      }
     }
     return out;
   }
@@ -527,6 +680,10 @@ STRATONIX_REGISTER(check_c8, registry::Kind::Check, "C8_fault_intersections", "1
                    [] { return std::make_unique<C8>(); })
 STRATONIX_REGISTER(check_c9, registry::Kind::Check, "C9_closure", "1.0.0", "Closure, spill point and area against targets",
                    [] { return std::make_unique<C9>(); })
+STRATONIX_REGISTER(check_c10, registry::Kind::Check, "C10_fault_scaling", "1.0.0", "Displacement-length scaling (warning)",
+                   [] { return std::make_unique<C10>(); })
+STRATONIX_REGISTER(check_c11, registry::Kind::Check, "C11_fault_system", "1.0.0",
+                   "Throw continuous across branch lines and relays", [] { return std::make_unique<C11>(); })
 
 CheckReport run_checks(CheckContext& ctx) {
   CheckReport rep;
@@ -535,6 +692,10 @@ CheckReport run_checks(CheckContext& ctx) {
     auto rs = chk->run(ctx);
     rep.results.insert(rep.results.end(), rs.begin(), rs.end());
   }
+  // Report in numeric order of the check ids (C1, C2, ..., C10, C11), stable within a check.
+  auto num = [](const std::string& id) { return id.size() > 1 && id[0] == 'C' ? std::atoi(id.c_str() + 1) : 1 << 20; };
+  std::stable_sort(rep.results.begin(), rep.results.end(),
+                   [&](const CheckResult& a, const CheckResult& b) { return num(a.id) < num(b.id); });
   return rep;
 }
 
@@ -548,6 +709,8 @@ void register_check_plugins() {
   STRATONIX_PLUGIN_ANCHOR(check_c7);
   STRATONIX_PLUGIN_ANCHOR(check_c8);
   STRATONIX_PLUGIN_ANCHOR(check_c9);
+  STRATONIX_PLUGIN_ANCHOR(check_c10);
+  STRATONIX_PLUGIN_ANCHOR(check_c11);
 }
 
 }  // namespace stratonix
