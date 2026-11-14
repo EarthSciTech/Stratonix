@@ -108,6 +108,10 @@ struct Section {
   std::vector<BlockCode> block;     ///< nz x ns
   std::vector<std::vector<double>> horizon_z;  ///< per horizon, per column: elevation or NaN (gap)
   std::vector<std::vector<double>> fault_z;    ///< per fault, per column: elevation of the fault or NaN
+  /// Sections where fault blocks overlap (reverse faults): per horizon, the horizon in each fault
+  /// block along the section (NaN where that block does not hold it), so both sheets are drawn.
+  /// Empty when no block overlaps another along the section.
+  std::vector<std::vector<std::pair<BlockCode, std::vector<double>>>> horizon_block_z;
 };
 Section make_section(const Model& m, const std::string& name, const Polyline& line, double ds, double dz);
 

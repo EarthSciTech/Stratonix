@@ -1,0 +1,66 @@
+# Worked example 9: a vertical right-lateral strike-slip fault with 600 m of slip offsets the axis of an
+# anticline that crosses it (stage 2A).
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_strike_slip, version: "1.0.0", status: DESIGN,
+        title: "Right-lateral strike-slip fault offsetting a plunging anticline"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, fixed block"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+      H4: "1600 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]   # the fault cuts top and base on purpose
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+  primitives:
+    - type: anticline
+      name: A1
+      crest: "[5000, 5000] m | user_instruction | worked example"
+      axis_azimuth: "70 deg | user_instruction | worked example: crosses the fault obliquely"
+      half_width_left: "2000 m | user_instruction | worked example"
+      half_width_right: "2000 m | user_instruction | worked example"
+      relief:
+        H1: "150 m | user_instruction | worked example"
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry:
+      type: planar
+      reference_point: "[5000, 5000] m | user_instruction | worked example"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: north-south"
+      dip: "90 deg | user_instruction | worked example: vertical"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "30000 m | user_instruction | worked example: longer than the model"
+    throw:
+      slip: "600 m | user_instruction | worked example"
+      sense: right_lateral
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.2 fraction | user_instruction | worked example"}
+    slip_mode: strike_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[500, 5000], [9500, 5000]] m | user_instruction | worked example: across the fault"
+  vertical_exaggeration: "5 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

@@ -330,6 +330,7 @@ class C4 final : public Check {
             };
             double zf = expand_and_solve(sv, cm.z, 5.0, 1e4, 1e-7);
             meas = fixed_hw ? cm.z - zf : zf - cm.z;
+            expect *= -F.slip.z;  // vertical part of the displacement (1 for dip-slip and vertical offsets)
           }
           worst = std::max(worst, std::fabs(meas - expect));
           tmax = std::max(tmax, std::fabs(expect));

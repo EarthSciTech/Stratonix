@@ -121,7 +121,8 @@ std::vector<const Param*> Description::all_params() const {
                     &f.trace_depth, &f.decay_length, &f.upper.offset, &f.upper.fraction, &f.upper.depth,
                     &f.lower.offset, &f.lower.fraction, &f.lower.depth, &f.length, &f.throw_max,
                     &f.profile_dip.taper, &f.profile_strike.taper, &f.influence_distance, &f.detachment_depth,
-                    &f.profile, &f.heave, &f.shear_angle, &f.drag_fraction, &f.drag_width})
+                    &f.profile, &f.heave, &f.shear_angle, &f.drag_fraction, &f.drag_width, &f.net_slip,
+                    &f.rake})
       add(*q);
   }
   for (auto& s : sections) { add(s.polyline); add(s.detail_window); }
@@ -427,7 +428,12 @@ struct Typer {
         fd.length = P(e, "length", b + ".extent", Dimension::Length, true, 1);
         fd.tip_line_shape = S(e, "tip_line_shape", "rectangular");
         const Node* th = f.get("throw");
-        fd.throw_max = P(th, "max", b + ".throw", Dimension::Length, !curved, 1);
+        fd.slip_mode = S(&f, "slip_mode");
+        const bool by_slip = fd.strike_component();
+        fd.throw_max = P(th, "max", b + ".throw", Dimension::Length, !curved && !by_slip, 1);
+        fd.net_slip = P(th, "slip", b + ".throw", Dimension::Length, by_slip, 1);
+        fd.sense = S(th, "sense");
+        fd.rake = P(&f, "rake", b, Dimension::Angle, fd.slip_mode == "oblique", 1);
         fd.heave = P(th, "heave", b + ".throw", Dimension::Length, curved, 1);
         auto prof = [&](const char* key, ProfileDesc& pd) {
           const Node* pn = th ? th->get(key) : nullptr;
@@ -874,6 +880,28 @@ struct Typer {
         c.err(b + ".extent", "F3", "upper tip is not above the lower tip at the reference location");
       if (f.upper.rule == "free" && f.lower.rule == "free")
         c.warn(b + ".extent", "F3", "both tips free: the fault cuts the whole model");
+      {
+        // STX-TN-05 section 5: movement sense.
+        const bool ss = f.slip_mode == "strike_slip", ob = f.slip_mode == "oblique";
+        if ((ss || ob) && f.throw_max.present)
+          c.err(b + ".throw.max", "F16", "an " + f.slip_mode + " fault takes its net slip as throw.slip, not throw.max");
+        if (!ss && !ob && f.net_slip.present)
+          c.err(b + ".throw.slip", "F16", "throw.slip is the net slip of oblique and strike_slip faults; dip-slip faults take throw.max");
+        if (ss && f.sense != "left_lateral" && f.sense != "right_lateral")
+          c.err(b + ".throw.sense", "F16", "a strike_slip fault needs throw.sense: left_lateral or right_lateral");
+        if ((f.slip_mode == "dip_slip" || f.slip_mode == "vertical_offset") && !f.sense.empty() && f.sense != "normal" && f.sense != "reverse")
+          c.err(b + ".throw.sense", "F16", "a " + f.slip_mode + " fault's sense is normal or reverse");
+        if (ob && !f.sense.empty()) c.err(b + ".throw.sense", "F16", "an oblique fault's sense follows from its rake; give no throw.sense");
+        if (!ob && f.rake.present) c.err(b + ".rake", "F16", "rake belongs to oblique faults");
+        if (ob && f.rake.present && std::fabs(f.rake.si()) > kPi + 1e-12) c.err(b + ".rake", "F16", "rake must be in [-180, 180] degrees");
+        if ((ss || ob) && f.hw_type != "rigid")
+          c.err(b + ".hanging_wall.type", "F16", "a fault with a strike component of slip takes hanging_wall: rigid (the scaled fields assume dip-slip motion)");
+        if (f.net_slip.present && f.net_slip.si() < 0) c.err(b + ".throw.slip", "F16", "net slip must not be negative (the sense gives the direction)");
+        if (f.throw_max.present && f.throw_max.si() < 0 && f.sense == "reverse")
+          c.err(b + ".throw.max", "F16", "give a positive throw with sense: reverse");
+        if (f.curved() && f.sense == "reverse")
+          c.err(b + ".throw.sense", "F14", "curved faults are normal in stage 2A (contractional curved faults come with stage 2B)");
+      }
       if (!f.drag_type.empty()) {
         // STX-TN-05 section 3: drag moves material parallel to the slip, inside the fault surface.
         if (f.curved()) c.err(b + ".drag", "F13", "drag applies to planar faults (curved faults deform their hanging wall by shear)");

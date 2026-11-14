@@ -427,6 +427,39 @@ Section make_section(const Model& m, const std::string& name, const Polyline& li
     faulted_roots(m, static_cast<int>(h), xs, ys, z, b, nullptr, nullptr);
     s.horizon_z.push_back(z);
   }
+  bool can_overlap = false;
+  for (auto& fi : inf.faults) can_overlap = can_overlap || fi.overlapping;
+  if (can_overlap) {
+    // Trace each block's horizon on its own, keeping a root only where the model puts it in that
+    // block; used for drawing where two blocks hold the same horizon in one column.
+    s.horizon_block_z.resize(inf.horizons.size());
+    std::vector<BlockCode> codes(s.block.begin(), s.block.end());
+    std::sort(codes.begin(), codes.end());
+    codes.erase(std::unique(codes.begin(), codes.end()), codes.end());
+    bool any_overlap = false;
+    for (std::size_t h = 0; h < inf.horizons.size(); ++h)
+      for (BlockCode bc : codes) {
+        std::vector<double> z;
+        vertical_roots(m, static_cast<int>(h), bc, xs, ys, s.z_top + 2000, s.z_base - 2000, z);
+        std::vector<Vec3> p(z.size());
+        for (std::size_t i = 0; i < z.size(); ++i) p[i] = {xs[i], ys[i], std::isnan(z[i]) ? 0.0 : z[i]};
+        EvalResult r;
+        m.evaluate(p, kEvalBlock, r);
+        bool any = false;
+        for (std::size_t i = 0; i < z.size(); ++i) {
+          if (std::isnan(z[i]) || z[i] > s.z_top || z[i] < s.z_base || r.block[i] != bc) z[i] = kNaN;
+          else any = true;
+        }
+        if (any) s.horizon_block_z[h].push_back({bc, std::move(z)});
+      }
+    for (std::size_t h = 0; h < inf.horizons.size() && !any_overlap; ++h)
+      for (std::size_t i = 0; i < xs.size() && !any_overlap; ++i) {
+        int n = 0;
+        for (auto& [bc, zz] : s.horizon_block_z[h]) n += std::isnan(zz[i]) ? 0 : 1;
+        any_overlap = n > 1;
+      }
+    if (!any_overlap) s.horizon_block_z.clear();
+  }
   for (std::size_t f = 0; f < inf.faults.size(); ++f) {
     std::vector<double> z, e;
     fault_vertical_roots(m, static_cast<int>(f), xs, ys, s.z_top, s.z_base, z, &e);

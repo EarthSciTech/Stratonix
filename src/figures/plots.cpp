@@ -192,15 +192,21 @@ void draw_section_panel(Figure& f, const FigureContext& c, const repr::Section& 
       }
     }
   }
-  // Horizon lines.
-  for (std::size_t h = 0; h < nh; ++h) {
+  // Horizon lines (per fault block where blocks overlap, so both sheets are drawn).
+  auto draw_line = [&](const std::vector<double>& zz) {
     std::vector<Pt> cur;
     for (std::size_t col = 0; col < s.ns; ++col) {
-      double z = s.horizon_z[h][col];
+      double z = zz[col];
       if (std::isnan(z)) { if (cur.size() > 1) f.path(cur, false, none(), kInk, 0.6); cur.clear(); continue; }
       cur.push_back(fr.p(s.station[col], z));
     }
     if (cur.size() > 1) f.path(cur, false, none(), kInk, 0.6);
+  };
+  for (std::size_t h = 0; h < nh; ++h) {
+    if (h < s.horizon_block_z.size() && !s.horizon_block_z[h].empty())
+      for (auto& [bc, zz] : s.horizon_block_z[h]) draw_line(zz);
+    else
+      draw_line(s.horizon_z[h]);
   }
   // Fault traces (between tips).
   for (std::size_t ff = 0; ff < s.fault_z.size(); ++ff) {

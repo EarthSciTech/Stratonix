@@ -284,6 +284,38 @@ static void faulted_roots_chunk(const Model& m, int h, const std::vector<double>
         }
       }
     }
+    // Reverse faults: a vertical can meet the horizon in two blocks. Collect the root of every block
+    // found on this horizon and keep the upper one, as the reference does.
+    bool can_overlap = false;
+    for (auto& fi : m.info().faults) can_overlap = can_overlap || fi.overlapping;
+    if (can_overlap) {
+      std::vector<BlockCode> codes;
+      for (std::size_t i = 0; i < n; ++i)
+        if (!std::isnan(z[i])) codes.push_back(blk[i]);
+      std::sort(codes.begin(), codes.end());
+      codes.erase(std::unique(codes.begin(), codes.end()), codes.end());
+      for (BlockCode b : codes) {
+        std::vector<std::size_t> idx;
+        for (std::size_t i = 0; i < n; ++i)
+          if (std::isnan(z[i]) || blk[i] != b) idx.push_back(i);
+        if (idx.empty()) continue;
+        std::vector<double> bx, byy, bz;
+        for (auto i : idx) { bx.push_back(xs[i]); byy.push_back(ys[i]); }
+        vertical_roots(m, h, b, bx, byy, zt + 2000, zb - 2000, bz);
+        std::vector<std::size_t> ok;
+        std::vector<double> okz;
+        for (std::size_t k = 0; k < idx.size(); ++k)
+          if (!std::isnan(bz[k]) && bz[k] <= zt && bz[k] >= zb) { ok.push_back(idx[k]); okz.push_back(bz[k]); }
+        auto bb = blocks_at(ok, okz);
+        for (std::size_t k = 0; k < ok.size(); ++k) {
+          if (bb[k] != b) continue;
+          std::size_t i = ok[k];
+          if (std::isnan(z[i])) { z[i] = okz[k]; blk[i] = b; continue; }
+          if (std::fabs(okz[k] - z[i]) > 0.01) ++nover;
+          if (okz[k] > z[i]) { z[i] = okz[k]; blk[i] = b; }  // upper kept
+        }
+      }
+    }
     for (std::size_t i = 0; i < n; ++i)
       if (std::isnan(z[i]) && inside_any[i]) ++ngap;
   }

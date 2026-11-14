@@ -591,13 +591,26 @@
               },
               "heave": {
                 "$ref": "#/$defs/param"
+              },
+              "slip": {
+                "$ref": "#/$defs/param"
+              },
+              "sense": {
+                "enum": [
+                  "normal",
+                  "reverse",
+                  "left_lateral",
+                  "right_lateral"
+                ]
               }
             }
           },
           "slip_mode": {
             "enum": [
               "dip_slip",
-              "vertical_offset"
+              "vertical_offset",
+              "oblique",
+              "strike_slip"
             ]
           },
           "hanging_wall": {
@@ -690,6 +703,9 @@
                 "type": "boolean"
               }
             }
+          },
+          "rake": {
+            "$ref": "#/$defs/param"
           }
         }
       }

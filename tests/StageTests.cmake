@@ -12,12 +12,11 @@ stx_test(test_interop stratonix_package)
 stx_test(test_package stratonix_package stx::zlib)
 stx_test(test_implicit stratonix_package)
 stx_test(test_sheet stratonix_package)
-# Stage 2A analytical tests (STX-TN-05), written before the features: each is expected to fail
-# until its prompt is done, then its WILL_FAIL line is removed.
+# Stage 2A analytical tests (STX-TN-05), written before the features (Prompt 15) and made to pass
+# by Prompts 16 to 18.
 stx_test(test_v2_curved stratonix_package)
 stx_test(test_v2_interaction stratonix_package)
 stx_test(test_v2_movement stratonix_package)
-set_tests_properties(test_v2_movement PROPERTIES WILL_FAIL TRUE)     # until Prompt 18
 # Independent check of the figure files (Python: Pillow, tifffile, python-pptx); skipped if absent.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
@@ -43,7 +42,7 @@ add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:str
 get_property(_stx_tests DIRECTORY PROPERTY TESTS)
 set_tests_properties(${_stx_tests} PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 # The worked examples of the user guide build with every check passing.
-foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay)
+foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)

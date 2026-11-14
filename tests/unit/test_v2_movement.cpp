@@ -1,5 +1,6 @@
 // Stage 2A, Prompt 18: reverse, strike-slip and oblique movement (STX-TN-05 section 5).
 #include "v2_fixture.hpp"
+#include "stratonix/io/io.hpp"
 
 using namespace v2fx;
 
@@ -48,6 +49,24 @@ TEST_CASE("P18 oblique slip at rake -45 degrees: dip and strike components") {
   double expected = 300 * std::sin(deg2rad(45)) * std::sin(deg2rad(60)) - 300 * std::cos(deg2rad(45)) * std::tan(deg2rad(5));
   double step = depth_faulted(*m, 0, 7000, 5000) - depth_faulted(*m, 0, 3000, 5000);
   CHECK_NEAR(step, expected, 0.5);
+}
+
+TEST_CASE("P18 thrust exports: overlapping hanging-wall and footwall grids load back") {
+  namespace fs = std::filesystem;
+  register_all_plugins();
+  fs::path out = fs::path(stxtest::tmp_dir()) / "v2_thrust_export";
+  fs::remove_all(out);
+  BuildOptions o;
+  o.figures = false;
+  o.exports = {"petrel"};
+  auto r = run_build(fs::path(stxtest::source_dir()) / "examples/thrust_repeated_section.yaml", out, o);
+  REQUIRE(r.checks_passed);
+  // Between the hanging-wall and footwall cut-offs of H2 (x 4567 to 4827 m at y = 5000 m) both
+  // sheets exist: the raised hanging wall at 1050 m and the footwall at 1200 m.
+  auto hw = io::read_irap_ascii(read_file(out / "exports/horizons/per_block/H2_block1.irap"));
+  auto fw = io::read_irap_ascii(read_file(out / "exports/horizons/per_block/H2_block0.irap"));
+  CHECK_NEAR(-hw.sample(4700, 5000), 1050, 0.5);
+  CHECK_NEAR(-fw.sample(4700, 5000), 1200, 0.5);
 }
 
 STX_TEST_MAIN()

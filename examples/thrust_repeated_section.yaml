@@ -1,0 +1,61 @@
+# Worked example 8: a reverse fault (thrust) dipping 30 degrees east; the hanging wall is raised 150 m over
+# the footwall, so wells east of the fault cross part of the section twice (stage 2A).
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_thrust, version: "1.0.0", status: DESIGN,
+        title: "Thrust with a repeated section"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, fixed block"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+      H4: "1600 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[5300, 5000] m | user_instruction | worked example: planned well through the repeated section"
+    total_depth: "1800 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]   # the fault cuts top and base on purpose
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry:
+      type: planar
+      reference_point: "[5000, 5000] m | user_instruction | worked example"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: dips east"
+      dip: "30 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "30000 m | user_instruction | worked example: longer than the model"
+    throw:
+      max: "150 m | user_instruction | worked example"
+      sense: reverse
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.2 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[500, 5000], [9500, 5000]] m | user_instruction | worked example: across the thrust"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

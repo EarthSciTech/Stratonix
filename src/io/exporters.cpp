@@ -80,6 +80,23 @@ Grid2D ExportContext::block_surface(int h, BlockCode b, int dilate) {
     mask.swap(m2);
   }
   Grid2D full = repr::horizon_grid_block(m_, h, b, g);
+  bool can_overlap = false;
+  for (auto& fi : info().faults) can_overlap = can_overlap || fi.overlapping;
+  if (can_overlap) {
+    // Under a reverse fault the faulted surface keeps the upper sheet; the lower block still holds
+    // the horizon there, so its own surface covers every node where the model puts it in the block.
+    std::vector<std::size_t> idx;
+    std::vector<Vec3> p;
+    for (std::size_t k = 0; k < g.size(); ++k)
+      if (!mask[k] && !std::isnan(full.v[k]) && full.v[k] <= info().domain.z_top && full.v[k] >= info().domain.z_base) {
+        idx.push_back(k);
+        p.push_back({g.x(k % g.nx), g.y(k / g.nx), full.v[k]});
+      }
+    EvalResult r;
+    m_.evaluate(p, kEvalBlock, r);
+    for (std::size_t q = 0; q < idx.size(); ++q)
+      if (r.block[q] == b) mask[idx[q]] = 1;
+  }
   for (std::size_t k = 0; k < g.size(); ++k)
     if (!mask[k]) full.v[k] = kNaN;
   return full;

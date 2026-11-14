@@ -56,6 +56,9 @@ struct FaultInfo {
   /// Recorded relations with other faults: "abuts F", "splay of F" (abutting with transfer),
   /// "relays with F".
   std::vector<std::string> relations;
+  /// True when the hanging wall can override the footwall (reverse sense, or slip with an upward
+  /// component): a vertical can then meet the same horizon in two blocks.
+  bool overlapping = false;
 };
 /// Description of a model, independent of the engine.
 struct ModelInfo {

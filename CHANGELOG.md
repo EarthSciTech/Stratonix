@@ -31,6 +31,18 @@ has its own version (`stratonix_schema`).
 - Figures: a displacement map on every fault surface with the horizons' cut-offs, and the throw
   along strike of each linked fault system. Worked example `fault_system_relay_splay.yaml`.
 
+- Movement sense (Prompt 18): `throw.sense: normal | reverse` on dip-slip and vertical-offset
+  faults (absent means normal, as before); `slip_mode: oblique` with the net slip `throw.slip`
+  and a `rake` (Aki and Richards); `slip_mode: strike_slip` with `throw.slip` and
+  `sense: left_lateral | right_lateral`. Rule F16 keeps faults with a strike component of slip on
+  rigid hanging walls. Reverse faults report the repeated thickness per horizon; faults whose
+  slip is not plain normal dip-slip report their slip vector. Worked examples
+  `thrust_repeated_section.yaml`, `strike_slip_offset.yaml` and `oblique_fault.yaml`.
+- Overlaps under reverse faults: the faulted surface keeps the upper sheet (now also in the
+  optimised tracer) and counts overlap nodes; per-block grids carry each block's own sheet, so
+  the hanging wall and footwall over a thrust are exported separately; sections draw each
+  block's horizon. `FaultInfo.overlapping` marks faults that can override their footwall.
+
 ### Changed
 - Check C4 measures faults whose slip has a strike component against the footwall horizon where
   the moving cut-off came from.

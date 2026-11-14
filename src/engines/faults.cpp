@@ -15,6 +15,8 @@
 // Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
 STRATONIX_DECLARE_PLUGIN_ANCHOR(kin_dip_slip);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(kin_vertical);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(kin_oblique);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(kin_strike_slip);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_rigid);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_layer_rigid);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_decay);
@@ -111,6 +113,22 @@ class VerticalOffset final : public Kinematics {
   Vec3 slip_vector(const Vec3&, double) const override { return {0, 0, -1}; }
   std::string name() const override { return "vertical_offset"; }
 };
+/// Oblique slip: unit vector at the rake in the fault plane (Aki and Richards: from the strike
+/// direction, positive up dip); the displacement magnitude is the net slip.
+class Oblique final : public Kinematics {
+ public:
+  Vec3 slip_vector(const Vec3& dd, double dip) const override { return dd / std::sin(dip); }
+  Vec3 slip_vector(const Vec3& s, const Vec3& dd, double, double rake) const override {
+    return s * std::cos(rake) - dd * std::sin(rake);
+  }
+  std::string name() const override { return "oblique"; }
+};
+class StrikeSlip final : public Kinematics {
+ public:
+  Vec3 slip_vector(const Vec3& dd, double dip) const override { return dd / std::sin(dip); }
+  Vec3 slip_vector(const Vec3& s, const Vec3&, double, double rake) const override { return s * std::cos(rake); }
+  std::string name() const override { return "strike_slip"; }
+};
 class RigidHW final : public HangingWallField {
  public:
   double scale(double, double, double) const override { return 1.0; }
@@ -155,6 +173,12 @@ STRATONIX_REGISTER(kin_dip_slip, registry::Kind::Kinematics, "dip_slip", "1.0.0"
 STRATONIX_REGISTER(kin_vertical, registry::Kind::Kinematics, "vertical_offset", "1.0.0",
                    "Hanging wall moves vertically by the throw (prototype mode)",
                    [] { return std::make_unique<VerticalOffset>(); })
+STRATONIX_REGISTER(kin_oblique, registry::Kind::Kinematics, "oblique", "1.0.0",
+                   "Hanging wall moves at a rake in the fault plane by the net slip",
+                   [] { return std::make_unique<Oblique>(); })
+STRATONIX_REGISTER(kin_strike_slip, registry::Kind::Kinematics, "strike_slip", "1.0.0",
+                   "Hanging wall moves along strike by the net slip (left- or right-lateral)",
+                   [] { return std::make_unique<StrikeSlip>(); })
 STRATONIX_REGISTER(hw_rigid, registry::Kind::HangingWall, "rigid", "1.0.0",
                    "Full displacement throughout the moving block", [] { return std::make_unique<RigidHW>(); })
 STRATONIX_REGISTER(hw_layer_rigid, registry::Kind::HangingWall, "layer_rigid", "1.0.0",
@@ -176,6 +200,8 @@ STRATONIX_REGISTER(hw_inclined_shear, registry::Kind::HangingWall, "inclined_she
 void register_fault_plugins() {
   STRATONIX_PLUGIN_ANCHOR(kin_dip_slip);
   STRATONIX_PLUGIN_ANCHOR(kin_vertical);
+  STRATONIX_PLUGIN_ANCHOR(kin_oblique);
+  STRATONIX_PLUGIN_ANCHOR(kin_strike_slip);
   STRATONIX_PLUGIN_ANCHOR(hw_rigid);
   STRATONIX_PLUGIN_ANCHOR(hw_layer_rigid);
   STRATONIX_PLUGIN_ANCHOR(hw_decay);
@@ -354,13 +380,17 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
     f.elliptical = fd.tip_line_shape == "elliptical";
     f.upper = tip_rule(fd.upper, d);
     f.lower = tip_rule(fd.lower, d);
-    f.tmax = f.curved ? f.curved->heave : fd.throw_max.si();
+    if (f.curved) f.tmax = f.curved->heave;
+    else if (fd.strike_component()) f.tmax = fd.net_slip.si();
+    else f.tmax = fd.sense == "reverse" ? -fd.throw_max.si() : fd.throw_max.si();
+    if (fd.slip_mode == "oblique") f.rake = fd.rake.si();
+    if (fd.slip_mode == "strike_slip") f.rake = fd.sense == "right_lateral" ? kPi : 0.0;
     f.pdip = profile_from(fd.profile_dip.type);
     f.pstrike = profile_from(fd.profile_strike.type);
     f.taper_dip = fd.profile_dip.taper.present ? fd.profile_dip.taper.si() : 0.25;
     f.taper_strike = fd.profile_strike.taper.present ? fd.profile_strike.taper.si() : 0.25;
     f.kin = reg.create<Kinematics>(registry::Kind::Kinematics, fd.slip_mode);
-    f.slip = f.kin->slip_vector(f.dd, f.dip);
+    f.slip = f.kin->slip_vector(f.s, f.dd, f.dip, f.rake);
     f.hw = reg.create<HangingWallField>(registry::Kind::HangingWall, fd.hw_type);
     f.hw_name = f.hw->name();
     f.layered = f.hw->name() == "layer_rigid";
@@ -520,7 +550,8 @@ bool FaultNetwork::cannot_move(int fi, const Vec3& q) const {
   double a, b;
   f.profile_coords(q, a, b);
   if (f.transfer) return false;  // slip along the branch line has a strike component
-  if (std::fabs(a) >= 0.5 * f.length) return true;  // slip has no strike component
+  // a point beyond the strike ends stays there unless the slip carries it along strike
+  if (std::fabs(a) >= 0.5 * f.length + std::fabs(dot(f.slip, f.s)) * std::fabs(f.tmax)) return true;
   if (f.layered || f.curved) return false;  // a layer can meet the fault far from the point
   if (b + f.slip_b < f.b_lo || b - f.slip_b > f.b_hi) return true;
   if (f.decays && std::fabs(f.sigma(q)) - f.slip_sigma >= f.influence) return true;
@@ -624,6 +655,17 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
           prev = t;
         }
       }
+      // along strike: the slip's strike component samples the strike profile elsewhere
+      const double per_tau_a = std::fabs(dot(f.slip, f.s));
+      if (per_tau_a > 1e-12)
+        for (std::size_t i = 1; i < K; ++i) {
+          double bu, bl;
+          f.tips(f.a_tab[i], bu, bl);
+          if (!(bl > bu) || !std::isfinite(bu) || !std::isfinite(bl)) continue;
+          double bm = 0.5 * (bu + bl), da = f.a_tab[i] - f.a_tab[i - 1];
+          double t1 = f.throw_at(f.a_tab[i], bm), t0 = f.throw_at(f.a_tab[i - 1], bm);
+          gmax = std::max(gmax, std::fabs(t1 - t0) / da * per_tau_a);
+        }
       f.max_slip_gradient = gmax;
       log.value("fault." + f.name + ".max_throw_gradient_along_slip", fmt_fixed(gmax, 3));
       if (gmax >= 1.0 && !f.layered)
@@ -639,6 +681,26 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
     f.tips(0, bu0, bl0);
     log.value("fault." + f.name + ".tips_depth_at_reference_m",
               fmt_fixed(-f.at(0, bu0).z, 2) + " / " + fmt_fixed(-f.at(0, bl0).z, 2));
+    if (std::fabs(dot(f.slip, f.s)) > 1e-12 || f.slip.z > 0 || f.tmax < 0) {
+      Vec3 u = normalized(f.slip) * (f.tmax < 0 ? -1.0 : 1.0);  // hanging-wall motion per metre of slip
+      log.value(f.name + ".slip_vector", fmt_fixed(u.x, 4) + ", " + fmt_fixed(u.y, 4) + ", " + fmt_fixed(u.z, 4));
+    }
+    if (f.tmax < 0 && !f.layered) {
+      // Reverse faults: repeated thickness of each horizon at the reference strike position
+      // (STX-TN-05 section 5.2); for a plane it equals the throw where the horizon meets the fault.
+      for (std::size_t hz = 0; hz < st.horizons(); ++hz) {
+        auto g = [&](double b) {
+          Vec3 p = f.at(0, b);
+          double zl = older_exist ? level_in_frame(st, static_cast<int>(hz), p.x, p.y, k, dom) : st.z(hz, p.x, p.y);
+          return p.z - zl;
+        };
+        double lo = b_top - margin, hi = b_base + margin, glo = g(lo), ghi = g(hi);
+        if (!(glo > 0 && ghi < 0)) continue;
+        double bh = illinois(g, lo, hi, glo, ghi, 1e-7);
+        if (bh < bu0 || bh > bl0) continue;
+        log.value(f.name + "." + d.horizons[hz].name + ".repeat", fmt_fixed(std::fabs(f.throw_at(0, bh)), 3));
+      }
+    }
     if (layered_) {
       // Where every level meets the plane in this fault's frame (older faults already resolved):
       // exactly at the horizons, and from the level of plane points every 10 m down dip between.

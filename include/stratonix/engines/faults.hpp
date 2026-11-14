@@ -30,6 +30,14 @@ class Kinematics : public registry::PluginBase {
  public:
   /// dd: unit down-dip vector; dip in radians. Returned vector has vertical component -1.
   virtual Vec3 slip_vector(const Vec3& dd, double dip) const = 0;
+  /// Slip vector given the strike direction s and the rake (radians, Aki and Richards). Dip-slip
+  /// kinematics ignore s and rake; oblique and strike-slip return a unit vector, and the fault's
+  /// displacement magnitude is then its net slip.
+  virtual Vec3 slip_vector(const Vec3& s, const Vec3& dd, double dip, double rake) const {
+    (void)s;
+    (void)rake;
+    return slip_vector(dd, dip);
+  }
   virtual std::string name() const = 0;
 };
 
@@ -126,6 +134,7 @@ struct Fault {
   double drag_fraction = 0, drag_width = 0;
   bool transfer = false;        ///< linked splay of the abutted fault
   int relay_with = -1;          ///< soft-linked relay partner, or -1
+  double rake = 0;              ///< oblique and strike-slip faults (radians)
   /// Relay window in this fault's strike coordinate: the strike factor of the throw is replaced by
   /// a linear ramp from 1 at ra_one to 0 at ra_zero (complementary on the partner).
   double ra_one = 0, ra_zero = 0;

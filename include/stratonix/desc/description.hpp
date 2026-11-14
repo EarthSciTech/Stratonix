@@ -100,6 +100,11 @@ struct FaultDesc {
   Param drag_fraction, drag_width;
   std::string relay_fault;         ///< relay.fault: soft-linked relay with this fault
   bool relay_breached = false;
+  // Movement sense (STX-TN-05 section 5).
+  std::string sense;               ///< throw.sense: normal | reverse | left_lateral | right_lateral
+  Param net_slip;                  ///< throw.slip: net slip of oblique and strike-slip faults
+  Param rake;                      ///< oblique: rake (Aki and Richards convention)
+  bool strike_component() const { return slip_mode == "oblique" || slip_mode == "strike_slip"; }
 };
 struct SectionDesc { std::string name; Param polyline, detail_window; };
 /// Section sheet (presentation page) settings.
