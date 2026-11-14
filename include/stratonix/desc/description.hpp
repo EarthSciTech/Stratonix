@@ -86,6 +86,14 @@ struct FaultDesc {
   std::string slip_mode, hw_type;
   Param influence_distance;
   std::string abuts_fault, abuts_side;
+  // Curved faults (stage 2A, STX-TN-05 section 2): listric shape, ramp-flat profile, heave and
+  // the shear hanging wall.
+  Param detachment_depth;          ///< listric: depth of the horizontal detachment
+  Param profile;                   ///< ramp_flat: [[u, z], ...] in the dip plane
+  Param heave;                     ///< curved faults: heave (displacement parallel to the regional)
+  Param shear_angle;               ///< inclined_shear: angle of the shear lines from vertical
+  std::string shear_sense;         ///< inclined_shear: antithetic | synthetic
+  bool curved() const { return geom_type == "listric" || geom_type == "ramp_flat"; }
 };
 struct SectionDesc { std::string name; Param polyline, detail_window; };
 /// Section sheet (presentation page) settings.
@@ -148,7 +156,7 @@ struct Description {
   std::string frame_well;
   Param frame_point;
   // checks
-  Param tol_thickness_min, tol_crossing, tol_offset_outside_tips, tol_throw, tol_wells, tol_unoffset;
+  Param tol_thickness_min, tol_crossing, tol_offset_outside_tips, tol_throw, tol_wells, tol_unoffset, tol_rollover;
   std::string closure_horizon;
   Param closure_faults_seal, target_closure, target_area, target_spill_depth, target_tolerance;
   std::vector<std::string> warn_only;

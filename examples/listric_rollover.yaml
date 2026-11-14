@@ -1,0 +1,59 @@
+# Worked example 6: a listric normal fault with a rollover in its hanging wall (stage 2A).
+# The fault flattens onto a detachment at 2500 m; the hanging wall collapses onto it by 30-degree
+# antithetic shear. DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_listric_rollover, version: "1.0.0", status: DESIGN,
+        title: "Listric normal fault with a hanging-wall rollover"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[12000, 6000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 3000] m | user_instruction | worked example: control well in the footwall"
+    tops:
+      H1: "800 m | user_instruction | worked example"
+      H2: "1100 m | user_instruction | worked example"
+      H3: "1450 m | user_instruction | worked example"
+      H4: "1800 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]   # the fault cuts top and base on purpose
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry:
+      type: listric
+      reference_point: "[3000, 3000] m | user_instruction | worked example: surface trace"
+      reference_depth: "0 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: dips east"
+      dip: "60 deg | user_instruction | worked example: dip at the surface"
+      detachment_depth: "2500 m | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "40000 m | user_instruction | worked example: longer than the model"
+    throw:
+      heave: "800 m | user_instruction | worked example"
+      profile_strike: {type: flat_topped, taper: "0.2 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall:
+      type: inclined_shear
+      shear_angle: "30 deg | assumed | worked example: antithetic shear typical of steep listric faults (Xiao and Suppe 1992)"
+      shear_sense: antithetic
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[500, 3000], [11500, 3000]] m | user_instruction | worked example: along dip through the rollover"
+  vertical_exaggeration: "1 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

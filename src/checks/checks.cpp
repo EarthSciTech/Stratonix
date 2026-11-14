@@ -258,8 +258,9 @@ class C4 final : public Check {
       auto wall_s = [&](std::size_t h, double a, double b, bool hw) {
         double sg = hw ? 1 : -1;
         Vec3 p = F.at(a, b);
-        Vec3 r1 = net->restore_from_frame(p + F.n * (sg * eps), fi, hw);
-        Vec3 r2 = net->restore_from_frame(p + F.n * (sg * 2 * eps), fi, hw);
+        const Vec3 nrm = F.normal_at(b);
+        Vec3 r1 = net->restore_from_frame(p + nrm * (sg * eps), fi, hw);
+        Vec3 r2 = net->restore_from_frame(p + nrm * (sg * 2 * eps), fi, hw);
         double s1 = r1.z - st->z(h, r1.x, r1.y), s2 = r2.z - st->z(h, r2.x, r2.y);
         return 2 * s1 - s2;
       };

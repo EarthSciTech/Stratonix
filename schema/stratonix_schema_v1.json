@@ -503,6 +503,7 @@
                 "enum": [
                   "planar",
                   "listric",
+                  "ramp_flat",
                   "sticks"
                 ]
               },
@@ -540,6 +541,12 @@
               },
               "decay_length": {
                 "$ref": "#/$defs/param"
+              },
+              "detachment_depth": {
+                "$ref": "#/$defs/param"
+              },
+              "profile": {
+                "$ref": "#/$defs/param"
               }
             }
           },
@@ -571,9 +578,6 @@
           },
           "throw": {
             "type": "object",
-            "required": [
-              "max"
-            ],
             "additionalProperties": false,
             "properties": {
               "max": {
@@ -584,6 +588,9 @@
               },
               "profile_strike": {
                 "$ref": "#/$defs/profile"
+              },
+              "heave": {
+                "$ref": "#/$defs/param"
               }
             }
           },
@@ -605,11 +612,22 @@
                   "rigid",
                   "decay",
                   "linear_between_faults",
-                  "layer_rigid"
+                  "layer_rigid",
+                  "vertical_shear",
+                  "inclined_shear"
                 ]
               },
               "influence_distance": {
                 "$ref": "#/$defs/param"
+              },
+              "shear_angle": {
+                "$ref": "#/$defs/param"
+              },
+              "shear_sense": {
+                "enum": [
+                  "antithetic",
+                  "synthetic"
+                ]
               }
             }
           },
@@ -680,6 +698,9 @@
               "$ref": "#/$defs/param"
             },
             "unoffset": {
+              "$ref": "#/$defs/param"
+            },
+            "rollover": {
               "$ref": "#/$defs/param"
             }
           }

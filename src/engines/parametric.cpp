@@ -1,6 +1,7 @@
 // Parametric engine: Model interface over Structure + FaultNetwork.
 #include "stratonix/engines/parametric.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -33,6 +34,24 @@ ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& 
       fi.b_max = std::max(fi.b_max, bl);
     }
     fi.slip_mode = f.kin->name();
+    if (f.curved) {
+      // Approximate plane: the chord from where the fault meets the model top to its far end.
+      fi.geometry = d.faults[static_cast<std::size_t>(f.index)].geom_type;
+      double bu, bl;
+      f.tips(0, bu, bl);
+      Vec3 top = f.at(0, bu), far = f.at(0, bl);
+      Vec3 dd = normalized(far - top);
+      double dip = std::asin(std::clamp(-dd.z, -1.0, 1.0));
+      fi.ref_point = top;
+      fi.dip_dir = dd;
+      fi.normal = f.dh * std::sin(dip) + Vec3{0, 0, std::cos(dip)};
+      fi.b_min = 0;
+      fi.b_max = norm(far - top);
+      for (int i = 0; i <= 400; ++i) {
+        double u = bu + (bl - bu) * i / 400.0;
+        fi.profile.emplace_back(u, f.curved->zf(u));
+      }
+    }
     info_.faults.push_back(fi);
   }
 }
@@ -104,6 +123,8 @@ void ParametricModel::evaluate_fault(int f, std::span<const Vec3> pts, FaultEval
       if (faults_->layered()) {
         // the material's level comes from the full restoration of the present point
         out.displacement[i] = faults_->layer_displacement(f, pts[i], &active);
+      } else if (F.curved) {
+        out.displacement[i] = F.sigma(q) > 0 ? norm(q - faults_->undo(f, q, 1)) : 0.0;
       } else {
         Vec3 r = faults_->relative_displacement(f, q, &active);
         out.displacement[i] = active ? norm(r) : 0.0;

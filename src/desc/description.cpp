@@ -99,7 +99,7 @@ std::vector<const Param*> Description::all_params() const {
   auto add = [&](const Param& p) { if (p.present) r.push_back(&p); };
   for (auto* p : {&origin, &size, &depth_range, &grid_spacing, &ref_point, &regional_dip, &correction_range,
                   &regional_dip_azimuth, &frame_point, &tol_thickness_min, &tol_crossing,
-                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset,
+                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
                   &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
                   &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch})
@@ -120,7 +120,8 @@ std::vector<const Param*> Description::all_params() const {
     for (auto* q : {&f.age, &f.reference_point, &f.reference_depth, &f.strike, &f.dip, &f.trace,
                     &f.trace_depth, &f.decay_length, &f.upper.offset, &f.upper.fraction, &f.upper.depth,
                     &f.lower.offset, &f.lower.fraction, &f.lower.depth, &f.length, &f.throw_max,
-                    &f.profile_dip.taper, &f.profile_strike.taper, &f.influence_distance})
+                    &f.profile_dip.taper, &f.profile_strike.taper, &f.influence_distance, &f.detachment_depth,
+                    &f.profile, &f.heave, &f.shear_angle})
       add(*q);
   }
   for (auto& s : sections) { add(s.polyline); add(s.detail_window); }
@@ -396,12 +397,15 @@ struct Typer {
         fd.geom_type = S(g, "type", "planar");
         bool by_trace = g && g->get("trace");
         bool by_sticks = fd.geom_type == "sticks";
+        const bool curved = fd.curved(), ramp = fd.geom_type == "ramp_flat";
         fd.geom_input = S(g, "input");
         fd.geom_input_format = S(g, "input_format", "irap_lines");
         fd.reference_point = P(g, "reference_point", b + ".geometry", Dimension::Length, !by_trace && !by_sticks, 2);
-        fd.reference_depth = P(g, "reference_depth", b + ".geometry", Dimension::Length, !by_trace && !by_sticks, 1);
+        fd.reference_depth = P(g, "reference_depth", b + ".geometry", Dimension::Length, !by_trace && !by_sticks && !ramp, 1);
         fd.strike = P(g, "strike", b + ".geometry", Dimension::Angle, !by_trace && !by_sticks, 1);
-        fd.dip = P(g, "dip", b + ".geometry", Dimension::Angle, !by_sticks, 1);
+        fd.dip = P(g, "dip", b + ".geometry", Dimension::Angle, !by_sticks && !ramp, 1);
+        fd.detachment_depth = P(g, "detachment_depth", b + ".geometry", Dimension::Length, fd.geom_type == "listric", 1);
+        fd.profile = P(g, "profile", b + ".geometry", Dimension::Length, ramp, 2, 2);
         fd.trace = P(g, "trace", b + ".geometry", Dimension::Length, false, 2, 2);
         fd.trace_depth = P(g, "trace_depth", b + ".geometry", Dimension::Length, by_trace, 1);
         fd.dip_side = S(g, "dip_side");
@@ -423,7 +427,8 @@ struct Typer {
         fd.length = P(e, "length", b + ".extent", Dimension::Length, true, 1);
         fd.tip_line_shape = S(e, "tip_line_shape", "rectangular");
         const Node* th = f.get("throw");
-        fd.throw_max = P(th, "max", b + ".throw", Dimension::Length, true, 1);
+        fd.throw_max = P(th, "max", b + ".throw", Dimension::Length, !curved, 1);
+        fd.heave = P(th, "heave", b + ".throw", Dimension::Length, curved, 1);
         auto prof = [&](const char* key, ProfileDesc& pd) {
           const Node* pn = th ? th->get(key) : nullptr;
           pd.type = S(pn, "type", "flat_topped");
@@ -431,12 +436,26 @@ struct Typer {
         };
         prof("profile_dip", fd.profile_dip);
         prof("profile_strike", fd.profile_strike);
-        if (!th || !th->get("profile_dip") || !th->get("profile_strike"))
+        if (curved) {
+          if (!th || !th->get("profile_strike"))
+            c.err(b + ".throw", "F7", "profile_strike must be given (no hidden defaults)");
+          if (th && th->get("profile_dip"))
+            c.err(b + ".throw.profile_dip", "F14", "a curved fault takes no down-dip profile: the shear construction needs a "
+                                                   "constant displacement down the fault (its throw follows from the shape)");
+          if (th && th->get("max"))
+            c.err(b + ".throw.max", "F14", "a curved fault takes its displacement as throw.heave, constant down the fault; "
+                                           "its throw at each horizon follows from the shape and is reported");
+        } else if (!th || !th->get("profile_dip") || !th->get("profile_strike")) {
           c.err(b + ".throw", "F7", "both profile_dip and profile_strike must be given (no hidden defaults)");
+        }
+        if (!curved && th && th->get("heave"))
+          c.err(b + ".throw.heave", "F14", "heave is the displacement of a curved (listric or ramp_flat) fault; a planar fault takes throw.max");
         fd.slip_mode = S(&f, "slip_mode");
         const Node* hw = f.get("hanging_wall");
         fd.hw_type = S(hw, "type");
         fd.influence_distance = P(hw, "influence_distance", b + ".hanging_wall", Dimension::Length, fd.hw_type == "decay", 1);
+        fd.shear_angle = P(hw, "shear_angle", b + ".hanging_wall", Dimension::Angle, fd.hw_type == "inclined_shear", 1);
+        fd.shear_sense = S(hw, "shear_sense");
         if (const Node* ab = f.get("abuts")) { fd.abuts_fault = S(ab, "fault"); fd.abuts_side = S(ab, "side"); }
         d.faults.push_back(std::move(fd));
       }
@@ -456,6 +475,7 @@ struct Typer {
         d.tol_throw = P(t, "throw", b, Dimension::Length, false, 1);
         d.tol_wells = P(t, "wells", b, Dimension::Length, false, 1);
         d.tol_unoffset = P(t, "unoffset", b, Dimension::Length, false, 1);
+        d.tol_rollover = P(t, "rollover", b, Dimension::Length, false, 1);
       }
       if (const Node* cl = ch->get("closure")) {
         d.closure_horizon = S(cl, "horizon");
@@ -745,8 +765,59 @@ struct Typer {
           c.err(b + ".geometry.input", "F9", "input '" + f.geom_input + "' is not listed under inputs");
         if (!d.implicit.present) c.err(b + ".geometry.type", "F9", "faults given by sticks need the implicit (data-conditioned) builder: add an implicit section");
       }
-      if (f.geom_type == "listric")
-        c.err(b + ".geometry.type", "F5", "listric faults are reserved in schema v1 but not implemented in Stratonix v1");
+      const bool shear_hw = f.hw_type == "vertical_shear" || f.hw_type == "inclined_shear";
+      if (f.curved()) {
+        // STX-TN-05 section 2.3: the admissible range of the shear construction.
+        if (d.implicit.present)
+          c.err(b + ".geometry.type", "F14", "curved faults are built by the parametric engine; the implicit builder takes planar faults");
+        if (!shear_hw)
+          c.err(b + ".hanging_wall.type", "F14", "a curved fault needs a shear hanging wall (vertical_shear or inclined_shear): "
+                                                 "a rigid hanging wall would open a void above the curved fault");
+        if (f.slip_mode != "dip_slip")
+          c.err(b + ".slip_mode", "F14", "a curved fault moves by dip_slip (normal); contractional curved faults come with stage 2B");
+        if (f.upper.rule != "free" || f.lower.rule != "free")
+          c.err(b + ".extent", "F10", "a curved fault cuts from the model top to its detachment: both tips must be free "
+                                      "(an upper tip inside the section would need the displacement to fall to zero)");
+        if (f.trace.present)
+          c.err(b + ".geometry.trace", "F6", "a curved fault is placed by reference_point and strike, not by a trace");
+        double theta_max = 0;  // steepest dip of the fault inside the model
+        const double z_top = d.depth_range.present && !d.depth_range.values.empty() ? d.depth_range.si(0) : 0.0;
+        if (f.geom_type == "listric" && f.dip.present && f.detachment_depth.present && f.reference_depth.present) {
+          double z0 = f.reference_depth.si(), zd = f.detachment_depth.si(), th = f.dip.si();
+          if (!(th > 0 && th < kPi / 2)) c.err(b + ".geometry.dip", "F6", "the dip of a listric fault must be in (0, 90) degrees");
+          if (!(zd > z0)) c.err(b + ".geometry.detachment_depth", "F6", "the detachment must lie below the reference depth");
+          else theta_max = std::atan(std::tan(th) * (zd - std::min(z0, z_top)) / (zd - z0));
+        }
+        if (f.geom_type == "ramp_flat" && f.profile.present && f.profile.cols() == 2) {
+          const std::size_t n = f.profile.rows();
+          if (std::fabs(f.profile.si(0)) > 1e-9)
+            c.err(b + ".geometry.profile", "F6", "the first profile point must be at u = 0 (the reference point)");
+          if (f.reference_depth.present && std::fabs(f.reference_depth.si() - f.profile.si(1)) > 1e-6)
+            c.err(b + ".geometry.reference_depth", "F6", "reference_depth differs from the depth of the first profile point");
+          for (std::size_t k = 1; k < n; ++k) {
+            double du = f.profile.si(2 * k) - f.profile.si(2 * k - 2), dz = f.profile.si(2 * k + 1) - f.profile.si(2 * k - 1);
+            if (!(du > 0)) c.err(b + ".geometry.profile", "F6", "profile u must increase from point to point");
+            else if (dz < 0) c.err(b + ".geometry.profile", "F6", "the fault must not rise in its dip direction (depth must not decrease)");
+            else theta_max = std::max(theta_max, std::atan2(dz, du));
+          }
+          if (n >= 2 && !(f.profile.si(3) > f.profile.si(1)))
+            c.err(b + ".geometry.profile", "F6", "the first profile segment must dip (it continues upwards to the model top)");
+        }
+        if (f.hw_type == "inclined_shear" && f.shear_angle.present) {
+          double a = f.shear_angle.si();
+          if (!(a >= 0 && a < kPi / 2)) c.err(b + ".hanging_wall.shear_angle", "F12", "the shear angle must be in [0, 90) degrees");
+          if (f.shear_sense != "antithetic" && f.shear_sense != "synthetic")
+            c.err(b + ".hanging_wall.shear_sense", "F12", "shear_sense must be antithetic or synthetic");
+          if (f.shear_sense == "synthetic" && theta_max > 0 && a >= kPi / 2 - theta_max - 1e-12)
+            c.err(b + ".hanging_wall.shear_angle", "F12",
+                  "synthetic shear at " + fmt_fixed(a * 180 / kPi, 2) + " degrees is not steeper than the fault (steepest dip " +
+                      fmt_fixed(theta_max * 180 / kPi, 2) + " degrees): shear lines would cross the fault twice. Use an angle below " +
+                      fmt_fixed(90 - theta_max * 180 / kPi, 2) + " degrees or antithetic shear");
+        }
+        if (f.heave.present && f.heave.si() < 0) c.err(b + ".throw.heave", "F14", "heave must not be negative");
+      } else if (shear_hw) {
+        c.err(b + ".hanging_wall.type", "F14", "vertical and inclined shear hanging walls belong to curved (listric or ramp_flat) faults");
+      }
       if (f.trace.present && f.dip_side.empty())
         c.err(b + ".geometry.dip_side", "F6", "a fault given by its trace needs dip_side");
       if (f.dip.present && (f.dip.si() <= 0 || f.dip.si() > kPi / 2 + 1e-12))

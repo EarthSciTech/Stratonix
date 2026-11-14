@@ -11,6 +11,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "stratonix/core/crs.hpp"
@@ -48,6 +49,10 @@ struct FaultInfo {
   double half_length = 0;   ///< extent along strike from ref_point (each way)
   double b_min = 0, b_max = 0;  ///< extent down dip from ref_point (b positive downwards)
   std::string slip_mode;    ///< "dip_slip" or "vertical_offset" (informational)
+  std::string geometry = "planar";  ///< "planar", "listric" or "ramp_flat"
+  /// Curved faults: the profile in the dip plane, (u, depth) with u the horizontal distance from
+  /// the reference point along the dip direction; the plane fields above are then its chord.
+  std::vector<std::pair<double, double>> profile;
 };
 /// Description of a model, independent of the engine.
 struct ModelInfo {

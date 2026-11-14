@@ -9,6 +9,15 @@ has its own version (`stratonix_schema`).
 - Stage 2A specification (technical note STX-TN-05, kept with the project documents): curved
   faults with vertical- and inclined-shear hanging walls, drag, splays and relay ramps,
   displacement-length scaling, and reverse, oblique and strike-slip movement.
+- Curved faults (Prompt 16): `geometry.type: listric` (exponential profile onto a detachment)
+  and `ramp_flat` (profile polyline), with `hanging_wall: vertical_shear` or `inclined_shear`
+  (shear angle and antithetic or synthetic sense) and the displacement given as `throw.heave`.
+  The hanging wall follows the inclined-shear construction exactly, in both directions, so
+  sections, maps, exports and checks work on curved faults unchanged. Per horizon the build
+  reports heave, throw, rollover width and maximum rollover dip. Rules F10 (tips free), F11
+  (fixed point in the footwall), F12 (shear lines cross the fault once) and F14 (curved faults
+  are normal dip-slip, take heave, no down-dip profile) refuse what the construction cannot
+  invert. New tolerance `checks.tolerances.rollover`. Worked example `listric_rollover.yaml`.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`),
   expected to fail until their features are built.
 

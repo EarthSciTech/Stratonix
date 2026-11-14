@@ -5,6 +5,7 @@
 /// The network is its own object. Once its tips are resolved it no longer needs the horizons,
 /// so another engine (v2 implicit) can reuse it unchanged.
 #pragma once
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -40,6 +41,30 @@ class HangingWallField : public registry::PluginBase {
   virtual double scale(double sigma, double next, double influence) const = 0;
   virtual bool needs_next_fault() const { return false; }
   virtual std::string name() const = 0;
+};
+
+/// Curved fault (listric or ramp-flat) with a vertical- or inclined-shear hanging wall
+/// (STX-TN-05 section 2). Coordinates in the dip plane: u, horizontal distance from the reference
+/// point along the dip direction; z, depth (positive down). Shear lines are u = xi + s z tan(alpha).
+struct CurvedFault {
+  enum class Shape { Listric, RampFlat };
+  Shape shape = Shape::Listric;
+  double z0 = 0, tan0 = 0, zd = 0;   ///< listric: reference depth, tan(dip at z0), detachment depth
+  std::vector<double> pu, pz;        ///< ramp-flat profile points (u increasing, depth not decreasing)
+  double s = -1;                     ///< shear sense: -1 antithetic, +1 synthetic
+  double ta = 0;                     ///< tan(shear angle); 0 = vertical shear
+  double heave = 0;                  ///< maximum heave (m)
+  /// Depth of the fault at u, and its slope dz/du (the dip is atan of it).
+  double zf(double u) const;
+  double dzdu(double u) const;
+  /// u where the fault reaches depth z.
+  double u_at(double z) const;
+  /// Depth where the shear line through xi meets the fault.
+  double G(double xi) const;
+  /// Forward: material at (u, z) on the hanging-wall side, heave h -> present (u1, z1).
+  void forward(double u, double z, double h, double& u1, double& z1) const;
+  /// Inverse: present (u1, z1) on the hanging-wall side, heave h -> restored (u, z).
+  void inverse(double u1, double z1, double h, double& u, double& z) const;
 };
 
 /// Rule placing a fault tip relative to the stratigraphy.
@@ -92,16 +117,44 @@ struct Fault {
   /// -1 domain top, nh domain base) meets the plane at strike position a.
   double layer_b(double s, double a) const;
 
-  double sigma(const Vec3& p) const { return dot(p - p0, n); }
-  void ab(const Vec3& p, double& a, double& b) const { Vec3 d = p - p0; a = dot(d, s); b = dot(d, dd); }
+  /// Curved geometry (null for a planar fault). For a curved fault the down-dip coordinate b of
+  /// at(), tips(), ab() and profile_coords() is the horizontal distance u along the dip direction.
+  std::shared_ptr<const CurvedFault> curved;
+  std::string hw_name;          ///< hanging-wall plugin name
+  /// Heave of a curved fault at strike position a (tapered by the strike profile).
+  double heave_at(double a) const;
+
+  /// Signed distance to the fault (+ hanging wall). Exact for a plane; for a curved fault the
+  /// vertical separation times the cosine of the local dip (exact in sign, first order in size).
+  double sigma(const Vec3& p) const {
+    if (!curved) return dot(p - p0, n);
+    double u = dot(p - p0, dh), t = curved->dzdu(u);
+    return (curved->zf(u) + p.z) / std::sqrt(1 + t * t);
+  }
+  /// Unit normal (towards the hanging wall) at plane coordinates (a, b).
+  Vec3 normal_at(double b) const {
+    if (!curved) return n;
+    double t = curved->dzdu(b), c = 1 / std::sqrt(1 + t * t);
+    return dh * (t * c) + Vec3{0, 0, c};
+  }
+  void ab(const Vec3& p, double& a, double& b) const {
+    Vec3 d = p - p0;
+    a = dot(d, s);
+    b = curved ? dot(d, dh) : dot(d, dd);
+  }
   /// Profile coordinates of a point: strike position, and the down-dip position of the fault
   /// point at the same elevation. A hanging-wall point therefore takes the displacement of the
   /// fault where its own elevation meets the fault (equal to ab() on the plane).
   void profile_coords(const Vec3& p, double& a, double& b) const {
     a = dot(p - p0, s);
-    b = (p0.z - p.z) / std::sin(dip);
+    b = curved ? dot(p - p0, dh) : (p0.z - p.z) / std::sin(dip);
   }
-  Vec3 at(double a, double b) const { return p0 + s * a + dd * b; }
+  Vec3 at(double a, double b) const {
+    if (!curved) return p0 + s * a + dd * b;
+    Vec3 q = p0 + s * a + dh * b;
+    q.z = -curved->zf(b);
+    return q;
+  }
   /// Effective tip positions at strike position a (elliptical tip line applied).
   void tips(double a, double& bu, double& bl) const;
   /// Vertical throw (signed, + normal) at plane coordinates; 0 outside the tip line.
@@ -175,6 +228,9 @@ class FaultNetwork {
   double next_fault_distance(int f, const Vec3& q, double sigma) const;
   double level_in_frame(const Structure& st, int h, double x, double y, int f, const Domain& dom) const;
   void resolve_tips(const desc::Description& d, const Structure& st, BuildLog& log);
+  /// Curved fault k: tip tables spanning the model, and the per-horizon report (heave, throw,
+  /// rollover width and dip) at the reference strike position.
+  void resolve_curved(const desc::Description& d, const Structure& st, BuildLog& log, int k, std::size_t rank);
   std::vector<Fault> faults_;
   std::vector<int> order_;       ///< youngest first
   std::vector<int> rank_;        ///< position of fault f in order_
