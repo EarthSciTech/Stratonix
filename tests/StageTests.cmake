@@ -9,7 +9,7 @@ stx_test(test_parity stratonix_package)
 stx_test(test_figures stratonix_package)
 stx_test(test_export stratonix_package)
 stx_test(test_interop stratonix_package)
-stx_test(test_package stratonix_package)
+stx_test(test_package stratonix_package stx::zlib)
 stx_test(test_implicit stratonix_package)
 stx_test(test_sheet stratonix_package)
 # Independent check of the figure files (Python: Pillow, tifffile, python-pptx); skipped if absent.

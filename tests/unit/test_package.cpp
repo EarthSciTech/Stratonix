@@ -3,6 +3,8 @@
 #include <map>
 #include <sstream>
 
+#include <zlib.h>
+
 #include "../stx_test.hpp"
 #include "stratonix/checks/manifest.hpp"
 #include "stratonix/core/error.hpp"
@@ -36,9 +38,63 @@ std::string without_timestamp(const std::string& m) {
     if (l.find("\"timestamp_utc\"") == std::string::npos) o += l + "\n";
   return o;
 }
+/// Raw pixel bytes of a PNG (IDAT chunks inflated): independent of the zlib version that compressed it.
+std::string png_pixels(const std::string& png) {
+  auto be32 = [&](std::size_t i) {
+    return (std::uint32_t(std::uint8_t(png[i])) << 24) | (std::uint32_t(std::uint8_t(png[i + 1])) << 16) |
+           (std::uint32_t(std::uint8_t(png[i + 2])) << 8) | std::uint32_t(std::uint8_t(png[i + 3]));
+  };
+  std::string idat, ihdr;
+  for (std::size_t i = 8; i + 8 <= png.size();) {
+    std::uint32_t len = be32(i);
+    std::string type = png.substr(i + 4, 4);
+    if (i + 12 + len > png.size()) break;
+    if (type == "IHDR") ihdr = png.substr(i + 8, len);
+    if (type == "IDAT") idat += png.substr(i + 8, len);
+    i += 12 + len;
+  }
+  if (ihdr.size() < 13) return "png-undecodable";
+  auto u32 = [&](std::size_t k) {
+    return (std::uint32_t(std::uint8_t(ihdr[k])) << 24) | (std::uint32_t(std::uint8_t(ihdr[k + 1])) << 16) |
+           (std::uint32_t(std::uint8_t(ihdr[k + 2])) << 8) | std::uint32_t(std::uint8_t(ihdr[k + 3]));
+  };
+  const std::size_t w = u32(0), h = u32(4), depth = std::uint8_t(ihdr[8]), ctype = std::uint8_t(ihdr[9]);
+  const std::size_t ch = ctype == 6 ? 4 : ctype == 2 ? 3 : ctype == 4 ? 2 : 1;
+  uLongf n = static_cast<uLongf>(h * (1 + (w * ch * depth + 7) / 8));
+  std::string raw(n, '\0');
+  if (uncompress(reinterpret_cast<Bytef*>(raw.data()), &n, reinterpret_cast<const Bytef*>(idat.data()),
+                 static_cast<uLong>(idat.size())) != Z_OK)
+    return "png-undecodable";
+  raw.resize(n);
+  return raw;
+}
+std::string base64_decode(const std::string& b) {
+  static const std::string a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string o;
+  int val = 0, bits = -8;
+  for (char c : b) {
+    auto k = a.find(c);
+    if (k == std::string::npos) continue;
+    val = (val << 6) + static_cast<int>(k);
+    bits += 6;
+    if (bits >= 0) {
+      o.push_back(static_cast<char>((val >> bits) & 0xFF));
+      bits -= 8;
+    }
+  }
+  return o;
+}
 std::string normalised(std::string s) {
   const std::string v = build_info().version;
   for (std::size_t p; (p = s.find("Stratonix " + v)) != std::string::npos;) s.replace(p, 10 + v.size(), "Stratonix VERSION");
+  // PNG images embedded in SVG: compare their pixels, not the zlib stream (differs between zlib versions)
+  const std::string tag = "data:image/png;base64,";
+  for (std::size_t p = s.find(tag); p != std::string::npos; p = s.find(tag, p + 1)) {
+    std::size_t a = p + tag.size(), e = s.find_first_of("\"'", a);
+    if (e == std::string::npos) break;
+    std::string digest = "png-pixels:" + sha256_hex(png_pixels(base64_decode(s.substr(a, e - a))));
+    s.replace(p, e - p, digest);
+  }
   return s;
 }
 PackageConfig fast() {
