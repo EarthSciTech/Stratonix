@@ -138,7 +138,9 @@ implicit builder.
   block moves as a rigid slab by the throw where that layer meets the fault, so a horizon keeps
   one offset across its whole block, also far from the fault. With `rigid` the throw is read where
   the point's own elevation meets the fault. Faults act in age order (oldest first) on the
-  geometry the older ones displaced. Use it for all faults of a model or for none.
+  geometry the older ones displaced. Use it for all faults of a model or for none, and make the
+  faults longer than the model along strike: a block offset that ends at a fault's strike end
+  inside the model ends along a line that is not a fault (the build notes it).
 - **Tips on the unfaulted stratigraphy** (`stratigraphy: unfaulted` in a tip rule). By default a
   younger fault's tip is placed on the stratigraphy as displaced by older faults; `unfaulted`
   places it on the stratigraphy before any faulting.

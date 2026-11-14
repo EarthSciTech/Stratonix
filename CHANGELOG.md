@@ -9,7 +9,8 @@ has its own version (`stratonix_schema`).
 - Hanging wall `layer_rigid`: every layer moves as a rigid slab by the throw where it meets the
   fault, faults acting oldest first on the displaced geometry. Restoration solves for the
   material's level; each fault tabulates where every level meets its plane. Build refuses throws
-  that change faster than the layers thicken.
+  that change faster than the layers thicken, and notes layer-rigid faults that end inside the
+  model along strike.
 - Tip rules can read their level on the unfaulted stratigraphy (`stratigraphy: unfaulted`).
 - Well completions; unit display labels (UTF-8); units `top: model_top` / `base: model_base`
   that name the outer units (role, colour, label).

@@ -499,6 +499,13 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
           if (dz > 1e-6) worst = std::max(worst, dt / dz);
         }
       log.value("fault." + f.name + ".max_layer_throw_change_per_thickness", fmt_fixed(worst, 3));
+      for (double e : {-0.5, 0.5}) {
+        Vec3 end = f.p0 + f.s * (e * f.length);
+        if (dom.inside_xy(end.x, end.y))
+          log.note("fault " + f.name + ": its strike end lies inside the domain; with layer-rigid hanging walls the block "
+                   "offset ends there along a line that is not a fault (make the fault longer than the model if the "
+                   "blocks should be bounded by faults only)");
+      }
       if (worst >= 1.0)
         throw Error(ErrorCode::Build, "fault " + f.name + ": the throw changes faster than the layers thicken at the fault (" +
                                           fmt_fixed(worst, 2) + " m per metre); layers would overlap. Reduce the throw or move the tips apart.",

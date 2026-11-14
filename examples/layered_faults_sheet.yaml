@@ -64,12 +64,12 @@ faults:
     extent:
       upper_tip: {rule: within_unit, unit: CHALK, stratigraphy: unfaulted, fraction: "0.5 fraction | user_instruction | worked example"}
       lower_tip: {rule: depth, depth: "1800 m | user_instruction | worked example"}
-      length: "5000 m | user_instruction | worked example"
-      tip_line_shape: elliptical
+      length: "30000 m | user_instruction | worked example: longer than the model, so the blocks are bounded by faults only"
+      tip_line_shape: rectangular
     throw:
       max: "40 m | user_instruction | worked example"
       profile_dip: {type: sine}
-      profile_strike: {type: elliptical}
+      profile_strike: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example: full throw across the model"}
     slip_mode: vertical_offset
     hanging_wall: {type: layer_rigid}
   - name: FB
@@ -83,12 +83,12 @@ faults:
     extent:
       upper_tip: {rule: horizon, horizon: Top_Chalk, offset: "0 m | user_instruction | worked example"}
       lower_tip: {rule: horizon, horizon: Top_Salt, offset: "150 m | user_instruction | worked example"}
-      length: "5000 m | user_instruction | worked example"
-      tip_line_shape: elliptical
+      length: "30000 m | user_instruction | worked example: longer than the model, so the blocks are bounded by faults only"
+      tip_line_shape: rectangular
     throw:
       max: "30 m | user_instruction | worked example"
       profile_dip: {type: sine}
-      profile_strike: {type: elliptical}
+      profile_strike: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example: full throw across the model"}
     slip_mode: vertical_offset
     hanging_wall: {type: layer_rigid}
 frame: {fixed: {point: "[4000, 7000, -1250] m | user_instruction | worked example: the well's block stays fixed"}}
