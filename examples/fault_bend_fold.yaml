@@ -1,0 +1,60 @@
+# Worked example 12: a thrust with a flat at 1100 m, a 30-degree ramp and a lower flat at 2000 m; 1000 m
+# of slip carries the hanging wall up the ramp by fault-parallel flow, folding it into a fault-bend fold
+# whose axial surfaces bisect the fault's bends (stage 2B).
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_fault_bend_fold, version: "1.0.0", status: DESIGN,
+        title: "Fault-bend fold by fault-parallel flow"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, fixed block"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+      H4: "1600 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[6000, 5000] m | user_instruction | worked example: planned well through the fold crest"
+    total_depth: "2500 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2, intended_offset: true}, {name: H3, intended_offset: true}, {name: H4, intended_offset: true}]
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry:
+      type: ramp_flat
+      reference_point: "[5000, 5000] m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: dips east"
+      profile: "[[-6000, 1100], [-1000, 1100], [558.846, 2000], [12000, 2000]] m | user_instruction | worked example: flat, 30-degree ramp, flat"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "100000 m | user_instruction | worked example: longer than the model"
+    throw:
+      slip: "1000 m | user_instruction | worked example: slip along the fault"
+      sense: reverse
+      profile_strike: {type: flat_topped, taper: "0.01 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: fault_parallel_flow}
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[500, 5000], [9500, 5000]] m | user_instruction | worked example: across the fold"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

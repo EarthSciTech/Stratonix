@@ -43,7 +43,38 @@ has its own version (`stratonix_schema`).
   the hanging wall and footwall over a thrust are exported separately; sections draw each
   block's horizon. `FaultInfo.overlapping` marks faults that can override their footwall.
 
+- Stage 2B specification (technical note STX-TN-06): trishear, fault-bend folds by
+  fault-parallel flow, detachment folds, parallel and similar fold mechanics, en echelon arrays.
+- Trishear (Prompt 20): `fold: {type: trishear, apical_angle, propagation_slip_ratio}` on a
+  planar dip-slip fault with an upper tip in the model folds the layers ahead of the propagating
+  tip by the symmetric linear velocity field of Zehnder and Allmendinger (2000), integrated in
+  both directions by fourth-order Runge-Kutta. Reverse slip gives fault-propagation folds and
+  normal slip forced folds. The build reports the slip, the initial and present tip depths and
+  each folded horizon's maximum forelimb dip. Rule F17 sets the admissible range (upper tip in
+  the model, constant slip behind it, rigid hanging wall, fixed point outside the zone's sweep).
+  Worked example `trishear_fold.yaml`.
+- Fault-parallel flow (Prompt 21): `hanging_wall: {type: fault_parallel_flow}` on `ramp_flat`
+  and `listric` faults, with `throw.slip` and `throw.sense: normal | reverse`, moves the hanging
+  wall along flow lines parallel to the fault that meet on the bisectors of its bends (Egan,
+  Buddin and Kane 1997), exactly and in closed form: contractional and extensional fault-bend
+  folds. Ramp-flat profiles may now start with a flat and need not start at the reference
+  point. Rule F18 refuses offsets where the bisectors of neighbouring bends cross; the crossing
+  offset is reported. Worked example `fault_bend_fold.yaml`.
+- Detachment folds (Prompt 21): primitive `type: detachment_fold` with `half_width`,
+  `shortening` and `detachment: <horizon>`; each horizon's relief follows from the area balance
+  (shortening times depth to the detachment, divided by the half-width) and is reported.
+- Fold mechanics (Prompt 21): `mechanics: similar` gives every horizon the anchor's relief;
+  `mechanics: parallel` makes the horizons below the anchor its offsets at their regional
+  thickness, measured normal to the folded surface (cusps kept). `array: {count, step_along,
+  step_across}` repeats a primitive en echelon. Rule F19 sets their admissible range. Worked
+  example `detachment_folds.yaml`.
+- Check C12: area conserved by the restoration of every fault with fold kinematics or a curved
+  hanging wall (Jacobian determinant in the dip plane), tolerance `checks.tolerances.area`
+  (default 0.01).
+
 ### Changed
+- Check C4 skips trishear and fault-parallel-flow faults, whose throw is not a profile; C12
+  checks them instead.
 - Check C4 measures faults whose slip has a strike component against the footwall horizon where
   the moving cut-off came from.
 - Tests: the LeakSanitizer suppressions (font library caches) now reach every test; tests
@@ -51,8 +82,9 @@ has its own version (`stratonix_schema`).
 - Golden package hashes: the checks report and summary gain the C10 lines and every figure's
   key numbers the new check count; the figure set gains the fault-plane maps. Exports are
   unchanged.
-- Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`),
-  expected to fail until their features are built.
+- Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
+  and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
+  integrations).
 
 ## [2026.1] - 2026-11-14 - First public release
 

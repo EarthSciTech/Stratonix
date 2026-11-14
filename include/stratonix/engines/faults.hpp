@@ -61,7 +61,17 @@ struct CurvedFault {
   std::vector<double> pu, pz;        ///< ramp-flat profile points (u increasing, depth not decreasing)
   double s = -1;                     ///< shear sense: -1 antithetic, +1 synthetic
   double ta = 0;                     ///< tan(shear angle); 0 = vertical shear
-  double heave = 0;                  ///< maximum heave (m)
+  double heave = 0;                  ///< maximum heave (m); fault-parallel flow: signed slip (+ down dip)
+  /// Fault-parallel flow (STX-TN-06 section 2): material moves along flow lines at constant
+  /// offset d from the polyline (pu, pz), meeting on the bisectors of its bends.
+  bool fpf = false;
+  std::vector<double> fe_u, fe_z, fn_u, fn_z, fm_u, fm_z;  ///< unit tangents, normals, miters (per vertex)
+  std::vector<double> fl0, fl1;      ///< segment length along a flow line: fl0 + d * fl1
+  double fpf_dmax = 0;               ///< offset where neighbouring bisectors cross
+  void setup_fpf();
+  /// Flow-line coordinates (s, d) of (u, z), and the inverse.
+  void fpf_coords(double u, double z, double& s, double& d) const;
+  void fpf_at(double s, double d, double& u, double& z) const;
   /// Depth of the fault at u, and its slope dz/du (the dip is atan of it).
   double zf(double u) const;
   double dzdu(double u) const;
@@ -73,6 +83,14 @@ struct CurvedFault {
   void forward(double u, double z, double h, double& u1, double& z1) const;
   /// Inverse: present (u1, z1) on the hanging-wall side, heave h -> restored (u, z).
   void inverse(double u1, double z1, double h, double& u, double& z) const;
+};
+
+/// Trishear fold ahead of a propagating tip (STX-TN-06 section 1): symmetric linear velocity field
+/// of Zehnder and Allmendinger (2000).
+struct TrishearFold {
+  double tanphi = 0;   ///< tan of the half apical angle
+  double ps = 0;       ///< propagation-to-slip ratio
+  double v0 = 1;       ///< +1: hanging wall moves towards the tip (reverse); -1: away from it (normal)
 };
 
 /// Rule placing a fault tip relative to the stratigraphy.
@@ -135,6 +153,9 @@ struct Fault {
   bool transfer = false;        ///< linked splay of the abutted fault
   int relay_with = -1;          ///< soft-linked relay partner, or -1
   double rake = 0;              ///< oblique and strike-slip faults (radians)
+  std::shared_ptr<const TrishearFold> tri;  ///< trishear fold kinematics (null: none)
+  /// Slip along the fault at strike position a (trishear: constant behind the tip).
+  double slip_at(double a) const;
   /// Relay window in this fault's strike coordinate: the strike factor of the throw is replaced by
   /// a linear ramp from 1 at ra_one to 0 at ra_zero (complementary on the partner).
   double ra_one = 0, ra_zero = 0;
@@ -226,6 +247,9 @@ class FaultNetwork {
   /// p1 on the given wall, and its inverse for a present position q.
   Vec3 drag_forward(int f, const Vec3& p1, bool hanging_wall) const;
   Vec3 drag_inverse(int f, const Vec3& q, bool hanging_wall) const;
+  /// Trishear: material position mapped through the slip history of fault f (forward from the
+  /// restored state to the present, or back).
+  Vec3 trishear_map(int f, const Vec3& q, bool forward) const;
   /// One step of restoration through fault f: drag on either wall, then the fault itself when q is
   /// on the moving side.
   Vec3 step(int f, const Vec3& q, bool side, bool fast) const;

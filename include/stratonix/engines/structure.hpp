@@ -29,6 +29,20 @@ struct FoldPrimitive {
   double rim_depth = 0, rim_width = 0;
   std::vector<double> relief;     ///< per horizon (m), sign included
   double relief_max = 0;          ///< max |relief| (for rim scaling)
+  /// Parallel mechanics (STX-TN-06 section 4): per horizon, the offset of the anchor's surface at
+  /// normal distance t below it, tabulated (1-D across a cylindrical axis, else a 2-D grid); null
+  /// where the horizon takes relief * shape.
+  struct Offset {
+    double t = 0;                 ///< normal distance below the anchor
+    bool cyl = true;
+    double v0 = 0, dv = 1;        ///< cylindrical: table over v
+    double x0 = 0, y0 = 0, dx = 1;///< grid origin and spacing
+    std::size_t nx = 0, ny = 0;
+    std::vector<double> val;      ///< contribution (offset elevation + t)
+    double outside = 0;           ///< contribution beyond the table
+    double eval(const FoldPrimitive& p, double x, double y) const;
+  };
+  std::vector<std::shared_ptr<const Offset>> offset;
   /// Raised-cosine bump g(t; w) = (1 + cos(pi t / w)) / 2 for |t| < w.
   static double bump(double t, double w);
   void axis_coords(double x, double y, double& u, double& v) const;
@@ -60,6 +74,10 @@ class Structure {
   const std::vector<double>& reference_depths() const { return ref_depth_; }
 
  private:
+  void add_copies(const desc::PrimitiveDesc& pd, FoldPrimitive p, const desc::Description& d, BuildLog& log);
+  std::shared_ptr<const FoldPrimitive::Offset> parallel_offset(const FoldPrimitive& p, std::size_t ha, double t,
+                                                               const desc::Description& d);
+  std::size_t offset_anchor_ = 0;
   enum class Kind { Parametric, Surface, Isochore };
   double z_uncorrected(std::size_t h, double x, double y) const;
   double regional(double x, double y) const;

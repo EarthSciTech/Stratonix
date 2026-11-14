@@ -99,7 +99,7 @@ std::vector<const Param*> Description::all_params() const {
   auto add = [&](const Param& p) { if (p.present) r.push_back(&p); };
   for (auto* p : {&origin, &size, &depth_range, &grid_spacing, &ref_point, &regional_dip, &correction_range,
                   &regional_dip_azimuth, &frame_point, &tol_thickness_min, &tol_crossing,
-                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &scaling_min_ratio, &scaling_max_ratio,
+                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &tol_area, &scaling_min_ratio, &scaling_max_ratio,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
                   &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
                   &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch})
@@ -112,7 +112,8 @@ std::vector<const Param*> Description::all_params() const {
   for (auto& h : horizons) { add(h.depth); add(h.thickness_above); add(h.iso_thickness); }
   for (auto& p : primitives) {
     for (auto* q : {&p.crest, &p.axis_azimuth, &p.plunge, &p.half_length, &p.half_width_left,
-                    &p.half_width_right, &p.radius_major, &p.radius_minor, &p.rim_depth, &p.rim_width})
+                    &p.half_width_right, &p.radius_major, &p.radius_minor, &p.rim_depth, &p.rim_width,
+                    &p.half_width, &p.shortening, &p.array_step_along, &p.array_step_across})
       add(*q);
     for (auto& [h, q] : p.relief) add(q);
   }
@@ -122,7 +123,7 @@ std::vector<const Param*> Description::all_params() const {
                     &f.lower.offset, &f.lower.fraction, &f.lower.depth, &f.length, &f.throw_max,
                     &f.profile_dip.taper, &f.profile_strike.taper, &f.influence_distance, &f.detachment_depth,
                     &f.profile, &f.heave, &f.shear_angle, &f.drag_fraction, &f.drag_width, &f.net_slip,
-                    &f.rake})
+                    &f.rake, &f.fold_apical_angle, &f.fold_ps_ratio})
       add(*q);
   }
   for (auto& s : sections) { add(s.polyline); add(s.detail_window); }
@@ -370,14 +371,36 @@ struct Typer {
           PrimitiveDesc pd;
           pd.type = S(&p, "type");
           pd.name = S(&p, "name");
+          bool det = pd.type == "detachment_fold";
           bool fold = pd.type == "anticline" || pd.type == "syncline";
           pd.crest = P(&p, "crest", b, Dimension::Length, true, 2);
-          pd.axis_azimuth = P(&p, "axis_azimuth", b, Dimension::Angle, fold, 1);
+          pd.axis_azimuth = P(&p, "axis_azimuth", b, Dimension::Angle, fold || det, 1);
+          pd.half_width = P(&p, "half_width", b, Dimension::Length, det, 1);
+          pd.shortening = P(&p, "shortening", b, Dimension::Length, det, 1);
+          pd.detachment = S(&p, "detachment");
+          pd.mechanics = S(&p, "mechanics");
+          if (const Node* ar = p.get("array")) {
+            std::string c0 = S(ar, "count", "1");
+            pd.array_count = std::max(1, std::atoi(c0.c_str()));
+            pd.array_step_along = P(ar, "step_along", b + ".array", Dimension::Length, true, 1);
+            pd.array_step_across = P(ar, "step_across", b + ".array", Dimension::Length, true, 1);
+          }
+          if (det) {
+            if (p.get("relief"))
+              c.err(b + ".relief", "F19", "a detachment fold takes no relief: it follows from shortening x depth to the detachment");
+            if (pd.detachment.empty()) c.err(b + ".detachment", "F19", "a detachment fold needs detachment: <horizon>");
+            if (p.get("half_width_left") || p.get("half_width_right"))
+              c.err(b + ".half_width", "F19", "a detachment fold is symmetric: give half_width");
+          } else {
+            if (!p.get("relief")) c.err(b + ".relief", "F7", "relief must be given (no hidden defaults)");
+            for (const char* k : {"half_width", "shortening", "detachment"})
+              if (p.get(k)) c.err(b + "." + k, "F19", std::string(k) + " belongs to detachment folds");
+          }
           pd.plunge = P(&p, "plunge", b, Dimension::Angle, false, 1);
           pd.half_length = P(&p, "half_length", b, Dimension::Length, false, 1);
           pd.half_width_left = P(&p, "half_width_left", b, Dimension::Length, fold, 1);
           pd.half_width_right = P(&p, "half_width_right", b, Dimension::Length, fold, 1);
-          pd.radius_major = P(&p, "radius_major", b, Dimension::Length, !fold, 1);
+          pd.radius_major = P(&p, "radius_major", b, Dimension::Length, !fold && !det, 1);
           pd.radius_minor = P(&p, "radius_minor", b, Dimension::Length, false, 1);
           pd.rim_depth = P(&p, "rim_depth", b, Dimension::Length, false, 1);
           pd.rim_width = P(&p, "rim_width", b, Dimension::Length, pd.rim_depth.present, 1);
@@ -429,12 +452,13 @@ struct Typer {
         fd.tip_line_shape = S(e, "tip_line_shape", "rectangular");
         const Node* th = f.get("throw");
         fd.slip_mode = S(&f, "slip_mode");
-        const bool by_slip = fd.strike_component();
+        const bool fpf_hw = f.get("hanging_wall") && S(f.get("hanging_wall"), "type") == "fault_parallel_flow";
+        const bool by_slip = fd.strike_component() || (curved && fpf_hw);
         fd.throw_max = P(th, "max", b + ".throw", Dimension::Length, !curved && !by_slip, 1);
         fd.net_slip = P(th, "slip", b + ".throw", Dimension::Length, by_slip, 1);
         fd.sense = S(th, "sense");
         fd.rake = P(&f, "rake", b, Dimension::Angle, fd.slip_mode == "oblique", 1);
-        fd.heave = P(th, "heave", b + ".throw", Dimension::Length, curved, 1);
+        fd.heave = P(th, "heave", b + ".throw", Dimension::Length, curved && !fpf_hw, 1);
         auto prof = [&](const char* key, ProfileDesc& pd) {
           const Node* pn = th ? th->get(key) : nullptr;
           pd.type = S(pn, "type", "flat_topped");
@@ -442,14 +466,29 @@ struct Typer {
         };
         prof("profile_dip", fd.profile_dip);
         prof("profile_strike", fd.profile_strike);
-        if (curved) {
+        const Node* fo = f.get("fold");
+        if (fo) {
+          fd.fold_type = S(fo, "type");
+          fd.fold_apical_angle = P(fo, "apical_angle", b + ".fold", Dimension::Angle, true, 1);
+          fd.fold_ps_ratio = P(fo, "propagation_slip_ratio", b + ".fold", Dimension::Dimensionless, true, 1);
+        }
+        if (fo && fd.fold_type == "trishear") {
+          if (!th || !th->get("profile_strike"))
+            c.err(b + ".throw", "F7", "profile_strike must be given (no hidden defaults)");
+          if (th && th->get("profile_dip"))
+            c.err(b + ".throw.profile_dip", "F17", "a trishear fault takes no down-dip profile: the slip is constant behind the "
+                                                   "propagating tip");
+        } else if (curved) {
           if (!th || !th->get("profile_strike"))
             c.err(b + ".throw", "F7", "profile_strike must be given (no hidden defaults)");
           if (th && th->get("profile_dip"))
             c.err(b + ".throw.profile_dip", "F14", "a curved fault takes no down-dip profile: the shear construction needs a "
                                                    "constant displacement down the fault (its throw follows from the shape)");
+          if (fpf_hw && th && th->get("heave"))
+            c.err(b + ".throw.heave", "F18", "fault-parallel flow takes the slip along the fault as throw.slip, not heave");
           if (th && th->get("max"))
-            c.err(b + ".throw.max", "F14", "a curved fault takes its displacement as throw.heave, constant down the fault; "
+            c.err(b + ".throw.max", "F14", std::string(fpf_hw ? "fault-parallel flow takes the slip along the fault as throw.slip; " :
+                                           "a curved fault takes its displacement as throw.heave, constant down the fault; ") +
                                            "its throw at each horizon follows from the shape and is reported");
         } else if (!th || !th->get("profile_dip") || !th->get("profile_strike")) {
           c.err(b + ".throw", "F7", "both profile_dip and profile_strike must be given (no hidden defaults)");
@@ -495,6 +534,7 @@ struct Typer {
         d.tol_wells = P(t, "wells", b, Dimension::Length, false, 1);
         d.tol_unoffset = P(t, "unoffset", b, Dimension::Length, false, 1);
         d.tol_rollover = P(t, "rollover", b, Dimension::Length, false, 1);
+        d.tol_area = P(t, "area", b, Dimension::Dimensionless, false, 1);
       }
       if (const Node* fsc = ch->get("fault_scaling")) {
         d.scaling_min_ratio = P(fsc, "min_ratio", "checks.fault_scaling", Dimension::Dimensionless, false, 1);
@@ -755,10 +795,35 @@ struct Typer {
               "give its range as a parameter");
     }
     // primitives
-    for (std::size_t k = 0; k < d.primitives.size(); ++k)
-      for (auto& [h, p] : d.primitives[k].relief)
-        if (d.horizon_index(h) < 0)
-          c.err("structure.primitives[" + std::to_string(k) + "].relief." + h, "R1", "unknown horizon '" + h + "'");
+    for (std::size_t k = 0; k < d.primitives.size(); ++k) {
+      const auto& pd = d.primitives[k];
+      const std::string b = "structure.primitives[" + std::to_string(k) + "]";
+      for (auto& [h, p] : pd.relief)
+        if (d.horizon_index(h) < 0) c.err(b + ".relief." + h, "R1", "unknown horizon '" + h + "'");
+      // STX-TN-06 sections 3 to 5: admissible range (F19)
+      if (pd.type == "detachment_fold") {
+        if (pd.shortening.present && pd.shortening.si() < 0) c.err(b + ".shortening", "F19", "shortening must not be negative");
+        if (pd.half_width.present && !(pd.half_width.si() > 0)) c.err(b + ".half_width", "F19", "half_width must be positive");
+        int hd = d.horizon_index(pd.detachment);
+        if (!pd.detachment.empty() && hd < 0) c.err(b + ".detachment", "F19", "unknown horizon '" + pd.detachment + "'");
+        else if (hd == 0)
+          c.err(b + ".detachment", "F19", "the detachment must lie below the folded horizons; " + pd.detachment +
+                                              " is the shallowest horizon, so nothing would fold");
+        if (!pd.mechanics.empty()) c.err(b + ".mechanics", "F19", "a detachment fold's shape follows from the area balance; give no mechanics");
+      }
+      if (pd.mechanics == "parallel") {
+        if (pd.relief.size() != 1)
+          c.err(b + ".mechanics", "F19", "parallel mechanics needs exactly one anchor horizon with relief (the others are its offsets)");
+        else if (int ha = d.horizon_index(pd.relief[0].first); ha >= 0)
+          for (std::size_t h = static_cast<std::size_t>(ha) + 1; h < d.horizons.size(); ++h)
+            if (!d.horizons[h].surface_input.empty() || !d.horizons[h].iso_from.empty())
+              c.err(b + ".mechanics", "F19", "parallel mechanics is not combined with imported surfaces or isochores below the anchor (" +
+                                                 d.horizons[h].name + ")");
+      }
+      if (pd.array_count > 1 && pd.array_step_along.present && pd.array_step_across.present &&
+          pd.array_step_along.si() == 0 && pd.array_step_across.si() == 0)
+        c.err(b + ".array", "F19", "an en echelon array needs a non-zero step along or across the axis");
+    }
     // implicit (data-conditioned) builder
     if (d.implicit.present) {
       for (std::size_t k = 0; k < d.implicit.data.size(); ++k) {
@@ -788,16 +853,18 @@ struct Typer {
           c.err(b + ".geometry.input", "F9", "input '" + f.geom_input + "' is not listed under inputs");
         if (!d.implicit.present) c.err(b + ".geometry.type", "F9", "faults given by sticks need the implicit (data-conditioned) builder: add an implicit section");
       }
-      const bool shear_hw = f.hw_type == "vertical_shear" || f.hw_type == "inclined_shear";
+      const bool fpf = f.hw_type == "fault_parallel_flow";
+      const bool shear_hw = f.hw_type == "vertical_shear" || f.hw_type == "inclined_shear" || fpf;
       if (f.curved()) {
         // STX-TN-05 section 2.3: the admissible range of the shear construction.
         if (d.implicit.present)
           c.err(b + ".geometry.type", "F14", "curved faults are built by the parametric engine; the implicit builder takes planar faults");
         if (!shear_hw)
-          c.err(b + ".hanging_wall.type", "F14", "a curved fault needs a shear hanging wall (vertical_shear or inclined_shear): "
+          c.err(b + ".hanging_wall.type", "F14", "a curved fault needs a shear or flow hanging wall (vertical_shear, inclined_shear or "
+                                                 "fault_parallel_flow): "
                                                  "a rigid hanging wall would open a void above the curved fault");
         if (f.slip_mode != "dip_slip")
-          c.err(b + ".slip_mode", "F14", "a curved fault moves by dip_slip (normal); contractional curved faults come with stage 2B");
+          c.err(b + ".slip_mode", "F14", "a curved fault moves by dip_slip");
         if (f.upper.rule != "free" || f.lower.rule != "free")
           c.err(b + ".extent", "F10", "a curved fault cuts from the model top to its detachment: both tips must be free "
                                       "(an upper tip inside the section would need the displacement to fall to zero)");
@@ -813,9 +880,11 @@ struct Typer {
         }
         if (f.geom_type == "ramp_flat" && f.profile.present && f.profile.cols() == 2) {
           const std::size_t n = f.profile.rows();
-          if (std::fabs(f.profile.si(0)) > 1e-9)
+          if (!fpf && std::fabs(f.profile.si(0)) > 1e-9)
             c.err(b + ".geometry.profile", "F6", "the first profile point must be at u = 0 (the reference point)");
-          if (f.reference_depth.present && std::fabs(f.reference_depth.si() - f.profile.si(1)) > 1e-6)
+          if (fpf && !(f.profile.si(0) <= 0 && f.profile.si(2 * n - 2) >= 0))
+            c.err(b + ".geometry.profile", "F18", "the profile must span u = 0 (the reference point)");
+          if (!fpf && f.reference_depth.present && std::fabs(f.reference_depth.si() - f.profile.si(1)) > 1e-6)
             c.err(b + ".geometry.reference_depth", "F6", "reference_depth differs from the depth of the first profile point");
           for (std::size_t k = 1; k < n; ++k) {
             double du = f.profile.si(2 * k) - f.profile.si(2 * k - 2), dz = f.profile.si(2 * k + 1) - f.profile.si(2 * k - 1);
@@ -823,7 +892,7 @@ struct Typer {
             else if (dz < 0) c.err(b + ".geometry.profile", "F6", "the fault must not rise in its dip direction (depth must not decrease)");
             else theta_max = std::max(theta_max, std::atan2(dz, du));
           }
-          if (n >= 2 && !(f.profile.si(3) > f.profile.si(1)))
+          if (!fpf && n >= 2 && !(f.profile.si(3) > f.profile.si(1)))
             c.err(b + ".geometry.profile", "F6", "the first profile segment must dip (it continues upwards to the model top)");
         }
         if (f.hw_type == "inclined_shear" && f.shear_angle.present) {
@@ -839,7 +908,9 @@ struct Typer {
         }
         if (f.heave.present && f.heave.si() < 0) c.err(b + ".throw.heave", "F14", "heave must not be negative");
       } else if (shear_hw) {
-        c.err(b + ".hanging_wall.type", "F14", "vertical and inclined shear hanging walls belong to curved (listric or ramp_flat) faults");
+        c.err(b + ".hanging_wall.type", fpf ? "F18" : "F14",
+              fpf ? "fault-parallel flow needs a curved (ramp_flat or listric) fault: flow lines follow its bends"
+                  : "vertical and inclined shear hanging walls belong to curved (listric or ramp_flat) faults");
       }
       if (f.trace.present && f.dip_side.empty())
         c.err(b + ".geometry.dip_side", "F6", "a fault given by its trace needs dip_side");
@@ -885,7 +956,7 @@ struct Typer {
         const bool ss = f.slip_mode == "strike_slip", ob = f.slip_mode == "oblique";
         if ((ss || ob) && f.throw_max.present)
           c.err(b + ".throw.max", "F16", "an " + f.slip_mode + " fault takes its net slip as throw.slip, not throw.max");
-        if (!ss && !ob && f.net_slip.present)
+        if (!ss && !ob && f.net_slip.present && !(fpf && f.curved()))
           c.err(b + ".throw.slip", "F16", "throw.slip is the net slip of oblique and strike_slip faults; dip-slip faults take throw.max");
         if (ss && f.sense != "left_lateral" && f.sense != "right_lateral")
           c.err(b + ".throw.sense", "F16", "a strike_slip fault needs throw.sense: left_lateral or right_lateral");
@@ -899,8 +970,23 @@ struct Typer {
         if (f.net_slip.present && f.net_slip.si() < 0) c.err(b + ".throw.slip", "F16", "net slip must not be negative (the sense gives the direction)");
         if (f.throw_max.present && f.throw_max.si() < 0 && f.sense == "reverse")
           c.err(b + ".throw.max", "F16", "give a positive throw with sense: reverse");
-        if (f.curved() && f.sense == "reverse")
-          c.err(b + ".throw.sense", "F14", "curved faults are normal in stage 2A (contractional curved faults come with stage 2B)");
+        if (f.curved() && !fpf && f.sense == "reverse")
+          c.err(b + ".throw.sense", "F14", "shear hanging walls collapse onto normal curved faults; contractional curved faults take hanging_wall: fault_parallel_flow");
+      }
+      if (f.fold_type == "trishear") {
+        // STX-TN-06 section 1: admissible range of trishear.
+        if (f.fold_apical_angle.present && !(f.fold_apical_angle.si() > 0 && f.fold_apical_angle.si() < kPi))
+          c.err(b + ".fold.apical_angle", "F17", "the apical angle must be in (0, 180) degrees");
+        if (f.fold_ps_ratio.present && f.fold_ps_ratio.si() < 0)
+          c.err(b + ".fold.propagation_slip_ratio", "F17", "the propagation-to-slip ratio must not be negative");
+        if (f.upper.rule == "free")
+          c.err(b + ".extent.upper_tip", "F17", "a trishear fault needs an upper tip inside the model: the fold forms ahead of it");
+        if (f.geom_type != "planar" || f.trace.present)
+          c.err(b + ".geometry", "F17", "trishear applies to planar faults placed by reference point, strike and dip");
+        if (f.slip_mode != "dip_slip") c.err(b + ".slip_mode", "F17", "trishear needs dip_slip");
+        if (f.hw_type != "rigid") c.err(b + ".hanging_wall.type", "F17", "trishear moves the hanging wall rigidly behind the zone: give hanging_wall: rigid");
+        if (!f.drag_type.empty() || !f.relay_fault.empty() || !f.abuts_fault.empty())
+          c.err(b + ".fold", "F17", "trishear is not combined with drag, relays or abutting in stage 2B");
       }
       if (!f.drag_type.empty()) {
         // STX-TN-05 section 3: drag moves material parallel to the slip, inside the fault surface.

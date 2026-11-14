@@ -412,8 +412,7 @@
             "required": [
               "type",
               "name",
-              "crest",
-              "relief"
+              "crest"
             ],
             "additionalProperties": false,
             "properties": {
@@ -422,7 +421,8 @@
                   "anticline",
                   "dome",
                   "syncline",
-                  "basin"
+                  "basin",
+                  "detachment_fold"
                 ]
               },
               "name": {
@@ -463,6 +463,42 @@
                 "minProperties": 1,
                 "additionalProperties": {
                   "$ref": "#/$defs/param"
+                }
+              },
+              "half_width": {
+                "$ref": "#/$defs/param"
+              },
+              "shortening": {
+                "$ref": "#/$defs/param"
+              },
+              "detachment": {
+                "type": "string"
+              },
+              "mechanics": {
+                "enum": [
+                  "parallel",
+                  "similar"
+                ]
+              },
+              "array": {
+                "type": "object",
+                "required": [
+                  "count",
+                  "step_along",
+                  "step_across"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "step_along": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "step_across": {
+                    "$ref": "#/$defs/param"
+                  }
                 }
               }
             }
@@ -627,7 +663,8 @@
                   "linear_between_faults",
                   "layer_rigid",
                   "vertical_shear",
-                  "inclined_shear"
+                  "inclined_shear",
+                  "fault_parallel_flow"
                 ]
               },
               "influence_distance": {
@@ -706,6 +743,26 @@
           },
           "rake": {
             "$ref": "#/$defs/param"
+          },
+          "fold": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "enum": [
+                  "trishear"
+                ]
+              },
+              "apical_angle": {
+                "$ref": "#/$defs/param"
+              },
+              "propagation_slip_ratio": {
+                "$ref": "#/$defs/param"
+              }
+            }
           }
         }
       }
@@ -758,6 +815,9 @@
               "$ref": "#/$defs/param"
             },
             "rollover": {
+              "$ref": "#/$defs/param"
+            },
+            "area": {
               "$ref": "#/$defs/param"
             }
           }

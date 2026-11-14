@@ -24,6 +24,7 @@ STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c8);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c9);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c10);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c11);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c12);
 
 namespace stratonix {
 
@@ -110,7 +111,8 @@ double CheckContext::tolerance(const std::string& key, std::string* source) cons
   struct T { const char* key; const desc::Param* p; double def; };
   const T table[] = {{"thickness_min", &d_.tol_thickness_min, 0.5}, {"crossing", &d_.tol_crossing, 0.01},
                      {"offset_outside_tips", &d_.tol_offset_outside_tips, 0.05}, {"throw", &d_.tol_throw, 0.5},
-                     {"wells", &d_.tol_wells, 0.01}, {"unoffset", &d_.tol_unoffset, 0.05}};
+                     {"wells", &d_.tol_wells, 0.01}, {"unoffset", &d_.tol_unoffset, 0.05},
+                     {"area", &d_.tol_area, 0.01}};
   for (auto& t : table)
     if (key == t.key) {
       if (t.p->present) {
@@ -249,6 +251,7 @@ class C4 final : public Check {
     for (std::size_t f = 0; f < inf.faults.size(); ++f) {
       const Fault& F = net->faults()[f];
       const int fi = static_cast<int>(f);
+      if (F.tri || (F.curved && F.curved->fpf)) continue;  // fold kinematics: no throw profile; area is checked by C12
       bool fixed_hw = ((net->fixed_block() >> f) & 1u) != 0;
       double bmin = 1e300, bmax = -1e300;
       for (std::size_t i = 0; i < F.a_tab.size(); ++i) {
@@ -481,6 +484,75 @@ class C11 final : public Check {
   }
 };
 
+/// C12: area conserved by fold kinematics (STX-TN-06 section 6): Jacobian determinant of the
+/// fault's own restoration in its dip plane at the reference strike position.
+class C12 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* net = static_cast<const FaultNetwork*>(c.model().capability("faults"));
+    if (!net) return out;
+    std::string src;
+    const double tol = c.tolerance("area", &src);
+    const double e = 0.5;
+    for (const Fault& F : net->faults()) {
+      if (!F.tri && !F.curved) continue;
+      // dip-plane basis (along, across) and the region sampled
+      Vec3 ua, uc;
+      std::vector<std::pair<double, double>> pts;  // (along, across) offsets from the origin
+      Vec3 o;
+      double bu, bl;
+      F.tips(0, bu, bl);
+      if (F.tri) {
+        double S = F.slip_at(0), ps = F.tri->ps, tp = F.tri->tanphi;
+        double len = ps * S + std::fabs(S) + 600, wid = len * tp + 200;
+        ua = F.dd;
+        uc = F.n;
+        o = F.at(0, bu);
+        for (int i = 0; i <= 24; ++i)
+          for (int j = 0; j <= 24; ++j) {
+            double al = -len + (len + ps * S + 300) * i / 24.0, ac = -wid + 2 * wid * j / 24.0;
+            if (al > 0 && std::fabs(ac) < 3 * e + 1) continue;  // the fault surface behind the present tip
+            pts.push_back({al, ac});
+          }
+      } else {
+        ua = F.dh;
+        uc = Vec3{0, 0, 1};
+        o = F.at(0, 0);
+        for (int i = 0; i <= 24; ++i)
+          for (int j = 1; j <= 24; ++j) {
+            double u = -500 + 4000 * i / 24.0;
+            double zf = -F.curved->zf(u);
+            pts.push_back({u, zf - o.z + 60.0 * j});  // above the fault
+          }
+      }
+      auto map = [&](const Vec3& q) {
+        if (F.tri) return net->trishear_map(F.index, q, false);
+        return F.sigma(q) > 0 ? net->undo(F.index, q, 1) : q;
+      };
+      double worst = 0;
+      int n = 0;
+      for (auto& [al, ac] : pts) {
+        Vec3 p = o + ua * al + uc * ac;
+        if (F.curved && F.sigma(p) < 3 * e + 1) continue;
+        Vec3 ra = map(p + ua * e), rb = map(p - ua * e), rc = map(p + uc * e), rd = map(p - uc * e);
+        double a11 = dot(ra - rb, ua) / (2 * e), a12 = dot(rc - rd, ua) / (2 * e);
+        double a21 = dot(ra - rb, uc) / (2 * e), a22 = dot(rc - rd, uc) / (2 * e);
+        worst = std::max(worst, std::fabs(a11 * a22 - a12 * a21 - 1));
+        ++n;
+      }
+      auto r = base(c, "C12", "area conserved by fold kinematics", F.name);
+      r.unit = "fraction";
+      r.value = worst;
+      r.tolerance = tol;
+      r.tolerance_source = src;
+      r.passed = worst <= tol;
+      r.detail = std::to_string(n) + " points in the dip plane at the reference strike position; |Jacobian - 1|";
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 /// C5: control wells honoured (check wells reported as warnings).
 class C5 final : public Check {
   std::vector<CheckResult> run(CheckContext& c) const override {
@@ -683,6 +755,8 @@ STRATONIX_REGISTER(check_c9, registry::Kind::Check, "C9_closure", "1.0.0", "Clos
                    [] { return std::make_unique<C9>(); })
 STRATONIX_REGISTER(check_c10, registry::Kind::Check, "C10_fault_scaling", "1.0.0", "Displacement-length scaling (warning)",
                    [] { return std::make_unique<C10>(); })
+STRATONIX_REGISTER(check_c12, registry::Kind::Check, "C12_area", "1.0.0", "Area conserved by fold kinematics",
+                   [] { return std::make_unique<C12>(); })
 STRATONIX_REGISTER(check_c11, registry::Kind::Check, "C11_fault_system", "1.0.0",
                    "Throw continuous across branch lines and relays", [] { return std::make_unique<C11>(); })
 
@@ -712,6 +786,7 @@ void register_check_plugins() {
   STRATONIX_PLUGIN_ANCHOR(check_c9);
   STRATONIX_PLUGIN_ANCHOR(check_c10);
   STRATONIX_PLUGIN_ANCHOR(check_c11);
+  STRATONIX_PLUGIN_ANCHOR(check_c12);
 }
 
 }  // namespace stratonix

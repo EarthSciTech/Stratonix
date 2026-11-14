@@ -23,6 +23,7 @@ STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_decay);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_linear);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_vertical_shear);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_inclined_shear);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_fpf);
 
 namespace stratonix {
 
@@ -90,12 +91,87 @@ double CurvedFault::G(double xi) const {
   double z = expand_and_solve(phi, zf(xi), 50.0, 1.0e7, 1e-10);
   return z;
 }
+void CurvedFault::setup_fpf() {
+  const std::size_t n = pu.size(), ns = n - 1;
+  fe_u.assign(ns, 0); fe_z.assign(ns, 0); fn_u.assign(ns, 0); fn_z.assign(ns, 0);
+  for (std::size_t k = 0; k < ns; ++k) {
+    double du = pu[k + 1] - pu[k], dz = pz[k + 1] - pz[k], l = std::hypot(du, dz);
+    fe_u[k] = du / l; fe_z[k] = dz / l;
+    fn_u[k] = fe_z[k]; fn_z[k] = -fe_u[k];  // towards the hanging wall (shallower)
+  }
+  fm_u.assign(n, 0); fm_z.assign(n, 0);
+  for (std::size_t k = 0; k < n; ++k) {
+    if (k == 0) { fm_u[k] = fn_u[0]; fm_z[k] = fn_z[0]; continue; }
+    if (k == ns) { fm_u[k] = fn_u[ns - 1]; fm_z[k] = fn_z[ns - 1]; continue; }
+    double c = 1 + fn_u[k - 1] * fn_u[k] + fn_z[k - 1] * fn_z[k];
+    fm_u[k] = (fn_u[k - 1] + fn_u[k]) / c;
+    fm_z[k] = (fn_z[k - 1] + fn_z[k]) / c;
+  }
+  fl0.assign(ns, 0); fl1.assign(ns, 0);
+  fpf_dmax = std::numeric_limits<double>::infinity();
+  for (std::size_t k = 0; k < ns; ++k) {
+    fl0[k] = (pu[k + 1] - pu[k]) * fe_u[k] + (pz[k + 1] - pz[k]) * fe_z[k];
+    fl1[k] = (fm_u[k + 1] - fm_u[k]) * fe_u[k] + (fm_z[k + 1] - fm_z[k]) * fe_z[k];
+    // the end segments are unbounded; inner ones vanish where the bisectors cross
+    if (k > 0 && k + 1 < ns && fl1[k] < 0) fpf_dmax = std::min(fpf_dmax, -fl0[k] / fl1[k]);
+  }
+  fpf = true;
+}
+void CurvedFault::fpf_coords(double u, double z, double& s, double& d) const {
+  const std::size_t ns = pu.size() - 1;
+  std::size_t k0;
+  if (u <= pu[0]) k0 = 0;
+  else if (u >= pu[ns]) k0 = ns - 1;
+  else k0 = static_cast<std::size_t>(std::upper_bound(pu.begin(), pu.end(), u) - pu.begin()) - 1;
+  auto test = [&](std::size_t k, double& t, double& dd) {
+    dd = (u - pu[k]) * fn_u[k] + (z - pz[k]) * fn_z[k];
+    t = (u - pu[k]) * fe_u[k] + (z - pz[k]) * fe_z[k] - dd * (fm_u[k] * fe_u[k] + fm_z[k] * fe_z[k]);
+    return (k == 0 || t >= -1e-9) && (k + 1 == ns || t <= fl0[k] + dd * fl1[k] + 1e-9);
+  };
+  double t = 0, dd = 0;
+  std::size_t k = k0;
+  bool found = test(k0, t, dd);
+  for (std::size_t r = 1; !found && r <= ns; ++r) {
+    if (k0 + r < ns && test(k0 + r, t, dd)) { k = k0 + r; found = true; break; }
+    if (r <= k0 && test(k0 - r, t, dd)) { k = k0 - r; found = true; break; }
+  }
+  if (!found) test(k = k0, t, dd);
+  s = t;
+  for (std::size_t j = 0; j < k; ++j) s += fl0[j] + dd * fl1[j];
+  d = dd;
+}
+void CurvedFault::fpf_at(double s, double d, double& u, double& z) const {
+  const std::size_t ns = pu.size() - 1;
+  double acc = 0;
+  for (std::size_t k = 0; k < ns; ++k) {
+    double len = fl0[k] + d * fl1[k];
+    if (s < acc + len || k + 1 == ns) {
+      if (k == 0 && s < 0) acc = 0;
+      u = pu[k] + fm_u[k] * d + fe_u[k] * (s - acc);
+      z = pz[k] + fm_z[k] * d + fe_z[k] * (s - acc);
+      return;
+    }
+    acc += len;
+  }
+}
 void CurvedFault::forward(double u, double z, double h, double& u1, double& z1) const {
+  if (fpf) {
+    double s, d;
+    fpf_coords(u, z, s, d);
+    fpf_at(s + h, d, u1, z1);
+    return;
+  }
   double xi = u - s * z * ta, xi1 = xi + h;
   z1 = z + G(xi1) - G(xi);
   u1 = xi1 + s * z1 * ta;
 }
 void CurvedFault::inverse(double u1, double z1, double h, double& u, double& z) const {
+  if (fpf) {
+    double s, d;
+    fpf_coords(u1, z1, s, d);
+    fpf_at(s - h, d, u, z);
+    return;
+  }
   double xi1 = u1 - s * z1 * ta, xi = xi1 - h;
   z = z1 - G(xi1) + G(xi);
   u = xi + s * z * ta;
@@ -193,6 +269,9 @@ STRATONIX_REGISTER(hw_linear, registry::Kind::HangingWall, "linear_between_fault
 STRATONIX_REGISTER(hw_vertical_shear, registry::Kind::HangingWall, "vertical_shear", "1.0.0",
                    "Curved faults: hanging wall collapses onto the fault by vertical simple shear (Chevron construction)",
                    [] { return std::make_unique<ShearHW>("vertical_shear"); })
+STRATONIX_REGISTER(hw_fpf, registry::Kind::HangingWall, "fault_parallel_flow", "1.0.0",
+                   "Curved faults: hanging wall flows parallel to the fault (fault-bend folds)",
+                   [] { return std::make_unique<ShearHW>("fault_parallel_flow"); })
 STRATONIX_REGISTER(hw_inclined_shear, registry::Kind::HangingWall, "inclined_shear", "1.0.0",
                    "Curved faults: hanging wall collapses onto the fault by simple shear on inclined lines",
                    [] { return std::make_unique<ShearHW>("inclined_shear"); })
@@ -208,6 +287,7 @@ void register_fault_plugins() {
   STRATONIX_PLUGIN_ANCHOR(hw_linear);
   STRATONIX_PLUGIN_ANCHOR(hw_vertical_shear);
   STRATONIX_PLUGIN_ANCHOR(hw_inclined_shear);
+  STRATONIX_PLUGIN_ANCHOR(hw_fpf);
 }
 
 // ---- fault ---------------------------------------------------------------------------------
@@ -252,6 +332,12 @@ double Fault::throw_at(double a, double b) const {
   else
     fs = profile_value(pstrike, taper_strike, xi);
   return tmax * profile_value(pdip, taper_dip, eta) * fs;
+}
+
+double Fault::slip_at(double a) const {
+  double L2 = 0.5 * length;
+  if (std::fabs(a) >= L2) return 0;
+  return std::fabs(tmax) / std::sin(dip) * profile_value(pstrike, taper_strike, (a + L2) / length);
 }
 
 double Fault::heave_at(double a) const {
@@ -355,7 +441,23 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
       }
       c->s = fd.shear_sense == "synthetic" ? 1.0 : -1.0;
       c->ta = fd.hw_type == "inclined_shear" ? std::tan(fd.shear_angle.si()) : 0.0;
-      c->heave = fd.heave.si();
+      if (fd.hw_type == "fault_parallel_flow") {
+        if (c->shape == CurvedFault::Shape::Listric) {
+          // 600-segment polyline from the model top to near the detachment (STX-TN-06 section 2)
+          const double ztop = d.domain().z_top;
+          double ua = c->u_at(std::min(-ztop, c->z0)) - 1000, ub = -(c->zd - c->z0) / c->tan0 * std::log(1e-3);
+          for (int i = 0; i <= 600; ++i) {
+            double u = ua + (ub - ua) * i / 600.0;
+            c->pu.push_back(u);
+            c->pz.push_back(c->zf(u));
+          }
+          c->shape = CurvedFault::Shape::RampFlat;
+        }
+        c->heave = (fd.sense == "reverse" ? -1.0 : 1.0) * fd.net_slip.si();
+        c->setup_fpf();
+      } else {
+        c->heave = fd.heave.si();
+      }
       f.curved = c;
     }
     if (fd.trace.present) {
@@ -399,6 +501,13 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
       f.abuts = d.fault_index(fd.abuts_fault);
       f.abut_hw_side = fd.abuts_side == "hanging_wall";
       f.transfer = fd.abuts_transfer;
+    }
+    if (fd.fold_type == "trishear") {
+      auto t = std::make_shared<TrishearFold>();
+      t->tanphi = std::tan(0.5 * fd.fold_apical_angle.si());
+      t->ps = fd.fold_ps_ratio.si();
+      t->v0 = f.tmax < 0 ? 1.0 : -1.0;  // reverse: towards the tip
+      f.tri = t;
     }
     if (!fd.drag_type.empty()) {
       f.drag = fd.drag_type == "reverse" ? -1 : 1;
@@ -489,12 +598,52 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
     log.value("fault." + f.name + ".slip_vector_per_m_throw", fmt_fixed(f.slip.x, 4) + ", " + fmt_fixed(f.slip.y, 4) + ", " + fmt_fixed(f.slip.z, 4));
   }
   for (auto& f : faults_)
+    if (f.tri && ((fixed_block_ >> f.index) & 1u))
+      throw Error(ErrorCode::Build, "fault " + f.name + " (rule F17): the frame's fixed point lies on the hanging-wall side of a "
+                                                         "trishear fault; fix a point or well in the footwall",
+                  "frame.fixed");
+  for (auto& f : faults_)
     if (f.curved && ((fixed_block_ >> f.index) & 1u))
       throw Error(ErrorCode::Build,
                   "fault " + f.name + " (rule F11): the frame's fixed point lies in the hanging wall of a curved fault; the "
                   "shear construction moves the hanging wall over a fixed footwall, so fix a point or well in the footwall",
                   "frame.fixed");
   resolve_tips(d, st, log);
+  for (auto& f : faults_) {
+    if (!f.tri) continue;
+    if (norm(trishear_map(f.index, fixed_, false) - fixed_) > 1e-9)
+      throw Error(ErrorCode::Build, "fault " + f.name + " (rule F17): the frame's fixed point lies in the trishear zone's sweep; "
+                                                         "fix a point or well outside it", "frame.fixed");
+    double bu, bl, S = f.slip_at(0);
+    f.tips(0, bu, bl);
+    log.value(f.name + ".trishear.slip", fmt_fixed(S, 3));
+    log.value(f.name + ".trishear.tip_present_depth", fmt_fixed(-f.at(0, bu).z, 3));
+    log.value(f.name + ".trishear.tip_initial_depth", fmt_fixed(-f.at(0, bu + f.tri->ps * S).z, 3));
+    // forelimb dip of each horizon at the reference strike position: march the restored horizon forward
+    const Vec3 tip = f.at(0, bu);
+    for (std::size_t hz = 0; hz < st.horizons(); ++hz) {
+      if (st.z(hz, tip.x, tip.y) < tip.z) {  // below the present tip: cut by the fault, not folded over it
+        log.value(f.name + "." + d.horizons[hz].name + ".trishear", "cut by the fault");
+        continue;
+      }
+      double dipmax = 0;
+      Vec3 prev{};
+      bool have = false;
+      for (double b = bu - 3000; b <= bu + f.tri->ps * S + 3000; b += 10) {
+        Vec3 p = f.at(0, b);
+        // the horizon in this fault's frame at the map position of the plane point (no older faults assumed)
+        Vec3 h0{p.x, p.y, st.z(hz, p.x, p.y)};
+        Vec3 pr = trishear_map(f.index, h0, true);
+        if (have) {
+          double du = std::hypot(pr.x - prev.x, pr.y - prev.y);
+          if (du > 1e-6) dipmax = std::max(dipmax, std::atan(std::fabs(pr.z - prev.z) / du));
+        }
+        prev = pr;
+        have = true;
+      }
+      log.value(f.name + "." + d.horizons[hz].name + ".forelimb_dip_max", fmt_fixed(rad2deg(dipmax), 3));
+    }
+  }
   // Branch lines of splays (STX-TN-05 section 4.1): the line along the cross product of the normals.
   for (auto& f : faults_) {
     if (f.abuts < 0 || f.curved) continue;
@@ -549,7 +698,7 @@ bool FaultNetwork::cannot_move(int fi, const Vec3& q) const {
   const Fault& f = faults_[static_cast<std::size_t>(fi)];
   double a, b;
   f.profile_coords(q, a, b);
-  if (f.transfer) return false;  // slip along the branch line has a strike component
+  if (f.transfer || f.tri) return false;  // strike component of slip; trishear moves both sides
   // a point beyond the strike ends stays there unless the slip carries it along strike
   if (std::fabs(a) >= 0.5 * f.length + std::fabs(dot(f.slip, f.s)) * std::fabs(f.tmax)) return true;
   if (f.layered || f.curved) return false;  // a layer can meet the fault far from the point
@@ -668,6 +817,7 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
         }
       f.max_slip_gradient = gmax;
       log.value("fault." + f.name + ".max_throw_gradient_along_slip", fmt_fixed(gmax, 3));
+      if (f.tri) gmax = 0;  // constant slip behind the tip; the zone conserves area
       if (gmax >= 1.0 && !f.layered)
         throw Error(ErrorCode::Build,
                     "fault " + f.name + ": the throw changes by " + fmt_fixed(gmax, 2) +
@@ -781,10 +931,30 @@ void FaultNetwork::resolve_curved(const desc::Description& d, const Structure& s
   const Domain dom = d.domain();
   // Tips are free (rule F10): the fault spans the model from its top to beyond the far side, in
   // the horizontal coordinate u along the dip direction.
-  double u_top = c.u_at(-dom.z_top), u_far = u_top;
+  double u_top = c.u_at(-dom.z_top), u_far = u_top, u_near = 1e300;
+  for (double cx : {dom.x0, dom.x0 + dom.sx})
+    for (double cy : {dom.y0, dom.y0 + dom.sy}) {
+      double u = dot(Vec3{cx, cy, f.p0.z} - f.p0, f.dh);
+      u_far = std::max(u_far, u);
+      u_near = std::min(u_near, u);
+    }
+  if (!std::isfinite(u_top)) u_top = std::min(c.pu.front(), u_near) - 1000 - std::fabs(c.heave);  // upper flat below the top
+  if (!std::isfinite(u_far) || u_far < u_top) u_far = u_top;
   for (double cx : {dom.x0, dom.x0 + dom.sx})
     for (double cy : {dom.y0, dom.y0 + dom.sy}) u_far = std::max(u_far, dot(Vec3{cx, cy, f.p0.z} - f.p0, f.dh));
   u_far += 1000 + std::fabs(c.heave);
+  if (c.fpf) {
+    // Rule F18: flow lines of neighbouring bends cross above the bisector-crossing offset.
+    double need = 0;
+    for (double u = u_near; u <= u_far; u += 25) need = std::max(need, c.zf(u) + dom.z_top);
+    log.value("fault." + f.name + ".fpf.bisector_crossing_offset",
+              std::isfinite(c.fpf_dmax) ? fmt_fixed(c.fpf_dmax, 2) : std::string("none"));
+    if (c.fpf_dmax < need)
+      throw Error(ErrorCode::Build, "fault " + f.name + " (rule F18): the bisectors of neighbouring bends cross " +
+                                        fmt_fixed(c.fpf_dmax, 1) + " m above the fault, below the model top (" + fmt_fixed(need, 1) +
+                                        " m above it): fault-parallel flow lines would overlap. Lengthen the short segments "
+                                        "between bends or soften the bends", "faults." + f.name + ".geometry.profile");
+  }
   const std::size_t K = 513;
   f.a_tab.assign(K, 0.0);
   f.bu_tab.assign(K, u_top);
@@ -801,6 +971,18 @@ void FaultNetwork::resolve_curved(const desc::Description& d, const Structure& s
   // Report at the reference strike position (a = 0): per horizon heave, throw, rollover width and
   // maximum rollover dip (STX-TN-05 section 2.4).
   const double h = f.heave_at(0);
+  if (c.fpf) {
+    log.value(f.name + ".fpf.slip", fmt_fixed(-h, 3));
+    // per horizon: its offset above the fault (constant along its flow line)
+    for (std::size_t hz = 0; hz < st.horizons(); ++hz) {
+      Vec3 p = f.p0 + f.dh * c.pu.back();
+      double z = -st.z(hz, p.x, p.y), s0, d0;
+      c.fpf_coords(c.pu.back(), z, s0, d0);
+      if (d0 <= 0) continue;
+      log.value(f.name + "." + d.horizons[hz].name + ".fpf_offset_above_fault", fmt_fixed(d0, 3));
+    }
+    return;
+  }
   if (h <= 0) return;
   const double tol = d.tol_rollover.present ? d.tol_rollover.si() : 1.0;
   const bool older = r + 1 < order_.size();
@@ -891,6 +1073,7 @@ Vec3 FaultNetwork::relative_displacement(int fi, const Vec3& q, bool* active) co
       return {0, 0, 0};
     }
   }
+  if (f.tri) return trishear_map(fi, q, true) - q;
   if (f.curved) {
     if (f.sigma(q) <= 0) return {0, 0, 0};
     double a = dot(q - f.p0, f.s), u = dot(q - f.p0, f.dh), h = f.heave_at(a);
@@ -915,6 +1098,12 @@ Vec3 FaultNetwork::relative_displacement(int fi, const Vec3& q, bool* active) co
 
 Vec3 FaultNetwork::undo(int fi, const Vec3& q, int sgn, double* tau_out) const {
   const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  if (f.tri) {
+    Vec3 r = trishear_map(fi, q, false);
+    if (tau_out) *tau_out = q.z - r.z;
+    (void)sgn;
+    return r;
+  }
   if (f.curved) {
     // Only the hanging wall moves (rule F11). tau: vertical displacement (present minus restored depth).
     if (tau_out) *tau_out = 0;
@@ -996,8 +1185,60 @@ Vec3 FaultNetwork::drag_inverse(int fi, const Vec3& q, bool hw) const {
   return q - f.slip * t;
 }
 
+Vec3 FaultNetwork::trishear_map(int fi, const Vec3& q, bool fwd) const {
+  const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  const TrishearFold& t = *f.tri;
+  const Vec3 d = q - f.p0;
+  const double a = dot(d, f.s), S = f.slip_at(a);
+  if (S <= 0) return q;
+  double bu, bl;
+  f.tips(a, bu, bl);
+  const double b0 = dot(d, f.dd), y0 = dot(d, f.n), tp = t.tanphi, ps = t.ps, v0 = t.v0;
+  auto tipb = [&](double s) { return bu + ps * (S - s); };
+  auto in_zone = [&](double b, double y, double s) { double x = tipb(s) - b; return x > 0 && std::fabs(y) < x * tp; };
+  // Closed form when the relative path (a straight line along the fault) never meets the zone.
+  {
+    const double sa = fwd ? 0.0 : S, sb = fwd ? S : 0.0;
+    const double rate = y0 > 0 ? v0 : 0.0;  // db/ds = -rate outside the zone
+    auto b_at = [&](double s) { return b0 - rate * (s - sa); };
+    if (!in_zone(b_at(sa), y0, sa) && !in_zone(b_at(sb), y0, sb)) return q + f.dd * (b_at(sb) - b0);
+  }
+  // Integrate the velocity field (fourth-order Runge-Kutta, steps shrinking towards the apex).
+  auto vel = [&](double b, double y, double s, double& db, double& dy) {
+    double x = tipb(s) - b;
+    if (x <= 0 || y >= x * tp) {
+      db = y > 0 || x > 0 ? -v0 : 0.0;
+      if (x <= 0 && y <= 0) db = 0;
+      dy = 0;
+      return;
+    }
+    if (y <= -x * tp) { db = 0; dy = 0; return; }
+    double r = y / (x * tp);
+    db = -0.5 * v0 * (r + 1);
+    dy = 0.25 * v0 * tp * (r * r - 1);
+  };
+  double b = b0, y = y0, s = fwd ? 0.0 : S;
+  const double send = fwd ? S : 0.0, dir = fwd ? 1.0 : -1.0;
+  while (dir * (send - s) > 1e-12) {
+    double x = std::fabs(tipb(s) - b);
+    double h = std::clamp(0.02 * x * tp + 0.05, 0.05, 5.0);
+    h = std::min(h, dir * (send - s));
+    double hs = dir * h;
+    double k1b, k1y, k2b, k2y, k3b, k3y, k4b, k4y;
+    vel(b, y, s, k1b, k1y);
+    vel(b + 0.5 * hs * k1b, y + 0.5 * hs * k1y, s + 0.5 * hs, k2b, k2y);
+    vel(b + 0.5 * hs * k2b, y + 0.5 * hs * k2y, s + 0.5 * hs, k3b, k3y);
+    vel(b + hs * k3b, y + hs * k3y, s + hs, k4b, k4y);
+    b += hs / 6 * (k1b + 2 * k2b + 2 * k3b + k4b);
+    y += hs / 6 * (k1y + 2 * k2y + 2 * k3y + k4y);
+    s += hs;
+  }
+  return q + f.dd * (b - b0) + f.n * (y - y0);
+}
+
 Vec3 FaultNetwork::step(int fi, const Vec3& q, bool side, bool fast) const {
   const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  if (f.tri) return trishear_map(fi, q, false);  // every side of the zone moves
   Vec3 r = f.drag ? drag_inverse(fi, q, side) : q;
   bool fixed_side = ((fixed_block_ >> fi) & 1u) != 0;
   if (side == fixed_side) return r;

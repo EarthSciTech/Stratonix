@@ -66,6 +66,12 @@ struct PrimitiveDesc {
   Param crest, axis_azimuth, plunge, half_length, half_width_left, half_width_right;
   Param radius_major, radius_minor, rim_depth, rim_width;
   std::vector<std::pair<std::string, Param>> relief;  ///< horizon name -> relief
+  // Stage 2B (STX-TN-06 sections 3 to 5)
+  Param half_width, shortening;    ///< detachment_fold
+  std::string detachment;          ///< detachment_fold: horizon of the detachment
+  std::string mechanics;           ///< "" (interpolated relief), "parallel" or "similar"
+  int array_count = 1;             ///< en echelon copies
+  Param array_step_along, array_step_across;
 };
 /// Tip rule. stratigraphy: "fault_frame" (default) places the tip on the stratigraphy as displaced
 /// by older faults; "unfaulted" on the stratigraphy before any faulting.
@@ -105,6 +111,9 @@ struct FaultDesc {
   Param net_slip;                  ///< throw.slip: net slip of oblique and strike-slip faults
   Param rake;                      ///< oblique: rake (Aki and Richards convention)
   bool strike_component() const { return slip_mode == "oblique" || slip_mode == "strike_slip"; }
+  // Fault-related folding (STX-TN-06 section 1).
+  std::string fold_type;           ///< trishear (empty: none)
+  Param fold_apical_angle, fold_ps_ratio;
 };
 struct SectionDesc { std::string name; Param polyline, detail_window; };
 /// Section sheet (presentation page) settings.
@@ -167,7 +176,7 @@ struct Description {
   std::string frame_well;
   Param frame_point;
   // checks
-  Param tol_thickness_min, tol_crossing, tol_offset_outside_tips, tol_throw, tol_wells, tol_unoffset, tol_rollover;
+  Param tol_thickness_min, tol_crossing, tol_offset_outside_tips, tol_throw, tol_wells, tol_unoffset, tol_rollover, tol_area;
   Param scaling_min_ratio, scaling_max_ratio;  ///< checks.fault_scaling (C10)
   std::string closure_horizon;
   Param closure_faults_seal, target_closure, target_area, target_spill_depth, target_tolerance;

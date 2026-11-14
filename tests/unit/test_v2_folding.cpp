@@ -178,6 +178,8 @@ struct FPF {
     return {};
   }
   P2 forward(P2 p, double slip) const { double s, d; coords(p, s, d); return at(s - slip, d); }
+  // hanging wall: above the fault (the footwall does not move)
+  bool above(P2 p) const { double s, d; coords(p, s, d); return d > 0; }
 };
 // Thrust: upper flat at 1100 m, 30-degree ramp to a lower flat at 2000 m.
 const std::vector<P2> kThrust = {{-6000, 1100}, {2000, 1100}, {2000 + 900 / std::tan(deg2rad(30)), 2000}, {12000, 2000}};
@@ -200,6 +202,7 @@ TEST_CASE("P21 fault-bend fold by fault-parallel flow") {
   for (int h = 2; h < 4; ++h)
     for (double u = 2600; u <= 9000; u += 50) {
       double z0 = 1400 + 200 * (h - 2);
+      if (!f.above({u, z0})) continue;
       P2 p = f.forward({u, z0}, 1000);
       if (p.u > 9000) continue;
       worst = std::max(worst, std::fabs(scalar_at(*m, h, 5000 + p.u, -p.z)));
@@ -222,6 +225,7 @@ TEST_CASE("P21 fault-parallel flow round trip") {
   double worst = 0;
   for (double u = 2700; u <= 8000; u += 150)
     for (double z = 1300; z <= 1900; z += 100) {
+      if (!f.above({u, z})) continue;
       P2 p = f.forward({u, z}, 1000);
       std::vector<Vec3> in{{5000 + p.u, 5000, -p.z}}, out(1);
       m->restore(in, out);

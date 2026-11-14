@@ -1,0 +1,60 @@
+# Worked example 13: a detachment fold above H4 that absorbed 300 m of shortening (its relief follows
+# from the area balance), beside an en echelon array of three periclinal anticlines with parallel
+# (flexural-slip) mechanics (stage 2B).
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_detachment_folds, version: "1.0.0", status: DESIGN,
+        title: "Detachment fold and en echelon folds"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, fixed block"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+      H4: "1600 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[3000, 5000] m | user_instruction | worked example: planned well on the detachment fold crest"
+    total_depth: "2000 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}, {name: H4}]
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+  primitives:
+    - type: detachment_fold
+      name: DF
+      crest: "[3000, 5000] m | user_instruction | worked example"
+      axis_azimuth: "0 deg | user_instruction | worked example"
+      half_width: "1500 m | user_instruction | worked example"
+      half_length: "4000 m | user_instruction | worked example: periclinal"
+      shortening: "300 m | user_instruction | worked example"
+      detachment: H4
+    - type: anticline
+      name: EA
+      crest: "[5200, 1800] m | user_instruction | worked example: first fold of the array"
+      axis_azimuth: "20 deg | user_instruction | worked example"
+      half_length: "1800 m | user_instruction | worked example"
+      half_width_left: "700 m | user_instruction | worked example"
+      half_width_right: "700 m | user_instruction | worked example"
+      relief: {H1: "120 m | user_instruction | worked example"}
+      mechanics: parallel
+      array: {count: 3, step_along: "2000 m | user_instruction | worked example", step_across: "700 m | user_instruction | worked example"}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[500, 5000], [9500, 5000]] m | user_instruction | worked example: across both folds"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]
