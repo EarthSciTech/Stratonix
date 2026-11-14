@@ -166,7 +166,7 @@ TEST_CASE("S2 DejaVu Sans metrics and UTF-8 text widths") {
   CHECK_NEAR(text_width("A", 10, false, "DejaVu Sans"), 6.84, 1e-9);
   CHECK_NEAR(text_width("\xC3\xA5", 10, false, "DejaVu Sans"), text_width("a", 10, false, "DejaVu Sans"), 1e-9);  // å
   CHECK(text_width("AB", 10, true, "DejaVu Sans") > text_width("AB", 10, false, "DejaVu Sans"));
-  CHECK_NEAR(text_width("Gassum", 10, false), text_width("Gassum", 10, false, ""), 1e-12);  // default metrics unchanged
+  CHECK_NEAR(text_width("Sandstone", 10, false), text_width("Sandstone", 10, false, ""), 1e-12);  // default metrics unchanged
 }
 
 TEST_CASE("S3 description rules: completions, outer units, sheets") {

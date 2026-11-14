@@ -88,3 +88,7 @@ Options: `STRATONIX_WITH_CAIRO` (PNG/TIFF figures, default ON), `STRATONIX_WITH_
 
 See `CONTRIBUTING.md` for how to add a plugin or an optimised kernel, and the design
 specification STX-TN-01 for the architecture.
+
+## Licence
+
+MIT, see `LICENSE`. Third-party components and their licences are listed in `THIRD_PARTY.md`.
