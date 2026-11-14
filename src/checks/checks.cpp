@@ -11,6 +11,17 @@
 #include "stratonix/engines/faults.hpp"
 #include "stratonix/engines/structure.hpp"
 
+// Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c1);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c2);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c3);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c4);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c5);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c6);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c7);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c8);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c9);
+
 namespace stratonix {
 
 // ---- report --------------------------------------------------------------------------------

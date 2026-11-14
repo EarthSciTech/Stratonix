@@ -9,6 +9,11 @@
 #include "stratonix/core/util.hpp"
 #include "stratonix/io/io.hpp"
 
+// Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_irap_ascii);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_zmap);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_xyz);
+
 namespace stratonix::io {
 
 static std::vector<std::string> tokens(const std::string& text, bool comma = false) {

@@ -12,6 +12,14 @@
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/wells.hpp"
 
+// Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
+STRATONIX_DECLARE_PLUGIN_ANCHOR(kin_dip_slip);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(kin_vertical);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_rigid);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_layer_rigid);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_decay);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(hw_linear);
+
 namespace stratonix {
 
 constexpr double kInf = std::numeric_limits<double>::infinity();

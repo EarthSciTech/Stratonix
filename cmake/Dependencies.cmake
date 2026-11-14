@@ -1,6 +1,19 @@
 # Third-party dependencies. Each is found through vcpkg/CMake config first, then pkg-config,
 # then a plain library search, and exposed as an stx:: alias target.
 find_package(PkgConfig QUIET)
+include(CheckCSourceCompiles)
+
+# A static archive can go into the shared C API library only if it was built as position-
+# independent code (Ubuntu 22.04's libz.a and libyaml.a are not). Test by linking a shared object.
+function(stx_static_is_pic out lib symbol)
+  set(CMAKE_REQUIRED_FLAGS "-fPIC")
+  set(CMAKE_REQUIRED_LINK_OPTIONS "-shared")
+  set(CMAKE_REQUIRED_LIBRARIES "${lib}")
+  set(CMAKE_REQUIRED_QUIET ON)
+  string(MAKE_C_IDENTIFIER "STX_PIC_${lib}" var)
+  check_c_source_compiles("extern void ${symbol}(void); void stx_probe(void) { ${symbol}(); }" ${var})
+  set(${out} ${${var}} PARENT_SCOPE)
+endfunction()
 
 # libyaml (MIT): YAML and JSON reader. Prefer a static library so the program has no
 # runtime dependency to install.
@@ -8,7 +21,10 @@ find_package(yaml CONFIG QUIET)
 if(NOT TARGET yaml AND NOT WIN32)
   find_path(STX_YAML_INC_S yaml.h)
   find_library(STX_YAML_LIB_S NAMES libyaml.a)
-  if(STX_YAML_INC_S AND STX_YAML_LIB_S)
+  if(STX_YAML_LIB_S)
+    stx_static_is_pic(STX_YAML_STATIC_PIC ${STX_YAML_LIB_S} yaml_get_version_string)
+  endif()
+  if(STX_YAML_INC_S AND STX_YAML_LIB_S AND STX_YAML_STATIC_PIC)
     add_library(stx_yaml_static STATIC IMPORTED)
     set_target_properties(stx_yaml_static PROPERTIES IMPORTED_LOCATION ${STX_YAML_LIB_S}
                           INTERFACE_INCLUDE_DIRECTORIES ${STX_YAML_INC_S})
@@ -34,9 +50,22 @@ else()
   endif()
 endif()
 
-# zlib (zlib licence): PNG, zip and PPTX writers.
+# zlib (zlib licence): PNG, zip and PPTX writers. Static if the archive is position-independent.
 set(ZLIB_USE_STATIC_LIBS ON)
 find_package(ZLIB QUIET)
+if(ZLIB_FOUND AND NOT WIN32)
+  list(GET ZLIB_LIBRARIES 0 STX_ZLIB_FIRST)
+  if(STX_ZLIB_FIRST MATCHES "\\.a$")
+    stx_static_is_pic(STX_ZLIB_STATIC_PIC ${STX_ZLIB_FIRST} zlibVersion)
+    if(NOT STX_ZLIB_STATIC_PIC)
+      unset(ZLIB_FOUND)
+      unset(ZLIB_LIBRARY CACHE)
+      unset(ZLIB_LIBRARY_RELEASE CACHE)
+      unset(ZLIB_LIBRARY_DEBUG CACHE)
+      unset(ZLIB_INCLUDE_DIR CACHE)
+    endif()
+  endif()
+endif()
 if(NOT ZLIB_FOUND)
   set(ZLIB_USE_STATIC_LIBS OFF)
   find_package(ZLIB REQUIRED)

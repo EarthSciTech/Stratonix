@@ -8,6 +8,15 @@
 #include "stratonix/io/export.hpp"
 #include "stratonix/io/io.hpp"
 
+// Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_csv_points);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_csv_orientations);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_xyz_points);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_irap_lines);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_petrel_points);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_tsurf);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_well_tops);
+
 namespace stratonix::io {
 
 namespace {

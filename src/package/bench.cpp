@@ -76,7 +76,9 @@ std::vector<BenchRow> run_benchmark(const BenchOptions& o) {
       models.push_back({"40x40km@" + fmt_shortest(sp) + "m", d});
     }
   }
-  for (auto& [size, d] : models) {
+  for (auto& entry : models) {
+    const std::string& size = entry.first;  // plain references: Clang < 16 cannot capture structured bindings
+    desc::Description& d = entry.second;
     for (int mode = 0; mode < 2; ++mode) {
       bool opt = mode == 1;
       if ((opt && !o.optimised) || (!opt && !o.reference)) continue;

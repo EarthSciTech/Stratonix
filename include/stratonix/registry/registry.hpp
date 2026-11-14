@@ -68,15 +68,18 @@ struct Registrar {
 }  // namespace stratonix::registry
 
 /// Self-registration. Use once per plugin in its .cpp file. `id` must be a unique C identifier;
-/// the macro also defines stratonix_plugin_anchor_<id>(), which the layer's register function
-/// calls so the linker keeps the object.
+/// the macro also defines the C-linkage function stratonix_plugin_anchor_<id>(), which the
+/// layer's register function calls so the linker keeps the object. C linkage makes the anchor
+/// the same symbol whichever namespace declares or defines it (MSVC and GCC agree).
 #define STRATONIX_REGISTER(id, kind, name, version, description, factory)                       \
   namespace {                                                                                    \
   const ::stratonix::registry::Registrar stratonix_registrar_##id{                              \
       ::stratonix::registry::Entry{kind, name, version, description, "built-in", factory}};      \
   }                                                                                              \
-  void stratonix_plugin_anchor_##id() {}
+  extern "C" void stratonix_plugin_anchor_##id() {}
 
-#define STRATONIX_PLUGIN_ANCHOR(id)            \
-  void stratonix_plugin_anchor_##id();         \
-  stratonix_plugin_anchor_##id()
+/// Declares an anchor at file scope (outside any function) in the file that calls it.
+#define STRATONIX_DECLARE_PLUGIN_ANCHOR(id) extern "C" void stratonix_plugin_anchor_##id()
+
+/// Calls an anchor declared with STRATONIX_DECLARE_PLUGIN_ANCHOR.
+#define STRATONIX_PLUGIN_ANCHOR(id) ::stratonix_plugin_anchor_##id()

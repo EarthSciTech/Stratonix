@@ -9,6 +9,15 @@
 #include "stratonix/io/export.hpp"
 #include "stratonix/io/io.hpp"
 
+// Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_vtk);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_obj);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_stl);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_csv);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_geojson);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_gempy);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_loop);
+
 namespace stratonix::io {
 
 namespace fs = std::filesystem;

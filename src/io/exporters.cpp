@@ -8,6 +8,16 @@
 #include "stratonix/io/export.hpp"
 #include "stratonix/io/io.hpp"
 
+// Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_irap_ascii);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_zmap);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_fault_polygons);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_fault_sticks);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_petrel_points);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_tsurf);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_well_heads);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(exp_well_tops);
+
 namespace stratonix::io {
 
 namespace fs = std::filesystem;
