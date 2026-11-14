@@ -3,6 +3,18 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [2026.1] - 2026-11-14 - First public release
+
+Version numbers now put the release year first: `<year>.<major>`, with a third number only
+for a patch release (`2026.1.1`). This release is the content of 1.3.1 under its public number;
+the 1.x numbers below are the development history.
+
+### Changed
+- Version 2026.1 (was 1.3.1). The C API keeps its own version (1.1), which changes only with
+  its binary interface.
+- Container images are tagged with the release number taken from the git tag (`2026.1`) and
+  `latest`.
+
 ## [1.3.1] - 2026-11-14 - Builds on Windows (MSVC) and Ubuntu 22.04; container image
 
 ### Fixed

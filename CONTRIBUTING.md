@@ -50,3 +50,10 @@ Run-time plugins (shared libraries) will use the C ABI in `include/stratonix/reg
 `ctest` runs unit tests, the model-interface suite, the layer check, the C API test, command-line
 tests and (from later stages) regression, parity and round-trip tests. Sanitiser builds:
 `cmake --preset linux-asan`.
+
+## Release numbers
+
+Releases are numbered `<year>.<major>`: the year the release is made, then the major version
+(`2026.1`, then `2026.2` or `2027.2`). A fix to a published release adds a patch number
+(`2026.1.1`). The number is set in one place, `project(... VERSION ...)` in `CMakeLists.txt`,
+and the git tag is `v` followed by it.
