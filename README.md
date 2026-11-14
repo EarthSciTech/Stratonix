@@ -102,7 +102,12 @@ Windows installer, portable zip and Linux archive: see the Releases page.
 
 MIT, see `LICENSE`. Third-party components and their licences are listed in `THIRD_PARTY.md`.
 
-Developer: Amirsaman Rezaeyan
+## Developer
 
-How to Cite:  
+Amirsaman Rezaeyan
+
+## Citation
+
+How to cite:
+
 Amirsaman Rezaeyan, 2026, Stratonix v.1.3.1. https://github.com/EarthSciTech/Stratonix
