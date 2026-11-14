@@ -501,10 +501,17 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
       log.value("fault." + f.name + ".max_layer_throw_change_per_thickness", fmt_fixed(worst, 3));
       for (double e : {-0.5, 0.5}) {
         Vec3 end = f.p0 + f.s * (e * f.length);
-        if (dom.inside_xy(end.x, end.y))
-          log.note("fault " + f.name + ": its strike end lies inside the domain; with layer-rigid hanging walls the block "
-                   "offset ends there along a line that is not a fault (make the fault longer than the model if the "
-                   "blocks should be bounded by faults only)");
+        if (dom.inside_xy(end.x, end.y)) {
+          const bool steps = f.pstrike == ProfileType::FlatTopped && f.taper_strike <= 0;
+          if (steps)
+            log.note("fault " + f.name + ": its strike end lies inside the domain; with layer-rigid hanging walls and no "
+                     "taper along strike the block offset ends there along a line that is not a fault (give the strike "
+                     "profile a taper, or make the fault longer than the model)");
+          else
+            log.note("fault " + f.name + ": its strike end lies inside the domain; the throw tapers to zero there along "
+                     "strike, so the layer-rigid block offset dies out towards the end");
+          break;
+        }
       }
       if (worst >= 1.0)
         throw Error(ErrorCode::Build, "fault " + f.name + ": the throw changes faster than the layers thicken at the fault (" +

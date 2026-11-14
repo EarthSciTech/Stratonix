@@ -138,9 +138,11 @@ implicit builder.
   block moves as a rigid slab by the throw where that layer meets the fault, so a horizon keeps
   one offset across its whole block, also far from the fault. With `rigid` the throw is read where
   the point's own elevation meets the fault. Faults act in age order (oldest first) on the
-  geometry the older ones displaced. Use it for all faults of a model or for none, and make the
-  faults longer than the model along strike: a block offset that ends at a fault's strike end
-  inside the model ends along a line that is not a fault (the build notes it).
+  geometry the older ones displaced. Use it for all faults of a model or for none. A fault may end
+  inside the model along strike if its strike profile tapers the throw to zero at the ends (for
+  example `profile_strike: {type: flat_topped, taper: 0.5}`, a cosine bell over the whole length):
+  the block offset then dies out smoothly towards the end. Without a taper (`taper: 0`) the offset
+  would stop along a line that is not a fault; the build notes either case.
 - **Tips on the unfaulted stratigraphy** (`stratigraphy: unfaulted` in a tip rule). By default a
   younger fault's tip is placed on the stratigraphy as displaced by older faults; `unfaulted`
   places it on the stratigraphy before any faulting.
@@ -154,11 +156,45 @@ implicit builder.
   annotations (`leader` to a horizon, `horizon_at_fault` with the computed depth, `completion`),
   a legend by role, the key numbers Stratonix computes from the model and your notes. Titles take
   placeholders `{units}`, `{surfaces}`, `{faults}`, `{faults_word}`, `{ve}`, and the detail title
-  `{s0_km}`, `{s1_km}`; annotation texts take `{value:N}`, `{top:N}`, `{base:N}`. Key-number kinds:
-  `horizon_at_well`, `horizon_highest`, `block_offset`, `fault_tips`, `fault_throw`,
-  `well_fault_distance` (on the unfaulted unit), `block_highest_at_fault`, `relief_to_end`. The
-  sheet is written in the four figure formats beside a CSV of its key numbers; text is set in
-  DejaVu Sans (if the font is not installed the system substitutes another sans-serif font).
+  `{s0_km}`, `{s1_km}`; annotation texts take `{value:N}`, `{top:N}`, `{base:N}`.
+
+  **Key numbers and the summary table (1.3).** Each entry of `key_numbers` gives a `kind`, a
+  `label` (the quantity) and, optionally, a `basis` (where the number comes from). The sheet's
+  summary table `<model>_v<version>_<sheet>_summary.csv` has the columns `quantity,value,basis`
+  and lists every entry in order; the sheet draws the entries with `on_sheet` true (the default)
+  in its bottom-right corner under the heading `key_numbers_title` (default "Key numbers").
+  `decimals` sets the rounding. Kinds:
+
+  | Kind | Value | Needs |
+  |---|---|---|
+  | `text` | the `value` as given | `value` |
+  | `completion` | top-base of a completion (m) | `well`, `completion` |
+  | `vertical_exaggeration` | the main panel's exaggeration | - |
+  | `fold_relief` | unfaulted horizon: crest elevation minus its elevation at the section `end` | `horizon`, `end` |
+  | `limb_dip` | unfaulted horizon: steepest dip between the crest and the section `end` (deg) | `horizon`, `end` |
+  | `horizon_at_well` | depth where a well meets a horizon | `horizon`, `well` |
+  | `horizon_highest` | shallowest depth of a horizon along the section, after faulting | `horizon` |
+  | `block_offset` | how far the block between two faults is down-thrown relative to a well's block | `horizon`, `faults` (2), `well` |
+  | `fault_tips` | upper / lower tip depths on the section | `fault` |
+  | `fault_tip_units` | labels of the units holding the upper / lower tip | `fault` |
+  | `fault_dip` | dip and dip direction, e.g. "60 deg towards north" | `fault` |
+  | `fault_throw` | vertical throw at a horizon | `fault`, `horizon` |
+  | `fault_cutoff_position` | where a horizon meets the fault on one `side`, as `coordinate` x, y or distance | `fault`, `horizon` |
+  | `fault_cutoff_depths` | footwall / hanging-wall cut-off depths of a horizon | `fault`, `horizon` |
+  | `fault_overlap` | 1 - throw / unit thickness at the fault | `fault`, `horizon`, `unit` |
+  | `throw_ratio` | throw / thickness between horizons `from` and `to` at the fault | `fault`, `horizon`, `from`, `to` |
+  | `fault_gap` | horizontal gap from the first fault's lower tip to the second fault | `faults` (2) |
+  | `well_fault_distance` | horizontal distances from a well to faults at a level in a unit (`fraction` 0 top, 0.5 mid, 1 base) on the unfaulted stratigraphy | `well`, `faults`, `unit` |
+  | `block_highest_at_fault` | a well's block: horizon depth where it meets a fault | `well`, `fault`, `horizon` |
+  | `relief_to_end` | a well's block: horizon relief from that fault to the section `end` | `well`, `fault`, `horizon` |
+
+  Thickness at a fault (`fault_overlap`, `throw_ratio`) is the vertical distance between the two
+  horizons' cut-offs on the fault's footwall: the interval the fault cuts. Blocks are lettered A,
+  B, ... in the order they hold the key's horizon along the section. A `basis` may use
+  placeholders: `{x}`, `{y}`, `{s}` (location of the value, with `:N` decimals), `{block}`,
+  `{fw_block}`, `{hw_block}`. The sheet is written in the four figure formats beside its summary
+  table; text is set in DejaVu Sans (if the font is not installed the system substitutes another
+  sans-serif font). Notes, if any, are drawn under the legend.
 
 # 3. Running
 

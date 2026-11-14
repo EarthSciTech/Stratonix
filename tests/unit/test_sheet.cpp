@@ -194,4 +194,134 @@ TEST_CASE("S3 description rules: completions, outer units, sheets") {
   CHECK(d.units[0].label == "Shale Gp");
 }
 
+namespace {
+/// Value column of the summary row whose quantity is q ("" if absent).
+std::string summary_value(const std::string& csv, const std::string& q, std::string* basis = nullptr) {
+  std::string key = "\"" + q + "\",\"";
+  std::size_t p = csv.find(key);
+  if (p == std::string::npos) return {};
+  p += key.size();
+  std::size_t e = csv.find("\",\"", p);
+  if (basis) {
+    std::size_t b = e + 3, be = csv.find('"', b);
+    *basis = csv.substr(b, be - b);
+  }
+  return csv.substr(p, e - p);
+}
+}  // namespace
+
+TEST_CASE("S4 summary table: every quantity with its value and basis; key numbers bottom right") {
+  register_all_plugins();
+  fs::path out = fs::path(STX_TMP_DIR) / "sheet_example";
+  if (!fs::exists(out / "figures")) {
+    BuildOptions opt;
+    run_build(kExample, out, opt, "test");
+  }
+  std::string s = slurp(out / "figures" / "example_layered_faults_v1.0.0_SN_sheet_summary.csv");
+  CHECK(s.rfind("quantity,value,basis\n", 0) == 0);
+  CHECK(s.find('{') == std::string::npos);  // basis placeholders filled
+  CHECK(s.find("n/a") == std::string::npos);
+  CHECK(summary_value(s, "section") == "S-N through the crest");
+  CHECK(summary_value(s, "W1 completion (m TVDSS)") == "1210-1270");
+  CHECK(summary_value(s, "vertical exaggeration of the figure") == "2.0");
+  CHECK(summary_value(s, "FA: dip") == "55 deg towards south");
+  CHECK(summary_value(s, "FB: units holding the tips (upper / lower)").rfind("Chalk Fm / ", 0) == 0);  // tip on top Chalk
+  std::string basis;
+  summary_value(s, "FA: top Sand footwall / hanging wall at the fault (m TVDSS)", &basis);
+  CHECK(basis.find("footwall block ") == 0);
+  CHECK(basis != "footwall block ?, hanging wall block ?");
+  // planes: FA at (Y 6500, 1100 m) dips S 55 deg; FB at (Y 5500, 1100 m) dips N 60 deg. At FA's lower tip (1800 m):
+  const double kd = kPi / 180;
+  double y_fa = 6500 - (1800 - 1100) / std::tan(55 * kd), y_fb = 5500 + (1800 - 1100) / std::tan(60 * kd);
+  CHECK(summary_value(s, "FA: horizontal gap to FB at its lower tip (m)") == fmt_fixed(std::fabs(y_fa - y_fb), 0));
+
+  // overlap and throw ratio: thickness = vertical distance between the two footwall cut-offs on the plane,
+  // found here independently by marching the plane through the footwall block.
+  auto d = desc::load_description(kExample);
+  BuildOptions opt;
+  auto o = build_only(d, opt);
+  const Model& m = *o.model;
+  auto plane_z = [&](double y) { return -(1100 + (6500 - y) * std::tan(55 * kd)); };  // FA elevation
+  auto fw_block = [&](double y) {
+    Vec3 p{4000, y + 5, plane_z(y) + 1};  // just north of FA: its footwall
+    EvalResult r;
+    m.evaluate(std::span<const Vec3>(&p, 1), kEvalBlock, r);
+    return r.block[0];
+  };
+  auto cut = [&](int h) {
+    double lo = 5000, hi = 7900;
+    auto g = [&](double y) { return horizon_in_block(m, h, fw_block(y), 4000, y) - plane_z(y); };
+    double glo = g(lo), ghi = g(hi);
+    REQUIRE((glo > 0) != (ghi > 0));
+    for (int i = 0; i < 60; ++i) {
+      double mid = 0.5 * (lo + hi), gm = g(mid);
+      if ((gm > 0) == (glo > 0)) { lo = mid; glo = gm; } else hi = mid;
+    }
+    return plane_z(0.5 * (lo + hi));
+  };
+  double z_sand = cut(d.horizon_index("Top_Sand")), z_base = cut(d.horizon_index("Top_Base")), z_seal = cut(d.horizon_index("Top_Seal"));
+  double t = std::stod(summary_value(s, "FA: throw at top Sand (m)"));
+  CHECK_NEAR(std::stod(summary_value(s, "FA: Sand-on-Sand overlap (fraction)")), 1 - t / (z_sand - z_base), 0.006);
+  CHECK_NEAR(std::stod(summary_value(s, "FA: throw / seal thickness")), t / (z_seal - z_sand), 0.006);
+  CHECK_NEAR(std::stod(summary_value(s, "FA: Y at top Sand, footwall (m)")),
+             6500 - (-z_sand - 1100) / std::tan(55 * kd), 1.0);
+  // fold relief and limb dip on the unfaulted structure along the section
+  auto* st = static_cast<const Structure*>(m.capability("structure"));
+  const std::size_t hs = static_cast<std::size_t>(d.horizon_index("Top_Sand"));
+  double crest = -1e30, mx = 0, prev = st->z(hs, 4000, 0);
+  std::size_t ic = 0;
+  for (std::size_t i = 0; i <= 12000; ++i) {
+    double z = st->z(hs, 4000, static_cast<double>(i));
+    if (z > crest) { crest = z; ic = i; }
+  }
+  for (std::size_t i = 1; i <= ic; ++i) {
+    double z = st->z(hs, 4000, static_cast<double>(i));
+    mx = std::max(mx, std::fabs(z - prev));
+    prev = z;
+  }
+  CHECK_NEAR(std::stod(summary_value(s, "top Sand, crest to northern end (m)")), crest - st->z(hs, 4000, 12000), 0.06);
+  CHECK_NEAR(std::stod(summary_value(s, "south limb max dip at top Sand (deg)")), std::atan(mx) / kd, 0.1);
+
+  // the sheet: "Key numbers" heading, rows on the sheet only, right-aligned in the bottom-right corner
+  std::string svg = slurp(out / "figures" / "STX_example_layered_faults_v1.0.0_sheet_SN_sheet.svg");
+  CHECK(svg.find(">Key numbers<") != std::string::npos);
+  CHECK(svg.find("KEY NUMBERS") == std::string::npos);
+  CHECK(svg.find("FA: dip") == std::string::npos);
+  CHECK(svg.find("block: relief from FA") != std::string::npos);  // drawn (the apostrophe is escaped in SVG)
+}
+
+TEST_CASE("L4 layer-rigid fault shorter than the model: the throw tapers to zero at its ends") {
+  register_all_plugins();
+  std::string t = slurp(kExample);
+  // FA: 6 km long, centred at X = 4000 m, cosine-bell strike profile
+  std::size_t p = t.find("length: \"30000 m");
+  t.replace(p, t.find('"', p + 9) - p + 1, "length: \"6000 m | user_instruction | test\"");
+  p = t.find("taper: \"0.25 fraction");
+  t.replace(p, t.find('"', p + 8) - p + 1, "taper: \"0.5 fraction | user_instruction | test\"");
+  fs::path f = fs::path(STX_TMP_DIR) / "short_fault.yaml";
+  { std::ofstream(f) << t; }
+  auto d = desc::load_description(f);
+  BuildOptions opt;
+  auto o = build_only(d, opt);
+  auto* net = static_cast<const FaultNetwork*>(o.model->capability("faults"));
+  const auto& fa = net->faults()[static_cast<std::size_t>(d.fault_index("FA"))];
+  const double b = fa.layer_b(d.horizon_index("Top_Sand"), 0);
+  CHECK(fa.throw_at(0, b) > 20);
+  CHECK(std::fabs(fa.throw_at(2990, fa.layer_b(d.horizon_index("Top_Sand"), 2990))) < 0.01);  // near the end
+  CHECK(fa.throw_at(3010, b) == 0);  // beyond it
+  bool noted = false;
+  for (auto& n : o.log.notes) noted = noted || n.find("dies out") != std::string::npos;
+  CHECK(noted);
+  // the faulted top Sand is continuous across the fault end in FA's hanging wall
+  const Model& m = *o.model;
+  auto top_sand = [&](double x) {
+    Vec3 q{x, 6000, -1150};
+    EvalResult r;
+    m.evaluate(std::span<const Vec3>(&q, 1), kEvalBlock, r);
+    return horizon_in_block(m, d.horizon_index("Top_Sand"), r.block[0], x, 6000);
+  };
+  CHECK(std::fabs(top_sand(4000 + 2995) - top_sand(4000 + 3005)) < 0.05);
+  CHECK(std::fabs(top_sand(4000) - top_sand(7500)) > 5);  // the offset is there at the centre
+}
+
 STX_TEST_MAIN()

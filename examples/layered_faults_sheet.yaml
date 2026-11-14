@@ -129,6 +129,19 @@ outputs:
         - {kind: well_fault_distance, well: W1, faults: [FB, FA], unit: SAND, label: "W1 to FB / FA at mid Sand, horizontal (m)"}
         - {kind: block_highest_at_fault, well: W1, fault: FA, horizon: Top_Sand, label: "W1's block: top Sand at FA (m TVDSS)"}
         - {kind: relief_to_end, well: W1, fault: FA, horizon: Top_Sand, end: last, label: "W1's block: relief from FA to the northern level of top Sand (m)"}
+        # summary table only (on_sheet: false): written to the CSV with its basis, not drawn
+        - {kind: text, on_sheet: false, label: "section", value: "S-N through the crest", basis: "worked example"}
+        - {kind: completion, on_sheet: false, well: W1, completion: Sand, label: "W1 completion (m TVDSS)", basis: "worked example"}
+        - {kind: vertical_exaggeration, on_sheet: false, label: "vertical exaggeration of the figure", basis: "-"}
+        - {kind: fold_relief, on_sheet: false, horizon: Top_Sand, end: last, label: "top Sand, crest to northern end (m)", basis: "fold before faulting, crest at Y = {y:0} m"}
+        - {kind: limb_dip, on_sheet: false, horizon: Top_Sand, end: first, label: "south limb max dip at top Sand (deg)", basis: "fold before faulting"}
+        - {kind: fault_dip, on_sheet: false, fault: FA, label: "FA: dip", basis: "worked example"}
+        - {kind: fault_tip_units, on_sheet: false, fault: FB, label: "FB: units holding the tips (upper / lower)", basis: "worked example"}
+        - {kind: fault_cutoff_position, on_sheet: false, fault: FA, horizon: Top_Sand, side: footwall, coordinate: y, label: "FA: Y at top Sand, footwall (m)", basis: "X = {x:0} m"}
+        - {kind: fault_cutoff_depths, on_sheet: false, fault: FA, horizon: Top_Sand, label: "FA: top Sand footwall / hanging wall at the fault (m TVDSS)", basis: "footwall block {fw_block}, hanging wall block {hw_block}"}
+        - {kind: fault_overlap, on_sheet: false, fault: FA, horizon: Top_Sand, unit: SAND, label: "FA: Sand-on-Sand overlap (fraction)", basis: "1 - throw / Sand thickness at the fault"}
+        - {kind: throw_ratio, on_sheet: false, fault: FA, horizon: Top_Sand, from: Top_Seal, to: Top_Sand, label: "FA: throw / seal thickness", basis: "seal = top Seal to top Sand"}
+        - {kind: fault_gap, on_sheet: false, faults: [FA, FB], label: "FA: horizontal gap to FB at its lower tip (m)", basis: "worked example"}
       notes:
         - "Design example, not an interpretation."
         - "{figure}"

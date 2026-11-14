@@ -82,13 +82,22 @@ struct SheetPanel {
 };
 struct SheetKey {
   /// horizon_at_well, horizon_highest, block_offset, fault_tips, fault_throw, well_fault_distance,
-  /// block_highest_at_fault, relief_to_end
+  /// block_highest_at_fault, relief_to_end, text, completion, vertical_exaggeration, fold_relief,
+  /// limb_dip, fault_dip, fault_tip_units, fault_cutoff_position, fault_cutoff_depths,
+  /// fault_overlap, throw_ratio, fault_gap
   std::string kind, label;
   int horizon = -1, unit = -1, fault = -1;
   std::vector<int> faults;
-  std::string well, end;        ///< end: "first" or "last" (relief_to_end)
+  std::string well, end;        ///< end: "first" or "last" (relief_to_end, fold_relief, limb_dip)
   double fraction = 0.5;        ///< well_fault_distance: level inside the unit
   int decimals = 1;
+  std::string basis;            ///< third column of the summary; placeholders {x} {y} {s} {block} {fw_block} {hw_block}
+  bool on_sheet = true;         ///< false: summary table only
+  std::string value;            ///< text: the value as given
+  std::string completion;       ///< completion: name of the well completion
+  std::string side = "footwall";       ///< fault_cutoff_position: footwall or hanging_wall
+  std::string coordinate = "distance"; ///< fault_cutoff_position: x, y or distance along the section
+  int from = -1, to = -1;       ///< throw_ratio: horizons bounding the interval whose thickness divides the throw
 };
 struct SheetCompletion { std::string well, name; double top = 0, base = 0; };  ///< depths m, + down
 /// A presentation sheet for one section: main panel, optional detail panel, legend by role,
@@ -100,12 +109,13 @@ struct SheetSpec {
   std::string well_legend, completion_legend;
   std::vector<std::string> fault_legend, notes;
   std::vector<SheetKey> keys;
-  std::string summary_name;     ///< file name shown in the key-numbers heading
+  std::string summary_name;     ///< file name of the summary table
+  std::string key_title = "Key numbers";  ///< heading of the key-numbers block
   std::vector<SheetCompletion> completions;
   /// Unfaulted elevation of horizon h at (x, y), when the engine provides it (else empty).
   std::function<double(int, double, double)> unfaulted;
 };
-struct SheetValue { std::string label, text; double value = 0; };
+struct SheetValue { std::string label, text, basis; double value = 0; bool on_sheet = true; };
 struct SheetResult {
   Figure figure{1116, 691.2};
   std::vector<SheetValue> keys;

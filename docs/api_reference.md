@@ -407,7 +407,7 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 - `struct SheetAnnotation`  
   A labelled annotation on a sheet panel. Text may hold placeholders: {value}, {value:N} (computed depth), {top:N}, {base:N} (completion), N = decimals.
 - `std::string kind, label;`  
-  horizon_at_well, horizon_highest, block_offset, fault_tips, fault_throw, well_fault_distance, block_highest_at_fault, relief_to_end
+  horizon_at_well, horizon_highest, block_offset, fault_tips, fault_throw, well_fault_distance, block_highest_at_fault, relief_to_end, text, completion, vertical_exaggeration, fold_relief, limb_dip, fault_dip, fault_tip_units, fault_cutoff_position, fault_cutoff_depths, fault_overlap, throw_ratio, fault_gap
 - `struct SheetSpec`  
   A presentation sheet for one section: main panel, optional detail panel, legend by role, computed key numbers and notes, laid out on a 15.5 x 9.6 inch page in DejaVu Sans.
 - `std::function<double(int, double, double)> unfaulted;`  

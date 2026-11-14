@@ -117,7 +117,12 @@ Per column of the section it finds the fault crossings, splits the column into b
 finds each horizon by root finding in that block, so offsets are sharp; unit fills are polygons
 per block and unit, horizon lines are clipped to their block. Key numbers are computed from the
 same geometry and the model interface (well intersections, restoration, fault evaluation); the
-unfaulted levels come from the engine through a callback.
+unfaulted levels come from the engine through a callback. Since 1.3 every key number carries a
+basis and an `on_sheet` flag; the pipeline writes all of them to the summary table
+(`quantity,value,basis`) and the sheet draws the flagged ones right-aligned in the bottom-right
+corner. A new key-number kind is a branch in `section_sheet` (value, text and basis placeholders),
+a name in the description rules (`description.cpp`, rule O1) and the schema enum, a default
+rounding in `pipeline.cpp`, and a check in `test_sheet.cpp` against an independent calculation.
 
 ## 4.3 An importer
 

@@ -102,9 +102,12 @@ struct SheetKeyDesc {
   std::vector<std::string> faults;
   Param fraction;
   int decimals = -1;
+  std::string basis, value, completion, side = "footwall", coordinate = "distance", from, to;
+  bool on_sheet = true;
 };
 struct SheetDesc {
   std::string name, section, title, along_label, depth_label, end_left, end_right, well_legend, completion_legend;
+  std::string key_title = "Key numbers";
   SheetPanelDesc main, detail;
   std::vector<std::string> fault_legend, notes;
   std::vector<SheetKeyDesc> keys;

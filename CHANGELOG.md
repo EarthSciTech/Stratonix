@@ -3,6 +3,24 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [1.3.0] - 2026-11-14 - Summary tables and faults that end inside the model
+
+### Added
+- Section-sheet summary table with the columns `quantity,value,basis` (was `key,value`): every
+  key number with its basis; `basis` takes placeholders for the location and block letters.
+- Twelve key-number kinds: `text`, `completion`, `vertical_exaggeration`, `fold_relief`,
+  `limb_dip`, `fault_dip`, `fault_tip_units`, `fault_cutoff_position`, `fault_cutoff_depths`,
+  `fault_overlap`, `throw_ratio`, `fault_gap`. Key numbers can be kept off the sheet
+  (`on_sheet: false`); the heading is `key_numbers_title` (default "Key numbers").
+- Tests S4 (every new kind against an independent calculation) and L4 (a layer-rigid fault
+  shorter than the model, throw tapering to zero at its ends).
+
+### Changed
+- The sheet draws its key numbers right-aligned in the bottom-right corner under "Key numbers"
+  (no file name); notes, if any, go under the legend.
+- Layer-rigid faults that end inside the model: the build note now says whether the block offset
+  dies out (strike profile tapering to zero) or stops on a line that is not a fault (no taper).
+
 ## [1.2.0] - 2026-11-14 - Section sheets and layer-rigid faults (application model reference)
 
 ### Added

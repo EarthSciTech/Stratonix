@@ -184,10 +184,23 @@ fig::SheetSpec sheet_spec(const desc::Description& d, const Model& m, const desc
     x.well = k.well;
     x.end = k.end;
     x.fraction = k.fraction.present ? k.fraction.si() : 0.5;
-    x.decimals = k.decimals >= 0 ? k.decimals : (k.kind == "fault_tips" || k.kind == "well_fault_distance") ? 0 : 1;
+    x.decimals = k.decimals >= 0                                                                    ? k.decimals
+                 : (k.kind == "fault_tips" || k.kind == "well_fault_distance" || k.kind == "fault_cutoff_position" ||
+                    k.kind == "fault_gap" || k.kind == "fault_dip" || k.kind == "completion")          ? 0
+                 : (k.kind == "fault_overlap" || k.kind == "throw_ratio")                              ? 2
+                                                                                                      : 1;
+    x.basis = k.basis;
+    x.on_sheet = k.on_sheet;
+    x.value = k.value;
+    x.completion = k.completion;
+    x.side = k.side;
+    x.coordinate = k.coordinate;
+    x.from = k.from.empty() ? -1 : d.horizon_index(k.from);
+    x.to = k.to.empty() ? -1 : d.horizon_index(k.to);
     sp.keys.push_back(std::move(x));
   }
   sp.summary_name = d.model.name + "_v" + d.model.version + "_" + sh.name + "_summary.csv";
+  sp.key_title = sh.key_title;
   for (auto& w : d.wells)
     for (auto& cp : w.completions) sp.completions.push_back({w.name, cp.name, cp.top.si(), cp.base.si()});
   if (auto* st = static_cast<const Structure*>(m.capability("structure")))
@@ -199,8 +212,13 @@ void write_sheets(const desc::Description& d, const Model& m, const fig::FigureC
   for (auto& sh : d.sheets) {
     auto sp = sheet_spec(d, m, sh);
     auto res = fig::section_sheet(c, sp);
-    std::string csv = "key,value\n";
-    for (auto& k : res.keys) csv += "\"" + k.label + "\",\"" + k.text + "\"\n";
+    auto q = [](const std::string& t) {
+      std::string o = "\"";
+      for (char ch : t) o += ch == '"' ? std::string("\"\"") : std::string(1, ch);
+      return o + "\"";
+    };
+    std::string csv = "quantity,value,basis\n";
+    for (auto& k : res.keys) csv += q(k.label) + "," + q(k.text) + "," + q(k.basis) + "\n";
     std::filesystem::create_directories(folder);
     write_file(folder / sp.summary_name, csv);
     std::string notes = std::string("Evidence basis: ") + basis_label(m.info().basis) + ". Key numbers computed by Stratonix from the model (" +

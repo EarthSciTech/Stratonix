@@ -541,6 +541,7 @@ struct Typer {
             if (const Node* fl = lg->get("faults"))
               for (auto& x : fl->seq) sd.fault_legend.push_back(x.str);
           }
+          sd.key_title = S(&n, "key_numbers_title", "Key numbers");
           if (const Node* kn = n.get("key_numbers"))
             for (std::size_t q = 0; q < kn->seq.size(); ++q) {
               const Node& a = kn->seq[q];
@@ -556,6 +557,14 @@ struct Typer {
                 for (auto& x : fs->seq) kd.faults.push_back(x.str);
               kd.fraction = P(&a, "fraction", b + ".key_numbers[" + std::to_string(q) + "]", Dimension::Dimensionless, false, 1);
               if (const Node* dc = a.get("decimals")) kd.decimals = static_cast<int>(dc->number);
+              kd.basis = S(&a, "basis");
+              kd.value = S(&a, "value");
+              kd.completion = S(&a, "completion");
+              kd.side = S(&a, "side", "footwall");
+              kd.coordinate = S(&a, "coordinate", "distance");
+              kd.from = S(&a, "from");
+              kd.to = S(&a, "to");
+              if (const Node* os = a.get("on_sheet")) kd.on_sheet = os->type == Node::Type::Bool ? os->boolean : os->str != "false";
               sd.keys.push_back(std::move(kd));
             }
           if (const Node* nt = n.get("notes"))
@@ -849,16 +858,34 @@ struct Typer {
         if (!kd.fault.empty() && d.fault_index(kd.fault) < 0) c.err(bk, "O1", "unknown fault '" + kd.fault + "'");
         for (auto& fn : kd.faults)
           if (d.fault_index(fn) < 0) c.err(bk, "O1", "unknown fault '" + fn + "'");
-        bool needs_h = kd.kind != "fault_tips" && kd.kind != "well_fault_distance";
-        if (needs_h && kd.horizon.empty()) c.err(bk, "O1", kd.kind + " needs a horizon");
-        if ((kd.kind == "fault_tips" || kd.kind == "fault_throw" || kd.kind == "block_highest_at_fault" || kd.kind == "relief_to_end") &&
-            kd.fault.empty())
-          c.err(bk, "O1", kd.kind + " needs a fault");
-        if ((kd.kind == "block_offset" && kd.faults.size() != 2) || (kd.kind == "well_fault_distance" && kd.faults.empty()))
-          c.err(bk, "O1", kd.kind + (kd.kind == "block_offset" ? " needs two faults" : " needs faults"));
+        static const std::set<std::string> kinds{"horizon_at_well", "horizon_highest", "block_offset", "fault_tips", "fault_throw",
+                                                 "well_fault_distance", "block_highest_at_fault", "relief_to_end", "text",
+                                                 "completion", "vertical_exaggeration", "fold_relief", "limb_dip", "fault_dip",
+                                                 "fault_tip_units", "fault_cutoff_position", "fault_cutoff_depths", "fault_overlap",
+                                                 "throw_ratio", "fault_gap"};
+        if (!kinds.count(kd.kind)) { c.err(bk, "O1", "unknown key-number kind '" + kd.kind + "'"); continue; }
+        if (!kd.from.empty() && d.horizon_index(kd.from) < 0) c.err(bk, "O1", "unknown horizon '" + kd.from + "'");
+        if (!kd.to.empty() && d.horizon_index(kd.to) < 0) c.err(bk, "O1", "unknown horizon '" + kd.to + "'");
+        static const std::set<std::string> with_h{"horizon_at_well", "horizon_highest", "block_offset", "fault_throw",
+                                                  "block_highest_at_fault", "relief_to_end", "fold_relief", "limb_dip",
+                                                  "fault_cutoff_position", "fault_cutoff_depths", "throw_ratio", "fault_overlap"};
+        if (with_h.count(kd.kind) && kd.horizon.empty()) c.err(bk, "O1", kd.kind + " needs a horizon");
+        static const std::set<std::string> with_f{"fault_tips", "fault_throw", "block_highest_at_fault", "relief_to_end", "fault_dip",
+                                                  "fault_tip_units", "fault_cutoff_position", "fault_cutoff_depths", "fault_overlap",
+                                                  "throw_ratio"};
+        if (with_f.count(kd.kind) && kd.fault.empty()) c.err(bk, "O1", kd.kind + " needs a fault");
+        if ((kd.kind == "block_offset" || kd.kind == "fault_gap") && kd.faults.size() != 2)
+          c.err(bk, "O1", kd.kind + " needs two faults");
+        if (kd.kind == "well_fault_distance" && kd.faults.empty()) c.err(bk, "O1", kd.kind + " needs faults");
         if ((kd.kind == "horizon_at_well" || kd.kind == "block_offset" || kd.kind == "well_fault_distance" ||
-             kd.kind == "block_highest_at_fault" || kd.kind == "relief_to_end") && kd.well.empty())
+             kd.kind == "block_highest_at_fault" || kd.kind == "relief_to_end" || kd.kind == "completion") && kd.well.empty())
           c.err(bk, "O1", kd.kind + " needs a well");
+        if (kd.kind == "completion" && kd.completion.empty()) c.err(bk, "O1", "completion needs a completion name");
+        if (kd.kind == "text" && kd.value.empty()) c.err(bk, "O1", "text needs a value");
+        if (kd.kind == "fault_overlap" && kd.unit.empty()) c.err(bk, "O1", "fault_overlap needs a unit");
+        if (kd.kind == "throw_ratio" && (kd.from.empty() || kd.to.empty())) c.err(bk, "O1", "throw_ratio needs from and to horizons");
+        if (kd.side != "footwall" && kd.side != "hanging_wall") c.err(bk, "O1", "side must be footwall or hanging_wall");
+        if (kd.coordinate != "x" && kd.coordinate != "y" && kd.coordinate != "distance") c.err(bk, "O1", "coordinate must be x, y or distance");
         if (kd.kind == "well_fault_distance" && kd.unit.empty()) c.err(bk, "O1", "well_fault_distance needs a unit");
       }
     }

@@ -499,27 +499,111 @@ SheetResult section_sheet(const FigureContext& c, const SheetSpec& sp) {
     m.evaluate(std::span<const Vec3>(&p, 1), kEvalBlock, r);
     return r.block[0];
   };
+  // Fault blocks lettered A, B, ... in the order they hold horizon h along the section.
+  std::map<int, std::vector<BlockCode>> block_order;
+  auto letter = [&](int hh, BlockCode b) -> std::string {
+    auto it = block_order.find(hh);
+    if (it == block_order.end()) {
+      std::vector<BlockCode> o;
+      for (std::size_t i = 0; i < gm.st.size(); ++i)
+        for (auto& iv : gm.iv[i]) {
+          double r = iv.h[static_cast<std::size_t>(hh)];
+          if (std::isfinite(r) && r <= iv.top && r >= iv.bot && std::find(o.begin(), o.end(), iv.b) == o.end()) o.push_back(iv.b);
+        }
+      it = block_order.emplace(hh, std::move(o)).first;
+    }
+    auto p = std::find(it->second.begin(), it->second.end(), b);
+    if (p == it->second.end()) return "?";
+    std::size_t n = static_cast<std::size_t>(p - it->second.begin());
+    return n < 26 ? std::string(1, static_cast<char>('A' + n)) : std::to_string(n + 1);
+  };
+  // Block on side hw of fault ff next to the fault surface at column i.
+  auto side_block = [&](std::size_t i, int ff, bool hw, BlockCode& out) {
+    double zf = gm.fz[i][static_cast<std::size_t>(ff)];
+    if (std::isnan(zf)) return false;
+    for (auto& iv : gm.iv[i]) {
+      if ((((iv.b >> ff) & 1u) != 0) != hw) continue;
+      if (std::fabs(iv.top - zf) < 1e-6 || std::fabs(iv.bot - zf) < 1e-6) { out = iv.b; return true; }
+    }
+    return false;
+  };
+  // Vertical throw of fault ff at horizon hh (from the footwall cut-off).
+  auto throw_at_h = [&](int ff, int hh, double& out) {
+    double s, z;
+    if (!cutoff(gm, hh, ff, false, s, z)) return false;
+    Vec3 xy = point_at(sp.line, s);
+    const Vec3& nrm = inf.faults[static_cast<std::size_t>(ff)].normal;
+    Vec3 q{xy.x - nrm.x * 0.01, xy.y - nrm.y * 0.01, z - nrm.z * 0.01};  // just on the footwall side
+    FaultEval e;
+    m.evaluate_fault(ff, std::span<const Vec3>(&q, 1), e);
+    double vert = inf.faults[static_cast<std::size_t>(ff)].slip_mode == "dip_slip" ? std::sqrt(std::max(0.0, 1 - nrm.z * nrm.z)) : 1.0;
+    out = e.displacement[0] * vert;
+    return true;
+  };
+  // Thickness between horizons ha and hb where they meet fault ff on its footwall: the vertical
+  // distance between their two footwall cut-offs (the interval the fault cuts).
+  auto footwall_thickness = [&](int ff, int ha, int hb, double& out) {
+    double sa, za, sb, zb;
+    if (!cutoff(gm, ha, ff, false, sa, za) || !cutoff(gm, hb, ff, false, sb, zb)) return false;
+    out = za - zb;
+    return true;
+  };
+  auto unit_label = [&](std::size_t u) {
+    return u < c.unit_labels.size() && !c.unit_labels[u].empty() ? c.unit_labels[u] : inf.units[u].name;
+  };
+  auto unit_at = [&](const Vec3& p) {
+    BlockCode b = block_of(p);
+    std::size_t u = 0;
+    for (std::size_t hh = 0; hh < nh; ++hh) {
+      double o = 0;
+      m.scalar_in_block(std::span<const Vec3>(&p, 1), b, static_cast<int>(hh), std::span<double>(&o, 1));
+      if (o < 0) u = hh + 1;  // below horizon hh
+    }
+    return u;
+  };
+  // Unfaulted elevation of horizon hh along the section columns.
+  auto unfaulted_profile = [&](int hh) {
+    std::vector<double> z(gm.st.size(), kNaN);
+    if (sp.unfaulted)
+      for (std::size_t i = 0; i < gm.st.size(); ++i) z[i] = sp.unfaulted(hh, gm.xy[i].x, gm.xy[i].y);
+    return z;
+  };
+  auto compass = [](double az) {
+    static const char* w[] = {"north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"};
+    int k = static_cast<int>(std::floor(std::fmod(az + 360.0 + 22.5, 360.0) / 45.0)) % 8;
+    return std::string(w[k]);
+  };
   for (auto& k : sp.keys) {
     SheetValue v;
     v.label = k.label;
+    v.on_sheet = k.on_sheet;
+    std::map<std::string, double> bv;
+    std::map<std::string, std::string> bw;
     const int h = k.horizon;
     if (k.kind == "horizon_at_well") {
       Vec3 p;
       if (horizon_at_well(k.well, h, p)) { v.value = -p.z; v.text = fmt_dec(v.value, k.decimals); }
     } else if (k.kind == "horizon_highest") {
-      double best = -kInfD;
+      double best = -kInfD, best_s = 0;
+      BlockCode best_b = 0;
       for (std::size_t i = 0; i < gm.st.size(); ++i)
         for (auto& iv : gm.iv[i]) {
           double r = iv.h[static_cast<std::size_t>(h)];
-          if (std::isfinite(r) && r <= iv.top && r >= iv.bot) best = std::max(best, r);
+          if (std::isfinite(r) && r <= iv.top && r >= iv.bot && r > best) { best = r; best_s = gm.st[i]; best_b = iv.b; }
         }
       for (std::size_t ff = 0; ff < inf.faults.size(); ++ff)
         for (bool hw : {false, true}) {
           double s, z;
-          if (cutoff(gm, h, static_cast<int>(ff), hw, s, z)) best = std::max(best, z);
+          BlockCode b;
+          if (cutoff(gm, h, static_cast<int>(ff), hw, s, z) && z > best && side_block(col_at(gm, s), static_cast<int>(ff), hw, b)) {
+            best = z; best_s = s; best_b = b;
+          }
         }
       v.value = -best;
       v.text = fmt_dec(v.value, k.decimals);
+      Vec3 xy = point_at(sp.line, best_s);
+      bv = {{"x", xy.x}, {"y", xy.y}, {"s", best_s}};
+      bw["block"] = letter(h, best_b);
     } else if (k.kind == "block_offset" && k.faults.size() == 2) {
       double sa = 0, za = 0, sb = 0, zb = 0;
       bool oka = cutoff(gm, h, k.faults[0], true, sa, za) || cutoff(gm, h, k.faults[0], false, sa, za);
@@ -542,19 +626,7 @@ SheetResult section_sheet(const FigureContext& c, const SheetSpec& sp) {
         v.text = fmt_dec(-tr.front().second, k.decimals) + " / " + fmt_dec(-tr.back().second, k.decimals);
       }
     } else if (k.kind == "fault_throw") {
-      double s, z;
-      if (cutoff(gm, h, k.fault, false, s, z)) {
-        Vec3 xy = point_at(sp.line, s);
-        const Vec3& nrm = inf.faults[static_cast<std::size_t>(k.fault)].normal;
-        Vec3 q{xy.x - nrm.x * 0.01, xy.y - nrm.y * 0.01, z - nrm.z * 0.01};  // just on the footwall side
-        FaultEval e;
-        m.evaluate_fault(k.fault, std::span<const Vec3>(&q, 1), e);
-        double vert = inf.faults[static_cast<std::size_t>(k.fault)].slip_mode == "dip_slip"
-                          ? std::sqrt(std::max(0.0, 1 - nrm.z * nrm.z))
-                          : 1.0;
-        v.value = e.displacement[0] * vert;
-        v.text = fmt_dec(v.value, k.decimals);
-      }
+      if (throw_at_h(k.fault, h, v.value)) v.text = fmt_dec(v.value, k.decimals);
     } else if (k.kind == "well_fault_distance") {
       double sw = 0;
       std::vector<std::string> parts;
@@ -636,8 +708,100 @@ SheetResult section_sheet(const FigureContext& c, const SheetSpec& sp) {
           v.text = fmt_dec(v.value, k.decimals);
         }
       }
+    } else if (k.kind == "text") {
+      v.text = k.value;
+    } else if (k.kind == "completion") {
+      for (auto& cp : sp.completions)
+        if (cp.well == k.well && cp.name == k.completion) {
+          v.value = cp.top;
+          v.text = fmt_dec(cp.top, k.decimals >= 0 ? k.decimals : 0) + "-" + fmt_dec(cp.base, k.decimals >= 0 ? k.decimals : 0);
+        }
+    } else if (k.kind == "vertical_exaggeration") {
+      v.value = sp.main.ve;
+      v.text = fmt_dec(v.value, k.decimals);
+    } else if (k.kind == "fold_relief" || k.kind == "limb_dip") {
+      auto z = unfaulted_profile(h);
+      std::size_t ic = gm.st.size();
+      for (std::size_t i = 0; i < z.size(); ++i)
+        if (!std::isnan(z[i]) && (ic == gm.st.size() || z[i] > z[ic])) ic = i;
+      if (ic < gm.st.size()) {
+        Vec3 xy = point_at(sp.line, gm.st[ic]);
+        bv = {{"x", xy.x}, {"y", xy.y}, {"s", gm.st[ic]}};
+        std::size_t ie = k.end == "first" ? 0 : z.size() - 1;
+        if (k.kind == "fold_relief") {
+          v.value = z[ic] - z[ie];
+        } else {
+          std::size_t a = std::min(ic, ie), b = std::max(ic, ie);
+          double mx = 0;
+          for (std::size_t i = a; i < b; ++i) {
+            double ds = gm.st[i + 1] - gm.st[i];
+            if (ds > 0 && !std::isnan(z[i]) && !std::isnan(z[i + 1])) mx = std::max(mx, std::fabs(z[i + 1] - z[i]) / ds);
+          }
+          v.value = std::atan(mx) * 180.0 / kPi;
+        }
+        v.text = fmt_dec(v.value, k.decimals);
+      }
+    } else if (k.kind == "fault_dip") {
+      const Vec3& dd = inf.faults[static_cast<std::size_t>(k.fault)].dip_dir;
+      double hz = std::hypot(dd.x, dd.y);
+      v.value = std::atan2(std::fabs(dd.z), hz) * 180.0 / kPi;
+      double az = std::atan2(dd.x, dd.y) * 180.0 / kPi;
+      v.text = fmt_dec(v.value, k.decimals) + " deg towards " + compass(az);
+    } else if (k.kind == "fault_tip_units") {
+      auto tr = fault_trace(gm, k.fault);
+      if (tr.size() >= 2) {
+        Vec3 a = point_at(sp.line, tr.front().first), b = point_at(sp.line, tr.back().first);
+        a.z = tr.front().second - 0.05;  // just below the upper tip
+        b.z = tr.back().second + 0.05;   // just above the lower tip
+        v.text = unit_label(unit_at(a)) + " / " + unit_label(unit_at(b));
+      }
+    } else if (k.kind == "fault_cutoff_position") {
+      double s, z;
+      if (cutoff(gm, h, k.fault, k.side == "hanging_wall", s, z)) {
+        Vec3 xy = point_at(sp.line, s);
+        v.value = k.coordinate == "x" ? xy.x : k.coordinate == "y" ? xy.y : s;
+        v.text = fmt_dec(v.value, k.decimals);
+        bv = {{"x", xy.x}, {"y", xy.y}, {"s", s}};
+      }
+    } else if (k.kind == "fault_cutoff_depths") {
+      double sf, zf, sh, zh;
+      BlockCode bf, bh;
+      if (cutoff(gm, h, k.fault, false, sf, zf) && cutoff(gm, h, k.fault, true, sh, zh)) {
+        v.value = -zf;
+        v.text = fmt_dec(-zf, k.decimals) + " / " + fmt_dec(-zh, k.decimals);
+        if (side_block(col_at(gm, sf), k.fault, false, bf)) bw["fw_block"] = letter(h, bf);
+        if (side_block(col_at(gm, sh), k.fault, true, bh)) bw["hw_block"] = letter(h, bh);
+      }
+    } else if (k.kind == "fault_overlap" || k.kind == "throw_ratio") {
+      double t, thk;
+      int ha = k.from, hb = k.to;
+      if (k.kind == "fault_overlap" && k.unit >= 0) {
+        ha = inf.units[static_cast<std::size_t>(k.unit)].top_horizon;
+        hb = inf.units[static_cast<std::size_t>(k.unit)].base_horizon;
+      }
+      if (ha >= 0 && hb >= 0 && throw_at_h(k.fault, h, t) && footwall_thickness(k.fault, ha, hb, thk) && std::fabs(thk) > 1e-9) {
+        v.value = k.kind == "fault_overlap" ? 1.0 - std::fabs(t) / std::fabs(thk) : std::fabs(t) / std::fabs(thk);
+        v.text = fmt_dec(v.value, k.decimals);
+        bv = {{"throw", std::fabs(t)}, {"thickness", std::fabs(thk)}};
+      }
+    } else if (k.kind == "fault_gap") {
+      auto tr = fault_trace(gm, k.faults[0]);
+      if (tr.size() >= 2) {
+        const double za = tr.back().second, sa = tr.back().first;
+        const std::size_t fb = static_cast<std::size_t>(k.faults[1]);
+        double best = kNaN;
+        for (std::size_t i = 0; i + 1 < gm.st.size(); ++i) {
+          double a = gm.fz[i][fb] - za, b = gm.fz[i + 1][fb] - za;
+          if (std::isnan(a) || std::isnan(b) || ((a > 0) == (b > 0) && a != 0)) continue;
+          double t = a == b ? 0 : a / (a - b);
+          double sb = gm.st[i] + t * (gm.st[i + 1] - gm.st[i]);
+          if (std::isnan(best) || std::fabs(sb - sa) < best) best = std::fabs(sb - sa);
+        }
+        if (!std::isnan(best)) { v.value = best; v.text = fmt_dec(best, k.decimals); }
+      }
     }
     if (v.text.empty()) v.text = "n/a";
+    v.basis = fill(k.basis, bv, bw);
     res.keys.push_back(v);
   }
 
@@ -777,6 +941,7 @@ SheetResult section_sheet(const FigureContext& c, const SheetSpec& sp) {
   }
 
   // ---- legend ----
+  double legend_bottom = 61.2;
   {
     const double sx = 916.3, tx = 934.8, pitch = 10.3, size = 7.45;
     double y = 61.2;
@@ -827,22 +992,35 @@ SheetResult section_sheet(const FigureContext& c, const SheetSpec& sp) {
         y += pitch;
       }
     }
+    legend_bottom = y;
   }
 
-  // ---- key numbers ----
-  if (!sp.keys.empty()) {
-    double kx = 524.6, ky = 465.4;
-    f.text({kx, ky}, "KEY NUMBERS (" + sp.summary_name + ")", 8, Anchor::Start, true, kTitle);
-    ky += 15.1;
-    for (auto& v : res.keys) {
-      f.text({kx, ky}, v.label + ": " + v.text, 7.2, Anchor::Start, false, kTitle);
-      ky += 10.4;
+  // ---- key numbers: bottom right, right-aligned to the legend column ----
+  double key_top = f.height();
+  {
+    std::vector<const SheetValue*> shown;
+    for (auto& v : res.keys)
+      if (v.on_sheet) shown.push_back(&v);
+    if (!shown.empty()) {
+      const double size = 7.2, pitch = 10.4, head = 15.1, right = f.width() - 22.0, bottom = f.height() - 16.0;
+      double w = x.tw(sp.key_title, 8, true);
+      for (auto* v : shown) w = std::max(w, x.tw(v->label + ": " + v->text, size));
+      double kx = right - w;
+      double ky = bottom - pitch * static_cast<double>(shown.size() - 1) - head;
+      key_top = ky - 8;
+      f.text({kx, ky}, sp.key_title, 8, Anchor::Start, true, kTitle);
+      ky += head;
+      for (auto* v : shown) {
+        f.text({kx, ky}, v->label + ": " + v->text, size, Anchor::Start, false, kTitle);
+        ky += pitch;
+      }
     }
   }
-  // ---- notes ----
-  {
-    double ny = 585.1;
+  // ---- notes: under the legend, above the key numbers ----
+  if (!sp.notes.empty()) {
+    double ny = std::max(legend_bottom + 14.0, 0.0);
     for (auto& l : sp.notes) {
+      if (ny > key_top - 4) break;
       f.text({909.6, ny}, fill(l, {}, {{"figure", sp.name}}), 7.36, Anchor::Start, false, kGrey);
       ny += 8.8;
     }

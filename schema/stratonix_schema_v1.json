@@ -1071,7 +1071,19 @@
                         "fault_throw",
                         "well_fault_distance",
                         "block_highest_at_fault",
-                        "relief_to_end"
+                        "relief_to_end",
+                        "text",
+                        "completion",
+                        "vertical_exaggeration",
+                        "fold_relief",
+                        "limb_dip",
+                        "fault_dip",
+                        "fault_tip_units",
+                        "fault_cutoff_position",
+                        "fault_cutoff_depths",
+                        "fault_overlap",
+                        "throw_ratio",
+                        "fault_gap"
                       ]
                     },
                     "label": {
@@ -1108,6 +1120,37 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 6
+                    },
+                    "basis": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "string"
+                    },
+                    "completion": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "side": {
+                      "enum": [
+                        "footwall",
+                        "hanging_wall"
+                      ]
+                    },
+                    "coordinate": {
+                      "enum": [
+                        "x",
+                        "y",
+                        "distance"
+                      ]
+                    },
+                    "on_sheet": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -1117,6 +1160,9 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "key_numbers_title": {
+                "type": "string"
               }
             }
           }
