@@ -38,9 +38,6 @@ endif()
 add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
          -DDESC=${PROJECT_SOURCE_DIR}/examples/synthetic_fold_two_faults.yaml -DOUT=${STX_TEST_TMP}/cli_build_example
          -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
-# LeakSanitizer: ignore process-lifetime caches of fontconfig/Cairo (see lsan.supp).
-get_property(_stx_tests DIRECTORY PROPERTY TESTS)
-set_tests_properties(${_stx_tests} PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 # The worked examples of the user guide build with every check passing.
 foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
@@ -56,3 +53,7 @@ add_test(NAME cli_implicit_export COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:s
 add_test(NAME cli_implicit_package COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_implicit_package
          "-DARGS=package;${_imp};--formats;petrel;--no-figures;--zip" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
 add_test(NAME cli_implicit_suite COMMAND stratonix suite ${_imp})
+# LeakSanitizer: ignore process-lifetime caches of fontconfig/Cairo (see lsan.supp). Last, so it
+# reaches every test defined above.
+get_property(_stx_tests DIRECTORY PROPERTY TESTS)
+set_tests_properties(${_stx_tests} PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")

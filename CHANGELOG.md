@@ -46,6 +46,8 @@ has its own version (`stratonix_schema`).
 ### Changed
 - Check C4 measures faults whose slip has a strike component against the footwall horizon where
   the moving cut-off came from.
+- Tests: the LeakSanitizer suppressions (font library caches) now reach every test; tests
+  defined after them, such as `cli_implicit_section`, failed in the sanitiser job on exit.
 - Golden package hashes: the checks report and summary gain the C10 lines and every figure's
   key numbers the new check count; the figure set gains the fault-plane maps. Exports are
   unchanged.
