@@ -1,0 +1,41 @@
+# Keeps the "How to Cite" line of README.md at the latest release: version from the release tag,
+# year from its publication date. Runs when a release is published, or by hand.
+# The commit is credited to the repository owner, not to a bot.
+name: citation
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  readme:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Latest release
+        id: rel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          read -r tag date < <(gh release view --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt --jq '"\(.tagName) \(.publishedAt)"')
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "year=${date:0:4}" >> "$GITHUB_OUTPUT"
+      - name: Update the citation line
+        env:
+          VERSION: ${{ steps.rel.outputs.version }}
+          YEAR: ${{ steps.rel.outputs.year }}
+        run: |
+          sed -E -i "s#^(.+), [0-9]{4}, Stratonix v\.[0-9A-Za-z.+-]+\. (https://github\.com/EarthSciTech/Stratonix)\$#\1, ${YEAR}, Stratonix v.${VERSION}. \2#" README.md
+          grep -E "Stratonix v\.${VERSION}\. " README.md
+      - name: Commit if changed
+        run: |
+          if git diff --quiet README.md; then echo "README already cites v${{ steps.rel.outputs.version }}"; exit 0; fi
+          git config user.name "EarthSciTech"
+          git config user.email "164555811+EarthSciTech@users.noreply.github.com"
+          git commit -m "README: cite Stratonix v${{ steps.rel.outputs.version }} (${{ steps.rel.outputs.year }})" README.md
+          git push
