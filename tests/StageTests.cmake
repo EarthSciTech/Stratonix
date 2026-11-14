@@ -12,6 +12,14 @@ stx_test(test_interop stratonix_package)
 stx_test(test_package stratonix_package stx::zlib)
 stx_test(test_implicit stratonix_package)
 stx_test(test_sheet stratonix_package)
+# Stage 2A analytical tests (STX-TN-05), written before the features: each is expected to fail
+# until its prompt is done, then its WILL_FAIL line is removed.
+stx_test(test_v2_curved stratonix_package)
+stx_test(test_v2_interaction stratonix_package)
+stx_test(test_v2_movement stratonix_package)
+set_tests_properties(test_v2_curved PROPERTIES WILL_FAIL TRUE)       # until Prompt 16
+set_tests_properties(test_v2_interaction PROPERTIES WILL_FAIL TRUE)  # until Prompt 17
+set_tests_properties(test_v2_movement PROPERTIES WILL_FAIL TRUE)     # until Prompt 18
 # Independent check of the figure files (Python: Pillow, tifffile, python-pptx); skipped if absent.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)

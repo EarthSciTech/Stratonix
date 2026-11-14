@@ -3,6 +3,15 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [Unreleased] - v2 (2026.2) in progress
+
+### Added
+- Stage 2A specification (technical note STX-TN-05, kept with the project documents): curved
+  faults with vertical- and inclined-shear hanging walls, drag, splays and relay ramps,
+  displacement-length scaling, and reverse, oblique and strike-slip movement.
+- Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`),
+  expected to fail until their features are built.
+
 ## [2026.1] - 2026-11-14 - First public release
 
 Version numbers now put the release year first: `<year>.<major>`, with a third number only
