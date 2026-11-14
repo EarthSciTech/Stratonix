@@ -6,6 +6,7 @@
 
 #include "stratonix/checks/checks.hpp"
 #include "stratonix/checks/manifest.hpp"
+#include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/wells.hpp"
 #include "stratonix/figures/figures.hpp"
 #include "stratonix/core/error.hpp"
@@ -115,13 +116,98 @@ fig::FigureContext figure_context(const desc::Description& d, const Model& m, co
   c.closure_horizon = d.closure_horizon.empty() ? -1 : d.horizon_index(d.closure_horizon);
   c.faults_seal = d.closure_faults_seal.present && d.closure_faults_seal.flag;
   for (auto& u : m.info().units) {
-    std::string role, color;
+    std::string role, color, label;
     for (auto& du : d.units)
-      if (du.name == u.name) { role = du.role; color = du.color; }
+      if (du.name == u.name) { role = du.role; color = du.color; label = du.label; }
     c.unit_roles.push_back(role);
     c.unit_colors.push_back(color);
+    c.unit_labels.push_back(label);
   }
   return c;
+}
+
+fig::SheetSpec sheet_spec(const desc::Description& d, const Model& m, const desc::SheetDesc& sh) {
+  fig::SheetSpec sp;
+  const auto& inf = m.info();
+  sp.name = sh.name;
+  sp.title = sh.title;
+  sp.along_label = sh.along_label.empty() ? "Distance along section (m)" : sh.along_label;
+  sp.depth_label = sh.depth_label.empty() ? "Depth below datum (m)" : sh.depth_label;
+  sp.end_left = sh.end_left;
+  sp.end_right = sh.end_right;
+  for (auto& s : d.sections)
+    if (s.name == sh.section)
+      for (std::size_t r = 0; r < s.polyline.rows(); ++r) sp.line.push_back({s.polyline.si(2 * r), s.polyline.si(2 * r + 1), 0});
+  auto unit_of = [&](const std::string& n) {
+    for (std::size_t u = 0; u < inf.units.size(); ++u)
+      if (inf.units[u].name == n) return static_cast<int>(u);
+    return -1;
+  };
+  auto panel = [&](const desc::SheetPanelDesc& pd, fig::SheetPanel& p) {
+    p.present = pd.present;
+    p.title = pd.title;
+    p.ve = pd.vertical_exaggeration.present ? pd.vertical_exaggeration.si() : 1.0;
+    if (pd.window.present && pd.window.values.size() == 4) {
+      p.s0 = pd.window.si(0); p.s1 = pd.window.si(1); p.d0 = pd.window.si(2); p.d1 = pd.window.si(3);
+    }
+    p.label_at = pd.label_at.present ? pd.label_at.si() : -1;
+    for (auto& u : pd.label_units)
+      if (int k = unit_of(u); k >= 0) p.label_units.push_back(k);
+    for (auto& a : pd.annotations) {
+      fig::SheetAnnotation x;
+      x.type = a.type;
+      x.text = a.text;
+      x.horizon = a.horizon.empty() ? -1 : d.horizon_index(a.horizon);
+      x.fault = a.fault.empty() ? -1 : d.fault_index(a.fault);
+      x.footwall = a.side != "hanging_wall";
+      x.well = a.well;
+      x.completion = a.completion;
+      x.at = a.at.present ? a.at.si() : 0;
+      if (a.text_at.present && a.text_at.values.size() == 2) { x.text_s = a.text_at.si(0); x.text_depth = a.text_at.si(1); }
+      p.annotations.push_back(std::move(x));
+    }
+  };
+  panel(sh.main, sp.main);
+  panel(sh.detail, sp.detail);
+  sp.well_legend = sh.well_legend;
+  sp.completion_legend = sh.completion_legend;
+  sp.fault_legend = sh.fault_legend;
+  sp.notes = sh.notes;
+  for (auto& k : sh.keys) {
+    fig::SheetKey x;
+    x.kind = k.kind;
+    x.label = k.label;
+    x.horizon = k.horizon.empty() ? -1 : d.horizon_index(k.horizon);
+    x.unit = k.unit.empty() ? -1 : unit_of(k.unit);
+    x.fault = k.fault.empty() ? -1 : d.fault_index(k.fault);
+    for (auto& f : k.faults) x.faults.push_back(d.fault_index(f));
+    x.well = k.well;
+    x.end = k.end;
+    x.fraction = k.fraction.present ? k.fraction.si() : 0.5;
+    x.decimals = k.decimals >= 0 ? k.decimals : (k.kind == "fault_tips" || k.kind == "well_fault_distance") ? 0 : 1;
+    sp.keys.push_back(std::move(x));
+  }
+  sp.summary_name = d.model.name + "_v" + d.model.version + "_" + sh.name + "_summary.csv";
+  for (auto& w : d.wells)
+    for (auto& cp : w.completions) sp.completions.push_back({w.name, cp.name, cp.top.si(), cp.base.si()});
+  if (auto* st = static_cast<const Structure*>(m.capability("structure")))
+    sp.unfaulted = [st](int h, double x, double y) { return st->z(static_cast<std::size_t>(h), x, y); };
+  return sp;
+}
+
+void write_sheets(const desc::Description& d, const Model& m, const fig::FigureContext& c, const std::filesystem::path& folder) {
+  for (auto& sh : d.sheets) {
+    auto sp = sheet_spec(d, m, sh);
+    auto res = fig::section_sheet(c, sp);
+    std::string csv = "key,value\n";
+    for (auto& k : res.keys) csv += "\"" + k.label + "\",\"" + k.text + "\"\n";
+    std::filesystem::create_directories(folder);
+    write_file(folder / sp.summary_name, csv);
+    std::string notes = std::string("Evidence basis: ") + basis_label(m.info().basis) + ". Key numbers computed by Stratonix from the model (" +
+                        sp.summary_name + ").";
+    fig::write_figure(res.figure, folder, fig::figure_basename(c, "sheet", sh.name), c.model_name + " - section sheet " + sh.name,
+                      "Section sheet " + sh.name + ": main panel, detail panel, legend by role and key numbers.", notes);
+  }
 }
 
 void write_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
@@ -141,6 +227,7 @@ void write_figures(const desc::Description& d, const Model& m, const std::vector
     det.push_back({});
   }
   fig::write_figure_set(c, secs, det, folder);
+  write_sheets(d, m, c, folder);
 }
 
 std::vector<std::string> resolve_export_ids(const desc::Description& d, const std::vector<std::string>& requested) {

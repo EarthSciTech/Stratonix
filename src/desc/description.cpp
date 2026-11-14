@@ -107,6 +107,7 @@ std::vector<const Param*> Description::all_params() const {
   for (auto& w : wells) {
     add(w.head); add(w.datum_elevation); add(w.total_depth); add(w.stations);
     for (auto& [h, p] : w.tops) add(p);
+    for (auto& c : w.completions) { add(c.top); add(c.base); }
   }
   for (auto& h : horizons) { add(h.depth); add(h.thickness_above); add(h.iso_thickness); }
   for (auto& p : primitives) {
@@ -123,6 +124,13 @@ std::vector<const Param*> Description::all_params() const {
       add(*q);
   }
   for (auto& s : sections) { add(s.polyline); add(s.detail_window); }
+  for (auto& sh : sheets) {
+    for (auto* pd : {&sh.main, &sh.detail}) {
+      add(pd->window); add(pd->vertical_exaggeration); add(pd->label_at);
+      for (auto& a : pd->annotations) { add(a.at); add(a.text_at); }
+    }
+    for (auto& k : sh.keys) add(k.fraction);
+  }
   return r;
 }
 
@@ -297,6 +305,12 @@ struct Typer {
         wd.datum_elevation = P(&w, "datum_elevation", b, Dimension::Length, false, 1);
         wd.total_depth = P(&w, "total_depth", b, Dimension::Length, false, 1);
         if (const Node* tr = w.get("trajectory")) wd.stations = P(tr, "stations", b + ".trajectory", Dimension::Any, true, 2, 3);
+        if (const Node* cs = w.get("completions"))
+          for (std::size_t q = 0; q < cs->seq.size(); ++q) {
+            std::string bc = b + ".completions[" + std::to_string(q) + "]";
+            wd.completions.push_back({S(&cs->seq[q], "name"), P(&cs->seq[q], "top", bc, Dimension::Length, true, 1),
+                                      P(&cs->seq[q], "base", bc, Dimension::Length, true, 1)});
+          }
         if (const Node* tops = w.get("tops"))
           for (auto& [h, tn] : tops->map) wd.tops.emplace_back(h, P(tops, h, b + ".tops", Dimension::Length, true, 1));
         d.wells.push_back(std::move(wd));
@@ -330,9 +344,14 @@ struct Typer {
         d.horizons.push_back(std::move(hd));
       }
     if (const Node* us = st ? st->get("units") : nullptr)
-      for (auto& u : us->seq) d.units.push_back({S(&u, "name"), S(&u, "top"), S(&u, "base"), S(&u, "role"), S(&u, "color")});
+      for (auto& u : us->seq)
+        d.units.push_back({S(&u, "name"), S(&u, "top"), S(&u, "base"), S(&u, "role"), S(&u, "color"), S(&u, "label")});
     d.above_top_name = S(st, "above_top_name");
     d.below_base_name = S(st, "below_base_name");
+    for (auto& u : d.units) {
+      if (u.base == "model_base" && u.top != "model_top" && d.below_base_name.empty()) d.below_base_name = u.name;
+      if (u.top == "model_top" && u.base != "model_base" && d.above_top_name.empty()) d.above_top_name = u.name;
+    }
 
     if (const Node* s = root.get("structure")) {
       if (const Node* r = s->get("regional")) {
@@ -397,6 +416,7 @@ struct Typer {
           t.offset = P(tn, "offset", tb, Dimension::Length, t.rule == "horizon", 1);
           t.fraction = P(tn, "fraction", tb, Dimension::Dimensionless, t.rule == "within_unit", 1);
           t.depth = P(tn, "depth", tb, Dimension::Length, t.rule == "depth", 1);
+          t.stratigraphy = S(tn, "stratigraphy", "fault_frame");
         };
         tip("upper_tip", fd.upper);
         tip("lower_tip", fd.lower);
@@ -472,6 +492,75 @@ struct Typer {
           sd.polyline = P(&ss->seq[k], "polyline", b, Dimension::Length, true, 2, 2);
           sd.detail_window = P(&ss->seq[k], "detail_window", b, Dimension::Length, false, 4);
           d.sections.push_back(std::move(sd));
+        }
+      if (const Node* sh = o->get("section_sheets"))
+        for (std::size_t k = 0; k < sh->seq.size(); ++k) {
+          const Node& n = sh->seq[k];
+          std::string b = "outputs.section_sheets[" + std::to_string(k) + "]";
+          SheetDesc sd;
+          sd.name = S(&n, "name");
+          sd.section = S(&n, "section");
+          sd.title = S(&n, "title");
+          if (const Node* al = n.get("axis_labels")) { sd.along_label = S(al, "along"); sd.depth_label = S(al, "depth"); }
+          if (const Node* el = n.get("end_labels"); el && el->seq.size() == 2) { sd.end_left = el->seq[0].str; sd.end_right = el->seq[1].str; }
+          auto panel = [&](const char* key, SheetPanelDesc& pd) {
+            const Node* pn = n.get(key);
+            if (!pn) return;
+            std::string bp = b + "." + key;
+            pd.present = true;
+            pd.title = S(pn, "title");
+            pd.window = P(pn, "window", bp, Dimension::Length, false, 4);
+            pd.vertical_exaggeration = P(pn, "vertical_exaggeration", bp, Dimension::Dimensionless, false, 1);
+            if (const Node* ul = pn->get("unit_labels")) {
+              pd.label_at = P(ul, "at", bp + ".unit_labels", Dimension::Length, true, 1);
+              if (const Node* us = ul->get("units"))
+                for (auto& u : us->seq) pd.label_units.push_back(u.str);
+            }
+            if (const Node* an = pn->get("annotations"))
+              for (std::size_t q = 0; q < an->seq.size(); ++q) {
+                const Node& a = an->seq[q];
+                std::string ba = bp + ".annotations[" + std::to_string(q) + "]";
+                SheetAnnotationDesc ad;
+                ad.type = S(&a, "type");
+                ad.text = S(&a, "text");
+                ad.horizon = S(&a, "horizon");
+                ad.fault = S(&a, "fault");
+                ad.side = S(&a, "side", "footwall");
+                ad.well = S(&a, "well");
+                ad.completion = S(&a, "completion");
+                ad.at = P(&a, "at", ba, Dimension::Length, ad.type == "leader", 1);
+                ad.text_at = P(&a, "text_at", ba, Dimension::Length, true, 2);
+                pd.annotations.push_back(std::move(ad));
+              }
+          };
+          panel("main", sd.main);
+          panel("detail", sd.detail);
+          if (const Node* lg = n.get("legend")) {
+            sd.well_legend = S(lg, "well");
+            sd.completion_legend = S(lg, "completion");
+            if (const Node* fl = lg->get("faults"))
+              for (auto& x : fl->seq) sd.fault_legend.push_back(x.str);
+          }
+          if (const Node* kn = n.get("key_numbers"))
+            for (std::size_t q = 0; q < kn->seq.size(); ++q) {
+              const Node& a = kn->seq[q];
+              SheetKeyDesc kd;
+              kd.kind = S(&a, "kind");
+              kd.label = S(&a, "label");
+              kd.horizon = S(&a, "horizon");
+              kd.unit = S(&a, "unit");
+              kd.well = S(&a, "well");
+              kd.fault = S(&a, "fault");
+              kd.end = S(&a, "end", "last");
+              if (const Node* fs = a.get("faults"))
+                for (auto& x : fs->seq) kd.faults.push_back(x.str);
+              kd.fraction = P(&a, "fraction", b + ".key_numbers[" + std::to_string(q) + "]", Dimension::Dimensionless, false, 1);
+              if (const Node* dc = a.get("decimals")) kd.decimals = static_cast<int>(dc->number);
+              sd.keys.push_back(std::move(kd));
+            }
+          if (const Node* nt = n.get("notes"))
+            for (auto& x : nt->seq) sd.notes.push_back(x.str);
+          d.sheets.push_back(std::move(sd));
         }
       d.vertical_exaggeration = P(o, "vertical_exaggeration", "outputs", Dimension::Dimensionless, false, 1);
       d.voxel_spacing = P(o, "voxel_spacing", "outputs", Dimension::Length, false, 3);
@@ -566,6 +655,19 @@ struct Typer {
       auto& u = d.units[k];
       std::string b = "stratigraphy.units[" + std::to_string(k) + "]";
       if (!un.insert(u.name).second) c.err(b + ".name", "S2", "duplicate unit name '" + u.name + "'");
+      if (u.base == "model_base" || u.top == "model_top") {
+        bool below = u.base == "model_base";
+        const std::string& edge = below ? u.top : u.base;
+        int e = d.horizon_index(edge);
+        if (u.base == "model_base" && u.top == "model_top")
+          c.err(b, "S2", "unit '" + u.name + "' cannot span the whole model");
+        else if (e != (below ? static_cast<int>(d.horizons.size()) - 1 : 0))
+          c.err(b, "S2", std::string("a unit with ") + (below ? "base model_base must have the last horizon as its top"
+                                                                 : "top model_top must have the first horizon as its base"));
+        else if ((below ? d.below_base_name : d.above_top_name) != u.name)
+          c.err(b, "S2", "the unit " + std::string(below ? "below the last" : "above the first") + " horizon is named twice");
+        continue;
+      }
       int t = d.horizon_index(u.top), bb = d.horizon_index(u.base);
       if (t < 0) { c.err(b + ".top", "R1", "unknown horizon '" + u.top + "'"); continue; }
       if (bb < 0) { c.err(b + ".base", "R1", "unknown horizon '" + u.base + "'"); continue; }
@@ -655,7 +757,11 @@ struct Typer {
           if (t.fraction.present && (t.fraction.si() < 0 || t.fraction.si() > 1))
             c.err(tb + ".fraction", "F1", "fraction must be between 0 and 1");
           int ht = d.horizon_index(d.units[static_cast<std::size_t>(u)].top), hb = d.horizon_index(d.units[static_cast<std::size_t>(u)].base);
-          if (ht < 0 || hb < 0 || !t.fraction.present) return kNaN;
+          if (ht < 0 || hb < 0) {
+            c.err(tb + ".unit", "F1", "unit '" + t.unit + "' lies outside the horizons; a tip within a unit needs a unit between two horizons");
+            return kNaN;
+          }
+          if (!t.fraction.present) return kNaN;
           double a = zref[static_cast<std::size_t>(ht)], bb = zref[static_cast<std::size_t>(hb)];
           return a + t.fraction.si() * (bb - a);
         }
@@ -695,6 +801,67 @@ struct Typer {
       c.err("checks.closure.horizon", "R1", "unknown horizon '" + d.closure_horizon + "'");
     for (auto& s : d.sections)
       if (s.polyline.present && s.polyline.rows() < 2) c.err("outputs.sections", "S0", "a section needs at least two points");
+    // completions W4
+    for (std::size_t k = 0; k < d.wells.size(); ++k)
+      for (std::size_t q = 0; q < d.wells[k].completions.size(); ++q) {
+        auto& cp = d.wells[k].completions[q];
+        if (cp.top.present && cp.base.present && cp.base.si() <= cp.top.si())
+          c.err("wells[" + std::to_string(k) + "].completions[" + std::to_string(q) + "]", "W4",
+                "a completion's base must lie below its top");
+      }
+    // section sheets O1 (references) and O2 (windows)
+    auto unit_between = [&](const std::string& n) {
+      int u = d.unit_index(n);
+      return u >= 0;
+    };
+    for (std::size_t k = 0; k < d.sheets.size(); ++k) {
+      auto& sh = d.sheets[k];
+      std::string b = "outputs.section_sheets[" + std::to_string(k) + "]";
+      bool sec = false;
+      for (auto& s : d.sections) sec = sec || s.name == sh.section;
+      if (!sec) c.err(b + ".section", "O1", "unknown section '" + sh.section + "' (give it under outputs.sections)");
+      if (!sh.main.present || !sh.main.vertical_exaggeration.present)
+        c.err(b + ".main", "O2", "a section sheet needs main.vertical_exaggeration");
+      if (sh.detail.present && (!sh.detail.window.present || !sh.detail.vertical_exaggeration.present))
+        c.err(b + ".detail", "O2", "a detail panel needs a window [distance from, distance to, depth top, depth base] and a vertical exaggeration");
+      if (sh.detail.window.present && sh.detail.window.values.size() == 4 &&
+          (sh.detail.window.si(1) <= sh.detail.window.si(0) || sh.detail.window.si(3) <= sh.detail.window.si(2)))
+        c.err(b + ".detail.window", "O2", "window must be [distance from, distance to, depth top, depth base] in increasing order");
+      for (auto* pd : {&sh.main, &sh.detail}) {
+        for (auto& u : pd->label_units)
+          if (!unit_between(u)) c.err(b + ".unit_labels", "O1", "unknown unit '" + u + "'");
+        for (auto& a : pd->annotations) {
+          if (!a.horizon.empty() && d.horizon_index(a.horizon) < 0) c.err(b + ".annotations", "O1", "unknown horizon '" + a.horizon + "'");
+          if (!a.fault.empty() && d.fault_index(a.fault) < 0) c.err(b + ".annotations", "O1", "unknown fault '" + a.fault + "'");
+          if (!a.well.empty() && !d.well(a.well)) c.err(b + ".annotations", "O1", "unknown well '" + a.well + "'");
+          if (a.type == "leader" && a.horizon.empty()) c.err(b + ".annotations", "O1", "a leader names the horizon it points to");
+          if (a.type == "horizon_at_fault" && (a.horizon.empty() || a.fault.empty()))
+            c.err(b + ".annotations", "O1", "horizon_at_fault needs a horizon and a fault");
+          if (a.type == "completion" && a.well.empty()) c.err(b + ".annotations", "O1", "a completion annotation names its well");
+        }
+      }
+      for (std::size_t q = 0; q < sh.keys.size(); ++q) {
+        auto& kd = sh.keys[q];
+        std::string bk = b + ".key_numbers[" + std::to_string(q) + "]";
+        if (!kd.horizon.empty() && d.horizon_index(kd.horizon) < 0) c.err(bk, "O1", "unknown horizon '" + kd.horizon + "'");
+        if (!kd.unit.empty() && !unit_between(kd.unit)) c.err(bk, "O1", "unknown unit '" + kd.unit + "'");
+        if (!kd.well.empty() && !d.well(kd.well)) c.err(bk, "O1", "unknown well '" + kd.well + "'");
+        if (!kd.fault.empty() && d.fault_index(kd.fault) < 0) c.err(bk, "O1", "unknown fault '" + kd.fault + "'");
+        for (auto& fn : kd.faults)
+          if (d.fault_index(fn) < 0) c.err(bk, "O1", "unknown fault '" + fn + "'");
+        bool needs_h = kd.kind != "fault_tips" && kd.kind != "well_fault_distance";
+        if (needs_h && kd.horizon.empty()) c.err(bk, "O1", kd.kind + " needs a horizon");
+        if ((kd.kind == "fault_tips" || kd.kind == "fault_throw" || kd.kind == "block_highest_at_fault" || kd.kind == "relief_to_end") &&
+            kd.fault.empty())
+          c.err(bk, "O1", kd.kind + " needs a fault");
+        if ((kd.kind == "block_offset" && kd.faults.size() != 2) || (kd.kind == "well_fault_distance" && kd.faults.empty()))
+          c.err(bk, "O1", kd.kind + (kd.kind == "block_offset" ? " needs two faults" : " needs faults"));
+        if ((kd.kind == "horizon_at_well" || kd.kind == "block_offset" || kd.kind == "well_fault_distance" ||
+             kd.kind == "block_highest_at_fault" || kd.kind == "relief_to_end") && kd.well.empty())
+          c.err(bk, "O1", kd.kind + " needs a well");
+        if (kd.kind == "well_fault_distance" && kd.unit.empty()) c.err(bk, "O1", "well_fault_distance needs a unit");
+      }
+    }
   }
 };
 

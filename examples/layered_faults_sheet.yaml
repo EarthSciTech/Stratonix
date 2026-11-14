@@ -1,0 +1,136 @@
+# Worked example 6: an asymmetric anticline over a pillow with rim synclines, cut by two crestal
+# faults whose hanging walls move layer by layer (layer_rigid), and a section sheet with a detail
+# panel, labelled units, annotations and computed key numbers. DESIGN model; every parameter
+# carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_layered_faults, version: "1.0.0", status: DESIGN,
+        title: "Layer-rigid crestal faults over a pillow anticline"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "mean sea level; depths positive down", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[8000, 12000] m | user_instruction | worked example"
+  depth_range: "[100, 2600] m | user_instruction | worked example"
+  grid_spacing: "100 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: planned
+    head: "[4000, 7000] m | user_instruction | worked example"
+    datum_elevation: "0 m | user_instruction | worked example"
+    total_depth: "1400 m | user_instruction | worked example"
+    completions:
+      - {name: Sand, top: "1210 m | user_instruction | worked example", base: "1270 m | user_instruction | worked example"}
+stratigraphy:
+  reference: {point: "[4000, 7000] m | user_instruction | worked example: the column is given at the well"}
+  horizons:
+    - {name: Top_Shale, depth: "100 m | user_instruction | worked example"}
+    - {name: Top_Chalk, depth: "600 m | user_instruction | worked example"}
+    - {name: Top_Seal, depth: "1000 m | user_instruction | worked example"}
+    - {name: Top_Sand, depth: "1200 m | user_instruction | worked example"}
+    - {name: Top_Base, depth: "1300 m | user_instruction | worked example"}
+    - {name: Top_Salt, depth: "2000 m | user_instruction | worked example", intended_offset: true}
+  units:
+    - {name: SHALE, top: Top_Shale, base: Top_Chalk, role: Overburden, color: "#DDC98A", label: "Shale Gp"}
+    - {name: CHALK, top: Top_Chalk, base: Top_Seal, role: Overburden, color: "#9ED0E8", label: "Chalk Fm"}
+    - {name: SEAL, top: Top_Seal, base: Top_Sand, role: Caprock, color: "#5F7D45", label: "Seal Fm"}
+    - {name: SAND, top: Top_Sand, base: Top_Base, role: Reservoir, color: "#F6C412", label: "Sand Fm"}
+    - {name: BASE, top: Top_Base, base: Top_Salt, role: Underburden, color: "#C65A46", label: "Base Fm"}
+    - {name: SALT, top: Top_Salt, base: model_base, role: Underburden, color: "#EAA6CF", label: "Salt Gp"}
+structure:
+  regional: {type: flat}
+  base: {type: conformable}
+  primitives:
+    - type: anticline
+      name: PILLOW
+      crest: "[4000, 6000] m | user_instruction | worked example"
+      axis_azimuth: "90 deg | user_instruction | worked example: E-W axis, so a S-N line is a dip section"
+      half_length: "3000 m | user_instruction | worked example"
+      half_width_left: "2500 m | user_instruction | worked example: gentler north limb"
+      half_width_right: "1500 m | user_instruction | worked example: steeper south limb"
+      rim_width: "1200 m | user_instruction | worked example"
+      rim_depth: "60 m | user_instruction | worked example"
+      relief:
+        Top_Shale: "0 m | user_instruction | worked example"
+        Top_Sand: "150 m | user_instruction | worked example"
+        Top_Salt: "300 m | user_instruction | worked example"
+faults:
+  - name: FA
+    age: "1 ordinal | user_instruction | worked example: older"
+    geometry:
+      type: planar
+      reference_point: "[4000, 6500] m | user_instruction | worked example"
+      reference_depth: "1100 m | user_instruction | worked example"
+      strike: "90 deg | user_instruction | worked example: dips south"
+      dip: "55 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: within_unit, unit: CHALK, stratigraphy: unfaulted, fraction: "0.5 fraction | user_instruction | worked example"}
+      lower_tip: {rule: depth, depth: "1800 m | user_instruction | worked example"}
+      length: "5000 m | user_instruction | worked example"
+      tip_line_shape: elliptical
+    throw:
+      max: "40 m | user_instruction | worked example"
+      profile_dip: {type: sine}
+      profile_strike: {type: elliptical}
+    slip_mode: vertical_offset
+    hanging_wall: {type: layer_rigid}
+  - name: FB
+    age: "2 ordinal | user_instruction | worked example: younger"
+    geometry:
+      type: planar
+      reference_point: "[4000, 5500] m | user_instruction | worked example"
+      reference_depth: "1100 m | user_instruction | worked example"
+      strike: "270 deg | user_instruction | worked example: dips north"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: horizon, horizon: Top_Chalk, offset: "0 m | user_instruction | worked example"}
+      lower_tip: {rule: horizon, horizon: Top_Salt, offset: "150 m | user_instruction | worked example"}
+      length: "5000 m | user_instruction | worked example"
+      tip_line_shape: elliptical
+    throw:
+      max: "30 m | user_instruction | worked example"
+      profile_dip: {type: sine}
+      profile_strike: {type: elliptical}
+    slip_mode: vertical_offset
+    hanging_wall: {type: layer_rigid}
+frame: {fixed: {point: "[4000, 7000, -1250] m | user_instruction | worked example: the well's block stays fixed"}}
+outputs:
+  sections:
+    - name: SN
+      polyline: "[[4000, 0], [4000, 12000]] m | user_instruction | worked example: S-N dip section through the crest"
+  section_sheets:
+    - name: SN_sheet
+      section: SN
+      title: "Example layered faults, X = 4,000 m (S–N)   •   {units} units / {surfaces} horizons   •   {faults_word} planar faults   •   vertical exaggeration {ve}×"
+      axis_labels: {along: "Y [m]  (south → north)", depth: "Z [m TVDSS]"}
+      end_labels: [S, N]
+      main:
+        vertical_exaggeration: "2 ratio | user_instruction | worked example"
+        unit_labels: {at: "10500 m | user_instruction | worked example", units: [SHALE, CHALK, BASE, SALT]}
+        annotations:
+          - {type: leader, text: "crest", horizon: Top_Sand, at: "6000 m | user_instruction | worked example", text_at: "[2500, 700] m | user_instruction | worked example"}
+      detail:
+        title: "Detail: faults, seal and sand, Y {s0_km}–{s1_km} km, vertical exaggeration {ve}×"
+        window: "[3500, 9000, 850, 1450] m | user_instruction | worked example"
+        vertical_exaggeration: "5 ratio | user_instruction | worked example"
+        unit_labels: {at: "4000 m | user_instruction | worked example", units: [SEAL, SAND]}
+        annotations:
+          - {type: horizon_at_fault, horizon: Top_Sand, fault: FA, side: footwall, text: "top Sand at FA, W1's block\n(footwall, {value:0} m TVDSS)", text_at: "[7200, 1000] m | user_instruction | worked example"}
+          - {type: completion, well: W1, completion: Sand, text: "W1 completion\n{top:0}–{base:0} m TVDSS", text_at: "[7600, 1350] m | user_instruction | worked example"}
+      legend:
+        well: "W1 (vertical, Y = 7 km)"
+        completion: "completion, Sand"
+        faults: ["FA 55°, dips S; FB 60°, dips N"]
+      key_numbers:
+        - {kind: horizon_at_well, horizon: Top_Sand, well: W1, label: "top Sand at W1 (m TVDSS)"}
+        - {kind: horizon_highest, horizon: Top_Sand, label: "top Sand, highest point (m TVDSS)"}
+        - {kind: block_offset, horizon: Top_Sand, faults: [FB, FA], well: W1, label: "crest block (FB-FA) down-thrown relative to W1's block at top Sand (m)"}
+        - {kind: fault_tips, fault: FA, label: "FA: upper tip / lower tip (m TVDSS)"}
+        - {kind: fault_throw, fault: FA, horizon: Top_Sand, label: "FA: throw at top Sand (m)"}
+        - {kind: fault_throw, fault: FB, horizon: Top_Sand, label: "FB: throw at top Sand (m)"}
+        - {kind: well_fault_distance, well: W1, faults: [FB, FA], unit: SAND, label: "W1 to FB / FA at mid Sand, horizontal (m)"}
+        - {kind: block_highest_at_fault, well: W1, fault: FA, horizon: Top_Sand, label: "W1's block: top Sand at FA (m TVDSS)"}
+        - {kind: relief_to_end, well: W1, fault: FA, horizon: Top_Sand, end: last, label: "W1's block: relief from FA to the northern level of top Sand (m)"}
+      notes:
+        - "Design example, not an interpretation."
+        - "{figure}"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [csv]

@@ -1,8 +1,8 @@
 ---
 title: Stratonix developer guide
 doc_id: STX-DG
-version: 1.2
-date: 2026-11-13
+version: 1.3
+date: 2026-11-14
 ---
 
 # Stratonix developer guide
@@ -98,6 +98,26 @@ vertically). Derive from `HangingWallField` for a new decay of displacement with
 description's `slip_mode` and `hanging_wall.type` select them by name. Add a test in
 `test_engines.cpp` with a case that has an analytical answer, and run the synthetic example's
 checks (C3, C4) with it.
+
+### Layer-rigid restoration (1.2)
+
+With `layer_rigid` hanging walls the displacement of material depends on its stratigraphic level
+s (horizon index, fractional inside a unit, from the unfaulted structure), not on its position.
+`FaultNetwork::solve_layer` finds the one unknown s of a present point by bracketing: s must equal
+the level of the point restored through every fault with each fault's throw read at level s. Each
+fault keeps a table of where every level meets its plane in its own frame (exact at the horizons,
+sampled every 10 m down dip between them), resolved oldest first. With vertical slips the column
+does not move, so its horizons are read once per point. The build refuses a fault whose throw
+changes faster than the layers thicken at the fault (layers would overlap).
+
+### Section sheets (1.2)
+
+`figures/sheet.cpp` draws a sheet from `SheetSpec` (built from the description by the pipeline).
+Per column of the section it finds the fault crossings, splits the column into block intervals and
+finds each horizon by root finding in that block, so offsets are sharp; unit fills are polygons
+per block and unit, horizon lines are clipped to their block. Key numbers are computed from the
+same geometry and the model interface (well intersections, restoration, fault evaluation); the
+unfaulted levels come from the engine through a callback.
 
 ## 4.3 An importer
 

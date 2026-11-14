@@ -3,6 +3,22 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [1.2.0] - 2026-11-14 - Section sheets and layer-rigid faults (application model reference)
+
+### Added
+- Hanging wall `layer_rigid`: every layer moves as a rigid slab by the throw where it meets the
+  fault, faults acting oldest first on the displaced geometry. Restoration solves for the
+  material's level; each fault tabulates where every level meets its plane. Build refuses throws
+  that change faster than the layers thicken.
+- Tip rules can read their level on the unfaulted stratigraphy (`stratigraphy: unfaulted`).
+- Well completions; unit display labels (UTF-8); units `top: model_top` / `base: model_base`
+  that name the outer units (role, colour, label).
+- Section sheets (`outputs.section_sheets`): main and detail panels with sharp per-block fills,
+  unit labels, leader / fault-level / completion annotations, legend by role, computed key numbers
+  (eight kinds) with a CSV, notes; DejaVu Sans text with built-in metrics.
+- Rules W4 (completion order), O1 (sheet references), O2 (sheet windows); F1 refuses a
+  within-unit tip in an outer unit. Worked example 6 (`layered_faults_sheet.yaml`); test_sheet.
+
 ## [1.1.1] - 2026-11-14 - Figure fixes found on a 23-horizon model (Prompt 12)
 
 ### Fixed

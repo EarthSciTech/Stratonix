@@ -181,6 +181,12 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Plain-words description used in README files ("assumed by the modeller", ...).
 - `struct Param`  
   A labelled parameter: value(s), unit, evidence class and source.
+- `struct UnitDesc { std::string name, top, base, role, color, label; };`  
+  A unit between consecutive horizons; top "model_top" / base "model_base" name the units above the first and below the last horizon.
+- `struct TipDesc { std::string rule; std::string horizon, unit; Param offset, fraction, depth; std::string stratigraphy = "fault_frame"; };`  
+  Tip rule. stratigraphy: "fault_frame" (default) places the tip on the stratigraphy as displaced by older faults; "unfaulted" on the stratigraphy before any faulting.
+- `struct SheetAnnotationDesc { std::string type, text, horizon, fault, side = "footwall", well, completion; Param at, text_at; };`  
+  Section sheet (presentation page) settings.
 - `struct ImplicitData { std::string input, kind, format, horizon; };`  
   Data-conditioned (implicit) structure: data inputs and interpolation settings.
 - `struct Description`  
@@ -256,6 +262,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Rule placing a fault tip relative to the stratigraphy.
 - `struct Fault`  
   One fault with resolved geometry.
+- `bool layered = false;`  
+  Hanging wall "layer_rigid": every layer moves as a rigid slab by the throw where that layer meets the fault (in the fault's frame), so the displacement of a point depends on its stratigraphic level, not on its elevation.
+- `double layer_b(double s, double a) const;`  
+  Down-dip position where stratigraphic level s (horizon index, fractional inside units; -1 domain top, nh domain base) meets the plane at strike position a.
 - `void profile_coords(const Vec3& p, double& a, double& b) const`  
   Profile coordinates of a point: strike position, and the down-dip position of the fault point at the same elevation. A hanging-wall point therefore takes the displacement of the fault where its own elevation meets the fault (equal to ab() on the plane).
 - `void tips(double a, double& bu, double& bl) const;`  
@@ -282,6 +292,16 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Restore a point given in fault f's frame, on the stated wall of f, through f and the faults older than it (used to measure throw in the fault's own frame).
 - `const std::vector<int>& young_to_old() const { return order_; }`  
   Ages, youngest first.
+- `double layer_displacement(int f, const Vec3& p, bool* active = nullptr) const;`  
+  Layer-rigid networks: displacement magnitude of fault f for the material at present position p (its level found by restoring p through every fault).
+- `bool layered() const { return layered_; }`  
+  True when the faults use layer-rigid hanging walls (all of them do, or none).
+- `double strat_coord(const Vec3& r) const;`  
+  Stratigraphic coordinate of a restored point: horizon index, fractional inside a unit (-1 at the domain top, nh at the domain base, linear in metres / 1000 beyond them).
+- `Vec3 chain(const Vec3& q, std::size_t r0, std::size_t r1, double s, BlockCode* code, const BlockCode* forced, int first) const;`  
+  Layer-rigid restoration of q through the faults of ranks [r0, r1) for material at level s. first: 0 evaluate the side of the first fault; +1 / -1 move it as hanging wall / footwall (undo semantics); +2 / -2 take its side as hanging wall / footwall and respect the frame.
+- `double solve_layer(const Vec3& q, std::size_t r0, const BlockCode* forced, int first) const;`  
+  Level s of the material at q such that restoring it through ranks [r0, end) lands on level s.
 - `void register_fault_plugins();`  
   Register built-in kinematics and hanging-wall plugins (part of register_engine_plugins()).
 
@@ -353,8 +373,12 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   A figure: size in points, origin top-left, y downwards.
 - `const Image* own(Image img);`  
   Keep images alive with the figure.
+- `void set_font_family(std::string f) { font_ = std::move(f); }`  
+  Font family for all text of this figure: empty (Arial / Liberation Sans, the default) or "DejaVu Sans". Text widths for layout use the matching built-in metrics.
 - `double text_width(const std::string& s, double size, bool bold = false);`  
   Text width in points from built-in sans-serif metrics (Helvetica/Arial-compatible advance widths), so layout is identical on every platform.
+- `double text_width(const std::string& s, double size, bool bold, const std::string& family);`  
+  Text width for a font family ("" = the default metrics above, "DejaVu Sans" = DejaVu Sans advance widths). Text is UTF-8; characters without a table entry count as 0.6 em.
 - `std::string to_svg(const Figure& f, const std::string& title = {});`  
   SVG document (text kept as <text>, images embedded as PNG).
 - `struct Raster`  
@@ -380,6 +404,16 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Write a figure in the four formats into `folder`.
 - `std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::vector<std::pair<std::string, Polyline>>& sections, const std::vector<std::vector<double>>& detail_windows, const std::filesystem::path& folder);`  
   Write the whole figure set for a model (sections, maps, 3D views, fence) and a combined PPTX.
+- `struct SheetAnnotation`  
+  A labelled annotation on a sheet panel. Text may hold placeholders: {value}, {value:N} (computed depth), {top:N}, {base:N} (completion), N = decimals.
+- `std::string kind, label;`  
+  horizon_at_well, horizon_highest, block_offset, fault_tips, fault_throw, well_fault_distance, block_highest_at_fault, relief_to_end
+- `struct SheetSpec`  
+  A presentation sheet for one section: main panel, optional detail panel, legend by role, computed key numbers and notes, laid out on a 15.5 x 9.6 inch page in DejaVu Sans.
+- `std::function<double(int, double, double)> unfaulted;`  
+  Unfaulted elevation of horizon h at (x, y), when the engine provides it (else empty).
+- `SheetResult section_sheet(const FigureContext& c, const SheetSpec& spec);`  
+  Compute the sheet's key numbers and draw it.
 - `struct Mesh3`  
   Software renderer used by the 3D views (z-buffer, Lambert shading).
 

@@ -71,9 +71,14 @@ class Figure {
   void unclip();
   /// Keep images alive with the figure.
   const Image* own(Image img);
+  /// Font family for all text of this figure: empty (Arial / Liberation Sans, the default) or
+  /// "DejaVu Sans". Text widths for layout use the matching built-in metrics.
+  void set_font_family(std::string f) { font_ = std::move(f); }
+  const std::string& font_family() const { return font_; }
 
  private:
   double w_, h_;
+  std::string font_;
   std::vector<Op> ops_;
   std::vector<std::unique_ptr<Image>> images_;
 };
@@ -81,6 +86,9 @@ class Figure {
 /// Text width in points from built-in sans-serif metrics (Helvetica/Arial-compatible advance
 /// widths), so layout is identical on every platform.
 double text_width(const std::string& s, double size, bool bold = false);
+/// Text width for a font family ("" = the default metrics above, "DejaVu Sans" = DejaVu Sans
+/// advance widths). Text is UTF-8; characters without a table entry count as 0.6 em.
+double text_width(const std::string& s, double size, bool bold, const std::string& family);
 
 /// SVG document (text kept as <text>, images embedded as PNG).
 std::string to_svg(const Figure& f, const std::string& title = {});

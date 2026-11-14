@@ -99,6 +99,37 @@ double text_width(const std::string& s, double size, bool bold) {
   return t / 1000.0 * size * (bold ? 1.07 : 1.0);
 }
 
+namespace {
+static const short kDejaVu[95] = {318, 401, 460, 838, 636, 950, 780, 275, 390, 390, 500, 838, 318, 361, 318, 337, 636, 636, 636, 636, 636, 636, 636, 636, 636, 636, 337, 337, 838, 838, 838, 531, 1000, 684, 686, 698, 770, 632, 575, 775, 752, 295, 295, 656, 557, 863, 748, 787, 603, 787, 695, 635, 611, 732, 684, 989, 685, 611, 685, 390, 337, 390, 838, 500, 500, 613, 635, 550, 635, 615, 352, 635, 634, 278, 278, 579, 278, 974, 634, 612, 635, 635, 411, 521, 392, 634, 592, 818, 592, 592, 525, 636, 337, 636, 838};
+static const short kDejaVuBold[95] = {348, 456, 521, 838, 696, 1002, 872, 306, 457, 457, 523, 838, 380, 415, 380, 365, 696, 696, 696, 696, 696, 696, 696, 696, 696, 696, 400, 400, 838, 838, 838, 580, 1000, 774, 762, 734, 830, 683, 683, 821, 837, 372, 372, 775, 637, 995, 837, 850, 733, 850, 770, 720, 682, 812, 774, 1103, 771, 724, 725, 457, 365, 457, 838, 500, 500, 675, 716, 593, 716, 678, 435, 716, 712, 343, 343, 665, 343, 1042, 712, 687, 716, 716, 493, 595, 478, 712, 652, 924, 645, 652, 582, 712, 365, 712, 838};
+static const struct { unsigned cp; short w, wb; } kDejaVuExtra[] = {{229, 613, 675}, {248, 612, 687}, {230, 982, 1048}, {197, 684, 774}, {216, 787, 850}, {198, 974, 1085}, {233, 615, 678}, {232, 615, 678}, {252, 634, 712}, {246, 612, 687}, {228, 613, 675}, {214, 787, 850}, {196, 684, 774}, {220, 732, 812}, {8226, 590, 639}, {8211, 500, 500}, {8212, 1000, 1000}, {8722, 838, 838}, {8594, 838, 838}, {215, 838, 838}, {176, 500, 500}, {177, 838, 838}, {178, 401, 438}, {179, 401, 438}, {181, 636, 736}, {8217, 318, 380}, {8216, 318, 380}, {8220, 518, 657}, {8221, 518, 657}, {8230, 1000, 1000}, {183, 318, 380}, {8804, 838, 838}, {8805, 838, 838}};
+
+/// Next code point of a UTF-8 string (invalid bytes are taken one by one).
+unsigned next_cp(const std::string& s, std::size_t& i) {
+  unsigned char c = static_cast<unsigned char>(s[i++]);
+  if (c < 0x80) return c;
+  int n = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+  unsigned cp = n == 3 ? (c & 0x07u) : n == 2 ? (c & 0x0Fu) : (c & 0x1Fu);
+  for (int k = 0; k < n && i < s.size(); ++k) cp = (cp << 6) | (static_cast<unsigned char>(s[i++]) & 0x3Fu);
+  return cp;
+}
+}  // namespace
+
+double text_width(const std::string& s, double size, bool bold, const std::string& family) {
+  if (family.empty()) return text_width(s, size, bold);
+  double t = 0;
+  for (std::size_t i = 0; i < s.size();) {
+    unsigned cp = next_cp(s, i);
+    double w = 600;
+    if (cp >= 32 && cp < 127) w = bold ? kDejaVuBold[cp - 32] : kDejaVu[cp - 32];
+    else
+      for (auto& e : kDejaVuExtra)
+        if (e.cp == cp) { w = bold ? e.wb : e.w; break; }
+    t += w;
+  }
+  return t / 1000.0 * size;
+}
+
 // ---- base64 --------------------------------------------------------------------------------
 std::string base64(const std::string& d) {
   static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -157,7 +188,10 @@ std::string to_svg(const Figure& f, const std::string& title) {
         break;
       }
       case Op::Kind::Text: {
-        s << "<text x=\"" << num(o.at.x) << "\" y=\"" << num(o.at.y) << "\" font-family=\"Arial, 'Liberation Sans', Helvetica, sans-serif\" font-size=\""
+        s << "<text x=\"" << num(o.at.x) << "\" y=\"" << num(o.at.y) << "\" font-family=\""
+          << (f.font_family().empty() ? std::string("Arial, 'Liberation Sans', Helvetica, sans-serif")
+                                      : "'" + f.font_family() + "', 'Bitstream Vera Sans', Verdana, sans-serif")
+          << "\" font-size=\""
           << num(o.size) << "\"";
         if (o.bold) s << " font-weight=\"bold\"";
         if (o.italic) s << " font-style=\"italic\"";

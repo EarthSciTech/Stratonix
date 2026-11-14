@@ -1,8 +1,8 @@
 ---
 title: Stratonix user guide
 doc_id: STX-UG
-version: 1.2
-date: 2026-11-13
+version: 1.3
+date: 2026-11-14
 ---
 
 # Stratonix user guide
@@ -130,6 +130,34 @@ point with the evidence class of its input; exports and packages carry it and th
 every input. Data are never adjusted to improve the fit. Method and accuracy: the note on the
 implicit builder.
 
+## 2.5 Presentation sheets, layer-rigid faults and other 1.2 additions
+
+`examples/layered_faults_sheet.yaml` shows the features added in 1.2:
+
+- **Layer-rigid hanging walls** (`hanging_wall: {type: layer_rigid}`). Every layer of the moving
+  block moves as a rigid slab by the throw where that layer meets the fault, so a horizon keeps
+  one offset across its whole block, also far from the fault. With `rigid` the throw is read where
+  the point's own elevation meets the fault. Faults act in age order (oldest first) on the
+  geometry the older ones displaced. Use it for all faults of a model or for none.
+- **Tips on the unfaulted stratigraphy** (`stratigraphy: unfaulted` in a tip rule). By default a
+  younger fault's tip is placed on the stratigraphy as displaced by older faults; `unfaulted`
+  places it on the stratigraphy before any faulting.
+- **Completions** on wells (`completions: [{name, top, base}]`, depths positive down) are drawn
+  on sections and sheets.
+- **Unit labels** (`label`, UTF-8, for example "Våle Fm") are used in legends and on panels;
+  `top: model_top` or `base: model_base` names the unit above the first or below the last horizon
+  so it gets a role, a colour and a label.
+- **Section sheets** (`outputs.section_sheets`): one page per section with a main panel at a stated
+  vertical exaggeration, an optional detail panel (window and exaggeration), unit labels,
+  annotations (`leader` to a horizon, `horizon_at_fault` with the computed depth, `completion`),
+  a legend by role, the key numbers Stratonix computes from the model and your notes. Titles take
+  placeholders `{units}`, `{surfaces}`, `{faults}`, `{faults_word}`, `{ve}`, and the detail title
+  `{s0_km}`, `{s1_km}`; annotation texts take `{value:N}`, `{top:N}`, `{base:N}`. Key-number kinds:
+  `horizon_at_well`, `horizon_highest`, `block_offset`, `fault_tips`, `fault_throw`,
+  `well_fault_distance` (on the unfaulted unit), `block_highest_at_fault`, `relief_to_end`. The
+  sheet is written in the four figure formats beside a CSV of its key numbers; text is set in
+  DejaVu Sans (if the font is not installed the system substitutes another sans-serif font).
+
 # 3. Running
 
 | Command | What it does |
@@ -211,7 +239,8 @@ the package is marked DRAFT. Settings: `docs/package_config.md`.
   and no drag.
 - Dip-slip moves the hanging wall down the dip; vertical offset moves it straight down. They differ
   by up to a few metres on dipping horizons (3.5 m on the synthetic example).
-- Hanging-wall fields are rigid, linear decay to a distance, or linear decay to the next fault.
+- Hanging-wall fields are rigid, layer-rigid (1.2), linear decay to a distance, or linear decay to
+  the next fault. Layer-rigid fields need every fault of the model to use them.
 - A fault's throw must change by less than 1 m per metre of slip; elliptical dip profiles are
   refused for that reason.
 - Reverse faults are evaluated, but where a horizon occurs twice the upper occurrence is kept on

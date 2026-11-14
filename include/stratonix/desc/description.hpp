@@ -43,10 +43,12 @@ struct Param {
 
 struct ModelMeta { std::string name, version, status, title, description, contact; };
 struct InputDesc { std::string id, path, role, sharing, source, evidence; std::filesystem::path resolved; };
+struct CompletionDesc { std::string name; Param top, base; };  ///< depths positive down
 struct WellDesc {
   std::string name, role;
   Param head, datum_elevation, total_depth, stations;
   std::vector<std::pair<std::string, Param>> tops;  ///< horizon name -> depth (positive down)
+  std::vector<CompletionDesc> completions;
 };
 struct HorizonDesc {
   std::string name;
@@ -56,14 +58,18 @@ struct HorizonDesc {
   Param iso_thickness;
   bool intended_offset = false;
 };
-struct UnitDesc { std::string name, top, base, role, color; };
+/// A unit between consecutive horizons; top "model_top" / base "model_base" name the units above
+/// the first and below the last horizon.
+struct UnitDesc { std::string name, top, base, role, color, label; };
 struct PrimitiveDesc {
   std::string type, name;
   Param crest, axis_azimuth, plunge, half_length, half_width_left, half_width_right;
   Param radius_major, radius_minor, rim_depth, rim_width;
   std::vector<std::pair<std::string, Param>> relief;  ///< horizon name -> relief
 };
-struct TipDesc { std::string rule; std::string horizon, unit; Param offset, fraction, depth; };
+/// Tip rule. stratigraphy: "fault_frame" (default) places the tip on the stratigraphy as displaced
+/// by older faults; "unfaulted" on the stratigraphy before any faulting.
+struct TipDesc { std::string rule; std::string horizon, unit; Param offset, fraction, depth; std::string stratigraphy = "fault_frame"; };
 struct ProfileDesc { std::string type = "flat_topped"; Param taper; };
 struct FaultDesc {
   std::string name;
@@ -82,6 +88,27 @@ struct FaultDesc {
   std::string abuts_fault, abuts_side;
 };
 struct SectionDesc { std::string name; Param polyline, detail_window; };
+/// Section sheet (presentation page) settings.
+struct SheetAnnotationDesc { std::string type, text, horizon, fault, side = "footwall", well, completion; Param at, text_at; };
+struct SheetPanelDesc {
+  bool present = false;
+  std::string title;
+  Param window, vertical_exaggeration, label_at;
+  std::vector<std::string> label_units;
+  std::vector<SheetAnnotationDesc> annotations;
+};
+struct SheetKeyDesc {
+  std::string kind, label, horizon, unit, well, fault, end = "last";
+  std::vector<std::string> faults;
+  Param fraction;
+  int decimals = -1;
+};
+struct SheetDesc {
+  std::string name, section, title, along_label, depth_label, end_left, end_right, well_legend, completion_legend;
+  SheetPanelDesc main, detail;
+  std::vector<std::string> fault_legend, notes;
+  std::vector<SheetKeyDesc> keys;
+};
 /// Data-conditioned (implicit) structure: data inputs and interpolation settings.
 struct ImplicitData { std::string input, kind, format, horizon; };
 struct ImplicitDesc {
@@ -125,6 +152,7 @@ struct Description {
   ImplicitDesc implicit;
   // outputs
   std::vector<SectionDesc> sections;
+  std::vector<SheetDesc> sheets;
   Param vertical_exaggeration, voxel_spacing, fault_stick_spacing;
   std::vector<std::string> exports;
 

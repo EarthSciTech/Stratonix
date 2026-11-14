@@ -223,6 +223,7 @@ Raster rasterise(const Figure& f, double dpi) {
 #else
   const char* family = "Liberation Sans";
 #endif
+  if (!f.font_family().empty()) family = f.font_family().c_str();
   for (auto& o : f.ops()) {
     switch (o.kind) {
       case Op::Kind::Path: {

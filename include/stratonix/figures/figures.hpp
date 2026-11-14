@@ -6,6 +6,7 @@
 /// coordinate system, vertical datum and evidence basis.
 #pragma once
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,6 +26,7 @@ struct FigureContext {
   std::vector<std::pair<std::string, std::string>> key_numbers;  ///< read from the summary table
   std::vector<std::string> unit_roles;   ///< per model unit (may be empty)
   std::vector<std::string> unit_colors;  ///< per model unit "#rrggbb" or empty
+  std::vector<std::string> unit_labels;  ///< per model unit display name (UTF-8) or empty
   double vertical_exaggeration = 1;
   double grid_spacing = 50;
   int closure_horizon = -1;
@@ -55,6 +57,61 @@ WrittenFigure write_figure(const Figure& f, const std::filesystem::path& folder,
 std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::vector<std::pair<std::string, Polyline>>& sections,
                                             const std::vector<std::vector<double>>& detail_windows,
                                             const std::filesystem::path& folder);
+
+// ---- section sheet ---------------------------------------------------------------------------
+/// A labelled annotation on a sheet panel. Text may hold placeholders: {value}, {value:N}
+/// (computed depth), {top:N}, {base:N} (completion), N = decimals.
+struct SheetAnnotation {
+  std::string type;             ///< "leader", "horizon_at_fault" or "completion"
+  std::string text;
+  int horizon = -1, fault = -1;
+  bool footwall = true;         ///< horizon_at_fault: side of the cut-off
+  std::string well, completion;
+  double at = 0;                ///< leader: distance along the section of the target on the horizon
+  double text_s = 0, text_depth = 0;  ///< text anchor (left, first baseline): distance, depth (m, + down)
+};
+struct SheetPanel {
+  bool present = false;
+  double s0 = 0, s1 = 0;        ///< distance window along the section (s1 <= s0: whole section)
+  double d0 = 0, d1 = 0;        ///< depth window (m, + down; d1 <= d0: model domain)
+  double ve = 1;                ///< vertical exaggeration (sets the panel height)
+  std::string title;            ///< placeholders {units}, {surfaces}, {faults}, {faults_word}, {ve}, {s0_km}, {s1_km}
+  double label_at = -1;         ///< distance where unit labels sit (< 0: none)
+  std::vector<int> label_units; ///< model unit indices labelled
+  std::vector<SheetAnnotation> annotations;
+};
+struct SheetKey {
+  /// horizon_at_well, horizon_highest, block_offset, fault_tips, fault_throw, well_fault_distance,
+  /// block_highest_at_fault, relief_to_end
+  std::string kind, label;
+  int horizon = -1, unit = -1, fault = -1;
+  std::vector<int> faults;
+  std::string well, end;        ///< end: "first" or "last" (relief_to_end)
+  double fraction = 0.5;        ///< well_fault_distance: level inside the unit
+  int decimals = 1;
+};
+struct SheetCompletion { std::string well, name; double top = 0, base = 0; };  ///< depths m, + down
+/// A presentation sheet for one section: main panel, optional detail panel, legend by role,
+/// computed key numbers and notes, laid out on a 15.5 x 9.6 inch page in DejaVu Sans.
+struct SheetSpec {
+  std::string name, title, along_label, depth_label, end_left, end_right;
+  Polyline line;
+  SheetPanel main, detail;
+  std::string well_legend, completion_legend;
+  std::vector<std::string> fault_legend, notes;
+  std::vector<SheetKey> keys;
+  std::string summary_name;     ///< file name shown in the key-numbers heading
+  std::vector<SheetCompletion> completions;
+  /// Unfaulted elevation of horizon h at (x, y), when the engine provides it (else empty).
+  std::function<double(int, double, double)> unfaulted;
+};
+struct SheetValue { std::string label, text; double value = 0; };
+struct SheetResult {
+  Figure figure{1116, 691.2};
+  std::vector<SheetValue> keys;
+};
+/// Compute the sheet's key numbers and draw it.
+SheetResult section_sheet(const FigureContext& c, const SheetSpec& spec);
 
 /// Software renderer used by the 3D views (z-buffer, Lambert shading).
 struct Mesh3 {

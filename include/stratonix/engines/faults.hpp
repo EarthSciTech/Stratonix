@@ -50,6 +50,7 @@ struct TipRule {
   double offset = 0;    ///< m, positive downwards (Horizon)
   double fraction = 0;  ///< WithinUnit
   double depth = 0;     ///< m, positive down (Depth)
+  bool unfaulted = false;  ///< level read on the unfaulted stratigraphy instead of the fault's frame
 };
 
 /// One fault with resolved geometry.
@@ -80,6 +81,16 @@ struct Fault {
   bool decays = false;       ///< hanging-wall field vanishes beyond the influence distance
   double max_slip_gradient = 0;  ///< max |d throw / d slip| over the fault (must be < 1)
   bool abut_hw_side = true;  ///< active on the hanging-wall side of the abutted fault
+  /// Hanging wall "layer_rigid": every layer moves as a rigid slab by the throw where that layer
+  /// meets the fault (in the fault's frame), so the displacement of a point depends on its
+  /// stratigraphic level, not on its elevation.
+  bool layered = false;
+  std::vector<double> la_tab;              ///< strike positions of the layer table
+  std::vector<std::size_t> l_start;        ///< per strike position: first entry in ls_tab / lb_tab
+  std::vector<double> ls_tab, lb_tab;      ///< (level, down-dip position) pairs on the plane, level increasing
+  /// Down-dip position where stratigraphic level s (horizon index, fractional inside units;
+  /// -1 domain top, nh domain base) meets the plane at strike position a.
+  double layer_b(double s, double a) const;
 
   double sigma(const Vec3& p) const { return dot(p - p0, n); }
   void ab(const Vec3& p, double& a, double& b) const { Vec3 d = p - p0; a = dot(d, s); b = dot(d, dd); }
@@ -138,8 +149,29 @@ class FaultNetwork {
   Vec3 restore_from_frame(const Vec3& q, int f, bool hanging_wall) const;
   /// Ages, youngest first.
   const std::vector<int>& young_to_old() const { return order_; }
+  /// Layer-rigid networks: displacement magnitude of fault f for the material at present
+  /// position p (its level found by restoring p through every fault).
+  double layer_displacement(int f, const Vec3& p, bool* active = nullptr) const;
+  /// True when the faults use layer-rigid hanging walls (all of them do, or none).
+  bool layered() const { return layered_; }
+  /// Stratigraphic coordinate of a restored point: horizon index, fractional inside a unit
+  /// (-1 at the domain top, nh at the domain base, linear in metres / 1000 beyond them).
+  double strat_coord(const Vec3& r) const;
 
  private:
+  /// Layer-rigid restoration of q through the faults of ranks [r0, r1) for material at level s.
+  /// first: 0 evaluate the side of the first fault; +1 / -1 move it as hanging wall / footwall
+  /// (undo semantics); +2 / -2 take its side as hanging wall / footwall and respect the frame.
+  Vec3 chain(const Vec3& q, std::size_t r0, std::size_t r1, double s, BlockCode* code, const BlockCode* forced,
+             int first) const;
+  /// Level s of the material at q such that restoring it through ranks [r0, end) lands on level s.
+  double solve_layer(const Vec3& q, std::size_t r0, const BlockCode* forced, int first) const;
+  double layer_throw(int f, double s, const Vec3& q) const;
+  void resolve_layers(const Structure& st, BuildLog& log);
+  bool layered_ = false;
+  bool vertical_ = false;  ///< every slip vector is vertical (columns do not move when restored)
+  const Structure* st_ = nullptr;
+  double z_top_ = 0, z_base_ = 0;
   double next_fault_distance(int f, const Vec3& q, double sigma) const;
   double level_in_frame(const Structure& st, int h, double x, double y, int f, const Domain& dom) const;
   void resolve_tips(const desc::Description& d, const Structure& st, BuildLog& log);

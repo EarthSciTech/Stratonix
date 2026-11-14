@@ -22,6 +22,10 @@ ModelInfo model_info_from(const desc::Description& d) {
   mi.units[0] = {d.above_top_name.empty() ? "above_" + d.horizons[0].name : d.above_top_name, -1, 0, "#E8EEF4"};
   mi.units[nh] = {d.below_base_name.empty() ? "below_" + d.horizons[nh - 1].name : d.below_base_name,
                   static_cast<int>(nh) - 1, -1, "#B9B4AA"};
+  for (auto& u : d.units) {  // colours of the outer units when the units list names them
+    if (u.base == "model_base" && u.name == mi.units[nh].name && !u.color.empty()) mi.units[nh].color = u.color;
+    if (u.top == "model_top" && u.name == mi.units[0].name && !u.color.empty()) mi.units[0].color = u.color;
+  }
   for (std::size_t k = 1; k < nh; ++k) {
     mi.units[k].top_horizon = static_cast<int>(k) - 1;
     mi.units[k].base_horizon = static_cast<int>(k);

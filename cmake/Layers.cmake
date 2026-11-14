@@ -44,7 +44,8 @@ add_library(stratonix_figures STATIC
   src/figures/raster.cpp
   src/figures/pptx.cpp
   src/figures/render3d.cpp
-  src/figures/plots.cpp)
+  src/figures/plots.cpp
+  src/figures/sheet.cpp)
 target_link_libraries(stratonix_figures PUBLIC stratonix_repr PRIVATE stx::zlib)
 if(STRATONIX_WITH_CAIRO)
   target_link_libraries(stratonix_figures PRIVATE stx::cairo)

@@ -101,8 +101,13 @@ void ParametricModel::evaluate_fault(int f, std::span<const Vec3> pts, FaultEval
       out.distance[i] = F.sigma(q);
       out.extent[i] = F.extent_coord(a, b);
       bool active = true;
-      Vec3 r = faults_->relative_displacement(f, q, &active);
-      out.displacement[i] = active ? norm(r) : 0.0;
+      if (faults_->layered()) {
+        // the material's level comes from the full restoration of the present point
+        out.displacement[i] = faults_->layer_displacement(f, pts[i], &active);
+      } else {
+        Vec3 r = faults_->relative_displacement(f, q, &active);
+        out.displacement[i] = active ? norm(r) : 0.0;
+      }
     }
   };
   if (optimised_kernels() && pts.size() >= 2048) parallel_for(pts.size(), 1024, body);

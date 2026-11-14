@@ -55,6 +55,11 @@ class RigidHW final : public HangingWallField {
   double scale(double, double, double) const override { return 1.0; }
   std::string name() const override { return "rigid"; }
 };
+class LayerRigidHW final : public HangingWallField {
+ public:
+  double scale(double, double, double) const override { return 1.0; }
+  std::string name() const override { return "layer_rigid"; }
+};
 class DecayHW final : public HangingWallField {
  public:
   double scale(double sigma, double, double infl) const override {
@@ -81,6 +86,9 @@ STRATONIX_REGISTER(kin_vertical, registry::Kind::Kinematics, "vertical_offset", 
                    [] { return std::make_unique<VerticalOffset>(); })
 STRATONIX_REGISTER(hw_rigid, registry::Kind::HangingWall, "rigid", "1.0.0",
                    "Full displacement throughout the moving block", [] { return std::make_unique<RigidHW>(); })
+STRATONIX_REGISTER(hw_layer_rigid, registry::Kind::HangingWall, "layer_rigid", "1.0.0",
+                   "Each layer moves as a rigid slab by the throw where that layer meets the fault",
+                   [] { return std::make_unique<LayerRigidHW>(); })
 STRATONIX_REGISTER(hw_decay, registry::Kind::HangingWall, "decay", "1.0.0",
                    "Displacement decays linearly to zero at an influence distance",
                    [] { return std::make_unique<DecayHW>(); })
@@ -92,6 +100,7 @@ void register_fault_plugins() {
   STRATONIX_PLUGIN_ANCHOR(kin_dip_slip);
   STRATONIX_PLUGIN_ANCHOR(kin_vertical);
   STRATONIX_PLUGIN_ANCHOR(hw_rigid);
+  STRATONIX_PLUGIN_ANCHOR(hw_layer_rigid);
   STRATONIX_PLUGIN_ANCHOR(hw_decay);
   STRATONIX_PLUGIN_ANCHOR(hw_linear);
 }
@@ -135,6 +144,26 @@ double Fault::throw_at(double a, double b) const {
   return tmax * profile_value(pdip, taper_dip, eta) * profile_value(pstrike, taper_strike, xi);
 }
 
+double Fault::layer_b(double s, double a) const {
+  const std::size_t na = la_tab.size();
+  if (na < 2) return 0;
+  auto column = [&](std::size_t i) {
+    const double* ls = ls_tab.data() + l_start[i];
+    const double* lb = lb_tab.data() + l_start[i];
+    std::size_t n = l_start[i + 1] - l_start[i];
+    if (s <= ls[0]) return lb[0];
+    if (s >= ls[n - 1]) return lb[n - 1];
+    std::size_t j = static_cast<std::size_t>(std::upper_bound(ls, ls + n, s) - ls);
+    double w = (s - ls[j - 1]) / (ls[j] - ls[j - 1]);
+    return lb[j - 1] + w * (lb[j] - lb[j - 1]);
+  };
+  double t = std::clamp((a - la_tab.front()) / (la_tab.back() - la_tab.front()), 0.0, 1.0) * static_cast<double>(na - 1);
+  std::size_t i0 = std::min(static_cast<std::size_t>(t), na - 2);
+  double fa = t - static_cast<double>(i0);
+  double b0 = column(i0), b1 = column(i0 + 1);
+  return b0 + fa * (b1 - b0);
+}
+
 double Fault::extent_coord(double a, double b) const {
   double L2 = 0.5 * length;
   double ra = std::fabs(a) / L2;
@@ -165,6 +194,7 @@ static TipRule tip_rule(const desc::TipDesc& t, const desc::Description& d) {
     r.kind = TipRule::Kind::Depth;
     r.depth = t.depth.si();
   }
+  r.unfaulted = t.stratigraphy == "unfaulted";
   return r;
 }
 
@@ -220,12 +250,26 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
     f.kin = reg.create<Kinematics>(registry::Kind::Kinematics, fd.slip_mode);
     f.slip = f.kin->slip_vector(f.dd, f.dip);
     f.hw = reg.create<HangingWallField>(registry::Kind::HangingWall, fd.hw_type);
+    f.layered = f.hw->name() == "layer_rigid";
     f.influence = fd.influence_distance.present ? fd.influence_distance.si() : 0.0;
     if (!fd.abuts_fault.empty()) {
       f.abuts = d.fault_index(fd.abuts_fault);
       f.abut_hw_side = fd.abuts_side == "hanging_wall";
     }
     faults_.push_back(std::move(f));
+  }
+  st_ = &st;
+  {
+    const Domain dom = d.domain();
+    z_top_ = dom.z_top;
+    z_base_ = dom.z_base;
+    std::size_t nl = 0;
+    for (auto& f : faults_) nl += f.layered ? 1 : 0;
+    if (nl != 0 && nl != faults_.size())
+      throw Error(ErrorCode::Build, "hanging wall 'layer_rigid' must be used by all faults of a model or by none", "faults");
+    layered_ = nl != 0 && nl == faults_.size();
+    vertical_ = true;
+    for (auto& f : faults_) vertical_ = vertical_ && std::fabs(f.slip.x) < 1e-15 && std::fabs(f.slip.y) < 1e-15;
   }
   // Ages: youngest first (stable for equal ages: later in the list is treated as younger).
   order_.resize(faults_.size());
@@ -260,9 +304,15 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
 /// Elevation of horizon h at (x, y) in the frame of fault `rank` (stratigraphy displaced by the
 /// faults older than it, which are already resolved).
 double FaultNetwork::level_in_frame(const Structure& st, int h, double x, double y, int f, const Domain& dom) const {
+  const std::size_t r_older = static_cast<std::size_t>(rank_[static_cast<std::size_t>(f)]) + 1;
   auto s_at = [&](double z) {
     Vec3 q{x, y, z};
-    for (std::size_t k = static_cast<std::size_t>(rank_[static_cast<std::size_t>(f)]) + 1; k < order_.size(); ++k) {
+    if (layered_) {
+      // material on horizon h is at level h: restore it through the older faults directly
+      q = chain(q, r_older, order_.size(), static_cast<double>(h), nullptr, nullptr, 0);
+      return q.z - st.z(static_cast<std::size_t>(h), q.x, q.y);
+    }
+    for (std::size_t k = r_older; k < order_.size(); ++k) {
       int fi = order_[k];
       const Fault& F = faults_[static_cast<std::size_t>(fi)];
       bool side = F.sigma(q) > 0;
@@ -283,6 +333,7 @@ bool FaultNetwork::cannot_move(int fi, const Vec3& q) const {
   double a, b;
   f.profile_coords(q, a, b);
   if (std::fabs(a) >= 0.5 * f.length) return true;  // slip has no strike component
+  if (f.layered) return false;  // a layer can meet the fault far from the point
   if (b + f.slip_b < f.b_lo || b - f.slip_b > f.b_hi) return true;
   if (f.decays && std::fabs(f.sigma(q)) - f.slip_sigma >= f.influence) return true;
   return false;
@@ -296,7 +347,7 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
     Fault& f = faults_[static_cast<std::size_t>(k)];
     bool older_exist = r + 1 < order_.size();
     auto level = [&](const TipRule& rule, double x, double y, bool upper) -> double {
-      if (!older_exist) return rule_level(rule, st, x, y, dom, upper);
+      if (!older_exist || rule.unfaulted) return rule_level(rule, st, x, y, dom, upper);
       switch (rule.kind) {
         case TipRule::Kind::Horizon: return level_in_frame(st, rule.horizon, x, y, k, dom) - rule.offset;
         case TipRule::Kind::WithinUnit: {
@@ -383,19 +434,76 @@ void FaultNetwork::resolve_tips(const desc::Description& d, const Structure& st,
       }
       f.max_slip_gradient = gmax;
       log.value("fault." + f.name + ".max_throw_gradient_along_slip", fmt_fixed(gmax, 3));
-      if (gmax >= 1.0)
+      if (gmax >= 1.0 && !f.layered)
         throw Error(ErrorCode::Build,
                     "fault " + f.name + ": the throw changes by " + fmt_fixed(gmax, 2) +
                         " m per metre of slip near a tip (must be below 1): the hanging wall would overlap itself. "
                         "Lengthen the down-dip taper, move the tips apart or reduce the throw.",
                     "faults." + f.name + ".throw");
-      if (gmax >= 0.8)
+      if (gmax >= 0.8 && !f.layered)
         log.note("fault " + f.name + ": throw gradient along slip " + fmt_fixed(gmax, 2) + " is close to the limit of 1");
     }
     double bu0, bl0;
     f.tips(0, bu0, bl0);
     log.value("fault." + f.name + ".tips_depth_at_reference_m",
               fmt_fixed(-f.at(0, bu0).z, 2) + " / " + fmt_fixed(-f.at(0, bl0).z, 2));
+    if (layered_) {
+      // Where every level meets the plane in this fault's frame (older faults already resolved):
+      // exactly at the horizons, and from the level of plane points every 10 m down dip between.
+      const std::size_t nh = st.horizons(), KL = 129;
+      const std::size_t r_older = r + 1;
+      std::vector<std::vector<std::pair<double, double>>> cols(KL);
+      f.la_tab.assign(KL, 0.0);
+      parallel_for(KL, 4, [&](std::size_t i0, std::size_t i1) {
+        for (std::size_t i = i0; i < i1; ++i) {
+          double a = -0.5 * f.length + f.length * static_cast<double>(i) / (KL - 1);
+          f.la_tab[i] = a;
+          auto& c = cols[i];
+          for (std::size_t h = 0; h < nh; ++h) {
+            auto g = [&](double b) {
+              Vec3 p = f.at(a, b);
+              return p.z - level_in_frame(st, static_cast<int>(h), p.x, p.y, k, dom);
+            };
+            double lo = b_top - margin, hi = b_base + margin;
+            double glo = g(lo), ghi = g(hi);
+            if (glo > 0 && ghi < 0) c.emplace_back(illinois(g, lo, hi, glo, ghi, 1e-7), static_cast<double>(h));
+          }
+          const double db = 10.0;
+          for (double b = b_top; b <= b_base + 1e-9; b += db)
+            c.emplace_back(b, solve_layer(f.at(a, b), r_older, nullptr, 0));
+          std::sort(c.begin(), c.end());
+          // keep the level increasing down dip
+          std::vector<std::pair<double, double>> m;
+          for (auto& e : c)
+            if (m.empty() || e.second > m.back().second + 1e-12) m.push_back(e);
+          c.swap(m);
+        }
+      });
+      f.l_start.assign(KL + 1, 0);
+      f.ls_tab.clear();
+      f.lb_tab.clear();
+      for (std::size_t i = 0; i < KL; ++i) {
+        f.l_start[i] = f.ls_tab.size();
+        for (auto& [b, sl] : cols[i]) { f.lb_tab.push_back(b); f.ls_tab.push_back(sl); }
+        if (cols[i].empty()) { f.lb_tab.push_back(b_top); f.ls_tab.push_back(-1.0); }
+      }
+      f.l_start[KL] = f.ls_tab.size();
+      // Layers must keep their order after faulting: between neighbouring levels the throw may
+      // change by less than the layer is thick at the fault.
+      double worst = 0;
+      for (std::size_t i = 0; i < KL; i += 8)
+        for (std::size_t j = f.l_start[i] + 1; j < f.l_start[i + 1]; ++j) {
+          double ba = f.lb_tab[j - 1], bb = f.lb_tab[j];
+          double dz = (bb - ba) * std::sin(f.dip);
+          double dt = std::fabs(f.throw_at(f.la_tab[i], bb) - f.throw_at(f.la_tab[i], ba));
+          if (dz > 1e-6) worst = std::max(worst, dt / dz);
+        }
+      log.value("fault." + f.name + ".max_layer_throw_change_per_thickness", fmt_fixed(worst, 3));
+      if (worst >= 1.0)
+        throw Error(ErrorCode::Build, "fault " + f.name + ": the throw changes faster than the layers thicken at the fault (" +
+                                          fmt_fixed(worst, 2) + " m per metre); layers would overlap. Reduce the throw or move the tips apart.",
+                    "faults." + f.name + ".throw");
+    }
   }
 }
 
@@ -429,6 +537,10 @@ Vec3 FaultNetwork::relative_displacement(int fi, const Vec3& q, bool* active) co
       return {0, 0, 0};
     }
   }
+  if (layered_) {
+    double s = solve_layer(q, static_cast<std::size_t>(rank_[static_cast<std::size_t>(fi)]) + 1, nullptr, 0);
+    return f.slip * layer_throw(fi, s, q);
+  }
   double a, b;
   f.profile_coords(q, a, b);
   double t = f.throw_at(a, b);
@@ -441,6 +553,15 @@ Vec3 FaultNetwork::relative_displacement(int fi, const Vec3& q, bool* active) co
 
 Vec3 FaultNetwork::undo(int fi, const Vec3& q, int sgn, double* tau_out) const {
   const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  if (layered_) {
+    const std::size_t r = static_cast<std::size_t>(rank_[static_cast<std::size_t>(fi)]);
+    double s = solve_layer(q, r, nullptr, sgn);
+    bool active = true;
+    if (f.abuts >= 0) active = (faults_[static_cast<std::size_t>(f.abuts)].sigma(q) > 0) == f.abut_hw_side;
+    double tau = active ? layer_throw(fi, s, q) : 0.0;
+    if (tau_out) *tau_out = tau;
+    return q - f.slip * (sgn * tau);
+  }
   const Vec3 slip = f.slip;
   // tau(q0) along the line q0 = q - sgn * slip * tau; g(tau) = tau - amount(q0(tau)).
   auto amount = [&](double tau) {
@@ -467,6 +588,10 @@ Vec3 FaultNetwork::undo(int fi, const Vec3& q, int sgn, double* tau_out) const {
 }
 
 Vec3 FaultNetwork::restore(const Vec3& p, BlockCode* block, const BlockCode* forced) const {
+  if (layered_) {
+    double s = solve_layer(p, 0, forced, 0);
+    return chain(p, 0, order_.size(), s, block, forced, 0);
+  }
   const bool fast = optimised_kernels();
   Vec3 q = p;
   BlockCode code = 0;
@@ -484,6 +609,11 @@ Vec3 FaultNetwork::restore(const Vec3& p, BlockCode* block, const BlockCode* for
 }
 
 Vec3 FaultNetwork::restore_from_frame(const Vec3& p, int f, bool hw) const {
+  if (layered_) {
+    const std::size_t r = static_cast<std::size_t>(rank_[static_cast<std::size_t>(f)]);
+    double s = solve_layer(p, r, nullptr, hw ? 2 : -2);
+    return chain(p, r, order_.size(), s, nullptr, nullptr, hw ? 2 : -2);
+  }
   Vec3 q = p;
   bool fixed_side = ((fixed_block_ >> f) & 1u) != 0;
   if (hw != fixed_side) q = undo(f, q, hw ? 1 : -1);
@@ -498,6 +628,10 @@ Vec3 FaultNetwork::restore_from_frame(const Vec3& p, int f, bool hw) const {
 }
 
 Vec3 FaultNetwork::to_fault_frame(const Vec3& p, int f) const {
+  if (layered_) {
+    double s = solve_layer(p, 0, nullptr, 0);
+    return chain(p, 0, static_cast<std::size_t>(rank_[static_cast<std::size_t>(f)]), s, nullptr, nullptr, 0);
+  }
   const bool fast = optimised_kernels();
   Vec3 q = p;
   for (int fi : order_) {
@@ -510,6 +644,114 @@ Vec3 FaultNetwork::to_fault_frame(const Vec3& p, int f) const {
     q = undo(fi, q, side ? 1 : -1);
   }
   return q;
+}
+
+// ---- layer-rigid hanging walls -------------------------------------------------------------
+namespace {
+/// Level of elevation zr in a column whose horizon elevations are z[0..nh).
+double level_in_column(double zr, const double* z, std::size_t nh, double z_top, double z_base) {
+  const double top = std::max(z_top, z[0]), base = std::min(z_base, z[nh - 1]);
+  if (zr >= top) return -1.0 - (zr - top) / 1000.0;
+  if (zr <= base) return static_cast<double>(nh) + (base - zr) / 1000.0;
+  double up = top;
+  for (std::size_t l = 0; l <= nh; ++l) {
+    double dn = l < nh ? z[l] : base;
+    if (zr >= dn) {
+      double th = up - dn;
+      return static_cast<double>(l) - 1.0 + (th > 1e-12 ? (up - zr) / th : 0.0);
+    }
+    up = std::min(up, dn);
+  }
+  return static_cast<double>(nh);
+}
+}  // namespace
+
+double FaultNetwork::strat_coord(const Vec3& r) const {
+  const std::size_t nh = st_->horizons();
+  double zs[256];
+  std::vector<double> big;
+  double* z = zs;
+  if (nh > 256) { big.resize(nh); z = big.data(); }
+  st_->z_all(r.x, r.y, z);
+  return level_in_column(r.z, z, nh, z_top_, z_base_);
+}
+
+double FaultNetwork::layer_displacement(int fi, const Vec3& p, bool* active) const {
+  const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  Vec3 q = to_fault_frame(p, fi);
+  if (active) *active = true;
+  if (f.abuts >= 0 && (faults_[static_cast<std::size_t>(f.abuts)].sigma(q) > 0) != f.abut_hw_side) {
+    if (active) *active = false;
+    return 0.0;
+  }
+  double s = solve_layer(p, 0, nullptr, 0);
+  return std::fabs(layer_throw(fi, s, q)) * norm(f.slip);
+}
+
+double FaultNetwork::layer_throw(int fi, double s, const Vec3& q) const {
+  const Fault& f = faults_[static_cast<std::size_t>(fi)];
+  double a = dot(q - f.p0, f.s);
+  if (std::fabs(a) >= 0.5 * f.length) return 0.0;
+  return f.throw_at(a, f.layer_b(s, a));
+}
+
+Vec3 FaultNetwork::chain(const Vec3& q0, std::size_t r0, std::size_t r1, double s, BlockCode* code, const BlockCode* forced,
+                         int first) const {
+  Vec3 q = q0;
+  BlockCode c = 0;
+  for (std::size_t r = r0; r < r1 && r < order_.size(); ++r) {
+    const int fi = order_[r];
+    const Fault& F = faults_[static_cast<std::size_t>(fi)];
+    const bool fixed_side = ((fixed_block_ >> fi) & 1u) != 0;
+    bool side;
+    int sgn = 0;
+    if (r == r0 && (first == 1 || first == -1)) {
+      side = first > 0;
+      sgn = first;
+    } else {
+      if (r == r0 && (first == 2 || first == -2)) side = first > 0;
+      else side = forced ? ((*forced >> fi) & 1u) != 0 : F.sigma(q) > 0;
+      if (side != fixed_side) sgn = side ? 1 : -1;
+    }
+    if (side) c |= (BlockCode(1) << fi);
+    if (sgn == 0) continue;
+    if (F.abuts >= 0 && (faults_[static_cast<std::size_t>(F.abuts)].sigma(q) > 0) != F.abut_hw_side) continue;
+    q = q - F.slip * (sgn * layer_throw(fi, s, q));
+  }
+  if (code) *code = c;
+  return q;
+}
+
+double FaultNetwork::solve_layer(const Vec3& q, std::size_t r0, const BlockCode* forced, int first) const {
+  // With vertical slips the column never moves: read its horizons once.
+  const std::size_t nh = st_->horizons();
+  double zs[256];
+  std::vector<double> big;
+  double* zc = zs;
+  if (nh > 256) { big.resize(nh); zc = big.data(); }
+  if (vertical_) st_->z_all(q.x, q.y, zc);
+  auto g = [&](double s) {
+    Vec3 r = chain(q, r0, order_.size(), s, nullptr, forced, first);
+    return (vertical_ ? level_in_column(r.z, zc, nh, z_top_, z_base_) : strat_coord(r)) - s;
+  };
+  // Bracket from the largest possible displacement; widen if a dipping slip moved out of it.
+  double d = 0;
+  for (std::size_t r = r0; r < order_.size(); ++r) {
+    const Fault& F = faults_[static_cast<std::size_t>(order_[r])];
+    d += std::fabs(F.tmax) * norm(F.slip);
+  }
+  double lo = strat_coord(q + Vec3{0, 0, d + 1e-6}), hi = strat_coord(q - Vec3{0, 0, d + 1e-6});
+  double glo = g(lo), ghi = g(hi);
+  if (!(glo >= 0 && ghi <= 0)) {
+    lo = -1.0 - 1e4;
+    hi = static_cast<double>(st_->horizons()) + 1e4;
+    glo = g(lo);
+    ghi = g(hi);
+  }
+  if (glo == 0) return lo;
+  if (ghi == 0) return hi;
+  if ((glo > 0) == (ghi > 0)) return std::fabs(glo) < std::fabs(ghi) ? lo : hi;
+  return illinois(g, lo, hi, glo, ghi, 1e-12, 1e-13, 200);
 }
 
 }  // namespace stratonix
