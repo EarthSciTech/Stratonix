@@ -3,6 +3,22 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [1.3.1] - 2026-11-14 - Builds on Windows (MSVC) and Ubuntu 22.04; container image
+
+### Fixed
+- Windows (MSVC): plugin anchors have C linkage and are declared at file scope; before, MSVC
+  gave block-scope declarations a different linkage from their definitions (unresolved externals).
+- Linux: static libyaml and zlib are linked only when the whole archive is position-independent;
+  otherwise the shared libraries (Ubuntu 22.04's archives cannot go into the C API shared library).
+- Clang 14: no structured binding captured in a lambda (benchmark runner).
+- Windows checkouts keep LF line endings (`.gitattributes`), so the golden hash files and
+  examples compare byte for byte.
+
+### Added
+- Container image of the command-line program and C API (`docker/Dockerfile`), published to
+  GitHub Packages as `ghcr.io/earthscitech/stratonix` when a release is published.
+- Build and test presets for `linux-clang-release` and `linux-gcc-debug`.
+
 ## [1.3.0] - 2026-11-14 - Summary tables and faults that end inside the model
 
 ### Added

@@ -89,6 +89,15 @@ Options: `STRATONIX_WITH_CAIRO` (PNG/TIFF figures, default ON), `STRATONIX_WITH_
 See `CONTRIBUTING.md` for how to add a plugin or an optimised kernel, and the design
 specification STX-TN-01 for the architecture.
 
+## Container image
+
+```
+docker run --rm -v "$PWD:/work" ghcr.io/earthscitech/stratonix:latest validate model.yaml
+docker run --rm -v "$PWD:/work" ghcr.io/earthscitech/stratonix:latest build model.yaml -o out
+```
+
+Windows installer, portable zip and Linux archive: see the Releases page.
+
 ## Licence
 
 MIT, see `LICENSE`. Third-party components and their licences are listed in `THIRD_PARTY.md`.

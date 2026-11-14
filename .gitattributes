@@ -1,0 +1,12 @@
+# LF everywhere: golden hash files, examples and test inputs are compared byte for byte, so a
+# Windows checkout must not convert them to CRLF.
+* text=auto eol=lf
+*.png binary
+*.tif binary
+*.tiff binary
+*.zip binary
+*.pptx binary
+*.xlsx binary
+*.docx binary
+*.bat text eol=crlf
+*.cmd text eol=crlf
