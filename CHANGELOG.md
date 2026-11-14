@@ -3,6 +3,18 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [1.1.1] - 2026-11-14 - Figure fixes found on a 23-horizon model (Prompt 12)
+
+### Fixed
+- Legends with many entries (more than fit one column above the key-numbers box) are set two to a
+  row in a smaller font, so the key-numbers box is no longer pushed past the footer.
+- Legend groups keep stratigraphic order (order of first appearance) instead of alphabetical order;
+  units without a role stay last.
+- 3D views: the see-through opacity of shallower horizons now falls with their number so that at
+  least 20 % of the light from the faults and the deepest horizon passes through all of them
+  (opacity = min(0.4, 1 - 0.2^(1/n))). With 22 shallower horizons the faults were invisible.
+  Golden hashes of the two 3D figures in the synthetic package are updated for this change.
+
 ## [1.1.0] - 2026-11-13 - Opening v2: data-conditioned implicit builder (Prompt 14)
 
 ### Added

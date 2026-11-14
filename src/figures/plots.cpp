@@ -51,27 +51,46 @@ void title(Figure& f, const std::string& t, const std::string& sub) {
 
 /// Legend entries drawn top-down from (x, y); returns the next y.
 struct LegendEntry { std::string group, label; Color fill; bool line = false; Color line_color; double width = 1; int marker = 0; };  // marker 1 diamond, 2 triangle, 3 cross
-double legend(Figure& f, double x, double y, double w, const std::vector<LegendEntry>& es) {
+void legend_symbol(Figure& f, double x, double y, const LegendEntry& e) {
+  if (e.marker == 1) f.path({{x + 7, y + 4}, {x + 10, y + 1}, {x + 13, y + 4}, {x + 10, y + 7}}, true, e.fill, kWell, 0.9);
+  else if (e.marker == 2) f.path({{x + 10, y}, {x + 14, y + 7}, {x + 6, y + 7}}, true, e.fill, none());
+  else if (e.marker == 3) { f.line({x + 7, y + 1}, {x + 13, y + 7}, e.line_color, 1.4); f.line({x + 7, y + 7}, {x + 13, y + 1}, e.line_color, 1.4); }
+  else if (e.line) f.line({x + 2, y + 4}, {x + 18, y + 4}, e.line_color, e.width);
+  else f.rect(x + 2, y, 16, 8, e.fill, rgb(90, 90, 90), 0.3);
+}
+
+/// Legend from (x, y) down, grouped; when one column would pass max_y, entries are set two to a
+/// row in a smaller font. Returns the next y.
+double legend(Figure& f, double x, double y, double w, const std::vector<LegendEntry>& es, double max_y = 1e9) {
+  std::size_t groups = 0;
+  std::string g0;
+  for (auto& e : es)
+    if (e.group != g0) { g0 = e.group; ++groups; }
+  const bool two = y + 16.0 * static_cast<double>(groups) + 11.0 * static_cast<double>(es.size()) > max_y;
+  const double cw = two ? w / 2 : w, row = two ? 9.5 : 11, font = two ? 6.2 : 7;
   std::string group;
+  int col = 0;
   for (auto& e : es) {
     if (e.group != group) {
+      if (col == 1) { y += row; col = 0; }
       group = e.group;
       y += 4;
       f.text({x, y + 8}, group, 7.5, Anchor::Start, true, kInk);
       y += 12;
     }
-    if (e.marker == 1) f.path({{x + 7, y + 4}, {x + 10, y + 1}, {x + 13, y + 4}, {x + 10, y + 7}}, true, e.fill, kWell, 0.9);
-    else if (e.marker == 2) f.path({{x + 10, y}, {x + 14, y + 7}, {x + 6, y + 7}}, true, e.fill, none());
-    else if (e.marker == 3) { f.line({x + 7, y + 1}, {x + 13, y + 7}, e.line_color, 1.4); f.line({x + 7, y + 7}, {x + 13, y + 1}, e.line_color, 1.4); }
-    else if (e.line) f.line({x + 2, y + 4}, {x + 18, y + 4}, e.line_color, e.width);
-    else f.rect(x + 2, y, 16, 8, e.fill, rgb(90, 90, 90), 0.3);
+    double xx = x + col * cw;
+    legend_symbol(f, xx, y, e);
     std::string lab = e.label;
-    while (text_width(lab, 7) > w - 26 && lab.size() > 4) lab = lab.substr(0, lab.size() - 2);
-    f.text({x + 24, y + 7}, lab, 7, Anchor::Start, false, kInk);
-    y += 11;
+    while (text_width(lab, font) > cw - 26 && lab.size() > 4) lab = lab.substr(0, lab.size() - 2);
+    f.text({xx + 24, y + 7}, lab, font, Anchor::Start, false, kInk);
+    if (two && col == 0) col = 1;
+    else { col = 0; y += row; }
   }
+  if (col == 1) y += row;
   return y;
 }
+
+double key_box_height(const FigureContext& c) { return c.key_numbers.empty() ? 0 : 16 + 10.5 * static_cast<double>(c.key_numbers.size()); }
 
 double key_box(Figure& f, const FigureContext& c, double x, double y, double w) {
   if (c.key_numbers.empty()) return y;
@@ -95,7 +114,13 @@ std::vector<LegendEntry> unit_legend(const FigureContext& c) {
     std::string role = u < c.unit_roles.size() && !c.unit_roles[u].empty() ? c.unit_roles[u] : "Units";
     es.push_back({role, inf.units[u].name, unit_color(c, u)});
   }
-  std::stable_sort(es.begin(), es.end(), [](auto& a, auto& b) { return a.group < b.group && a.group != "Units"; });
+  // groups in order of first appearance (stratigraphic order); units without a role last
+  std::vector<std::string> order;
+  for (auto& e : es)
+    if (e.group != "Units" && std::find(order.begin(), order.end(), e.group) == order.end()) order.push_back(e.group);
+  order.push_back("Units");
+  auto rank = [&](const std::string& g) { return std::find(order.begin(), order.end(), g) - order.begin(); };
+  std::stable_sort(es.begin(), es.end(), [&](auto& a, auto& b) { return rank(a.group) < rank(b.group); });
   return es;
 }
 }  // namespace
@@ -276,7 +301,7 @@ Figure section_figure(const FigureContext& c, const repr::Section& s, const std:
   es.push_back({"Lines", "Horizon", none(), true, kInk, 0.6});
   es.push_back({"Lines", "Fault (between tips)", none(), true, kFault, 1.3});
   if (!c.wells.empty()) es.push_back({"Lines", "Well and tops", none(), true, kWell, 1.0});
-  ry = legend(f, rx, ry, rw, es) + 6;
+  ry = legend(f, rx, ry, rw, es, 540.0 - 30 - key_box_height(c) - 8 - (dw && dw->size() == 4 ? 80 : 0)) + 6;
   ry = key_box(f, c, rx, ry, rw) + 8;
   if (dw && dw->size() == 4) {
     double ds0 = (*dw)[0], ds1 = (*dw)[1], dz0 = -(*dw)[2], dz1 = -(*dw)[3];
@@ -515,7 +540,7 @@ Figure map_figure(const FigureContext& c, int h, const repr::FaultedSurface& sur
     es.push_back({"Symbols", "Spill point", none(), false, rgb(0, 110, 50), 1, 3});
   }
   if (!c.wells.empty()) es.push_back({"Symbols", "Well", rgb(255, 255, 255), false, none(), 1, 1});
-  double ly = legend(f, rx, ry + 190, 190, es) + 8;
+  double ly = legend(f, rx, ry + 190, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
   key_box(f, c, rx, ly, 190);
   footer(f, c);
   return f;
@@ -536,9 +561,13 @@ Figure view3d_figure(const FigureContext& c, double az, double el, const std::st
     auto fs = repr::fault_surface(*c.model, static_cast<int>(ff), sp);
     meshes.push_back({fs.mesh, rgb(200, 50, 40), 1.0});
   }
+  // With many horizons the see-through layers are made fainter so that at least 20 % of the light
+  // from the faults and the deepest horizon passes through all of them.
+  const double n_see = std::max<double>(1.0, static_cast<double>(inf.horizons.size()) - 1.0);
+  const double alpha = std::min(0.4, 1.0 - std::pow(0.2, 1.0 / n_see));
   for (std::size_t k = inf.horizons.size(); k-- > 0;) {
     auto fs = repr::horizon_grid_faulted(*c.model, static_cast<int>(k), g);
-    meshes.push_back({repr::grid_to_mesh(fs.z), unit_color(c, k + 1), k + 1 == inf.horizons.size() ? 1.0 : 0.4});
+    meshes.push_back({repr::grid_to_mesh(fs.z), unit_color(c, k + 1), k + 1 == inf.horizons.size() ? 1.0 : alpha});
   }
   BBox box = d.box();
   Image im = render_meshes(meshes, az, el, c.vertical_exaggeration, 1800, 1000, box);
@@ -553,7 +582,7 @@ Figure view3d_figure(const FigureContext& c, double az, double el, const std::st
   std::vector<LegendEntry> es;
   for (std::size_t h = 0; h < inf.horizons.size(); ++h) es.push_back({"Horizons (top of unit)", inf.horizons[h].name, unit_color(c, h + 1)});
   es.push_back({"Faults", "Fault surfaces (clipped to tips)", rgb(200, 50, 40)});
-  double ly = legend(f, 842 - 214, 56, 196, es) + 8;
+  double ly = legend(f, 842 - 214, 56, 196, es, 560.0 - 30 - key_box_height(c) - 8) + 8;
   key_box(f, c, 842 - 214, ly, 196);
   footer(f, c);
   return f;
@@ -677,7 +706,7 @@ Figure fence_figure(const FigureContext& c, const std::vector<repr::Section>& le
   es.push_back({"Lines", "Horizon", none(), true, kInk, 0.5});
   es.push_back({"Lines", "Fault (between tips)", none(), true, kFault, 1.2});
   es.push_back({"Lines", "Well and tops", none(), true, kWell, 1.0});
-  double ly = legend(f, 842 - 214, 56, 196, es) + 8;
+  double ly = legend(f, 842 - 214, 56, 196, es, 560.0 - 30 - key_box_height(c) - 8) + 8;
   key_box(f, c, 842 - 214, ly, 196);
   footer(f, c);
   return f;
