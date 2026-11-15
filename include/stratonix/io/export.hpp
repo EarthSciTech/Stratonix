@@ -18,6 +18,7 @@
 #include "stratonix/model/model.hpp"
 #include "stratonix/registry/registry.hpp"
 #include "stratonix/repr/faultrock.hpp"
+#include "stratonix/repr/grid.hpp"
 #include "stratonix/repr/repr.hpp"
 
 namespace stratonix::io {
@@ -63,6 +64,17 @@ std::string write_well_tops(const std::vector<WellTopRow>& t, const std::vector<
 std::vector<WellTopRow> read_well_tops(const std::string& text);
 /// Deviation survey as MD X Y Z (elevation) rows with a commented header.
 std::string write_well_path(const WellPath& w, int decimals = 2);
+
+// ---- GRDECL (Eclipse keyword format, stage 3B) ----------------------------------------------
+/// Grid keywords SPECGRID, COORD, ZCORN, ACTNUM (depth positive down), the integer properties
+/// ZONE, BLOCK and FACIES, real properties, MULTX / MULTY and FAULTS; every keyword has a comment
+/// header with provenance, unit and evidence class.
+struct GrdeclInfo {
+  std::vector<std::string> header;        ///< comment lines at the top of the file
+  std::vector<std::string> fault_names;   ///< by fault index, for FAULTS
+};
+std::string write_grdecl(const repr::CornerPointGrid& g, const repr::PropertySet* props,
+                         const repr::TransmissibilityResult* trans, const GrdeclInfo& info, int decimals = 3);
 
 // ---- Neutral formats -------------------------------------------------------------------------
 /// VTK XML unstructured grid (ASCII) of triangles or polylines with optional point and cell arrays.

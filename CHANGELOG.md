@@ -63,6 +63,14 @@ has its own version (`stratonix_schema`).
   - away from faults: 0.05 to 2.2 m;
   - near faults: up to 3.3 m;
   - estimated throws within 4.5 %.
+- Stage 3B specification (STX-TN-12): grids and properties. It covers corner-point grids with
+  fault-conforming pillars and zone layering (proportional, follow top, follow base), tetrahedral
+  grids derived from them (decision 12), zones, facies, porosity from compaction trends,
+  labelled transforms, Manzocchi (1999) fault transmissibility multipliers, an upscaling
+  interface, GRDECL and RESQML (FESAPI) exporters, and grid checks C23 to C25. Interfaces,
+  additive and not yet built: `repr/grid.hpp`, the model capability `PorosityQuery` and
+  `io::write_grdecl`.
+- Tests: `test_v3_grids` (thirteen cases), expected to fail until Prompts 38 and 39.
 
 ### Changed
 - GemPy and LoopStructural input sets: no pick where a series relation removes a horizon

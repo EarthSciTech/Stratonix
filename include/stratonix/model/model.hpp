@@ -111,6 +111,16 @@ struct ColumnQuery {
   virtual void column(double x, double y, double* elevations) const = 0;
 };
 
+/// Compaction porosity a model may offer through capability("porosity") (stage 3B, STX-TN-12
+/// section 2): the mean porosity of model unit `unit` between two present-day points on a
+/// vertical (top above base), from the unit's compaction law over their restored depths below
+/// the surface. NaN when the unit has no compaction law.
+struct PorosityQuery {
+  virtual ~PorosityQuery() = default;
+  virtual bool has_law(int unit) const = 0;
+  virtual double mean_porosity(int unit, const Vec3& top, const Vec3& base) const = 0;
+};
+
 /// Which fields evaluate() should fill.
 enum EvalFields : unsigned { kEvalUnit = 1u, kEvalBlock = 2u, kEvalScalars = 4u, kEvalAll = 7u };
 

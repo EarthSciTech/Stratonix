@@ -19,7 +19,8 @@ add_library(stratonix_repr STATIC
   src/repr/surfaces.cpp
   src/repr/faultrock.cpp
   src/repr/faults_wells.cpp
-  src/repr/closure.cpp)
+  src/repr/closure.cpp
+  src/repr/grid.cpp)
 target_link_libraries(stratonix_repr PUBLIC stratonix_model)
 stx_layer(stratonix_repr 4)
 
@@ -37,6 +38,7 @@ add_library(stratonix_io STATIC
   src/io/exporters.cpp
   src/io/neutral.cpp
   src/io/importers.cpp
+  src/io/grid_export.cpp
   src/io/register.cpp)
 target_link_libraries(stratonix_io PUBLIC stratonix_engines stratonix_repr)
 stx_layer(stratonix_io 5)

@@ -26,6 +26,10 @@ stx_test(test_v2_faultrock stratonix_package)
 # Prompt 36.
 stx_test(test_v3_data stratonix_package)
 set_tests_properties(test_v3_data PROPERTIES TIMEOUT 5400)
+# Stage 3B analytical tests (STX-TN-12), written before the features (Prompt 37) and made to pass
+# by Prompts 38 and 39.
+stx_test(test_v3_grids stratonix_package)
+set_tests_properties(test_v3_grids PROPERTIES WILL_FAIL TRUE TIMEOUT 3600)
 # Stage 3A benchmark: 100 000 points within 300 s (release builds; others skip with code 77).
 stx_test(bench_implicit_100k stratonix_package)
 set_tests_properties(bench_implicit_100k PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
