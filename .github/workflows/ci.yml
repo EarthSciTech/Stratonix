@@ -74,7 +74,7 @@ jobs:
       - name: FESAPI revision
         id: fesapi
         run: echo "sha=$(git ls-remote https://github.com/F2I-Consulting/fesapi.git HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         id: fesapi-cache
         with:
           path: fesapi-install
@@ -88,8 +88,14 @@ jobs:
                 -DWITH_EXAMPLE=OFF -DWITH_JAVA_WRAPPING=OFF -DWITH_PYTHON_WRAPPING=OFF -DWITH_DOTNET_WRAPPING=OFF
           cmake --build fesapi-build --parallel
           cmake --install fesapi-build
+      - uses: actions/cache/save@v4
+        if: steps.fesapi-cache.outputs.cache-hit != 'true'
+        with:
+          path: fesapi-install
+          key: fesapi-${{ steps.fesapi.outputs.sha }}-ubuntu-22.04
       - name: FESAPI interface used by Stratonix (for the log)
         run: |
+          grep -rn -A3 "createDiscreteProperty(\|createLocalDepth3dCrs(" fesapi-install/include/fesapi/common/DataObjectRepository.h | head -60 || true
           grep -rhn "setGeometryAsCoordinateLineNodes\|createLocalDepth3dCrs\|createDiscreteProperty\|createContinuousProperty\|Hdf5Array3dOfValues\|createHdfProxy\|setEnabledCells\|serializeFrom\|EpcDocument(" fesapi-install/include | head -80 || true
           find fesapi-install -name "*.so*" | head
       - name: Build Stratonix with FESAPI

@@ -40,6 +40,13 @@ using CumCount = ElemOf<7>;      // splitCoordinateLineColumnCumulativeCount
 using ColumnIndex = ElemOf<8>;   // splitCoordinateLineColumns
 }  // namespace
 
+namespace {
+auto* repr_active(COMMON_NS::DataObjectRepository& repo, RESQML2_NS::IjkGridExplicitRepresentation* ijk) {
+  return repo.createDiscreteProperty(ijk, "", "ACTIVE", 1, gsoap_eml2_3::eml23__IndexableElement::cells,
+                                     gsoap_resqml2_0_1::resqml20__ResqmlPropertyKind::active);
+}
+}  // namespace
+
 std::vector<ExportedFile> write_resqml_grid(ExportContext& c, const fs::path& folder) {
   const auto& g = *c.cells.grid;
   const int nx = g.nx, ny = g.ny, nz = g.nz;
@@ -121,20 +128,24 @@ std::vector<ExportedFile> write_resqml_grid(ExportContext& c, const fs::path& fo
                                                        static_cast<unsigned int>(nz));
   ijk->setGeometryAsCoordinateLineNodes(gsoap_resqml2_0_1::resqml20__PillarShape::straight, gsoap_resqml2_0_1::resqml20__KDirection::down, false,
                                         pts.data(), hdf, splits.size(), pillar_of.data(), cum.data(), cols.data(), nullptr, crs);
-  std::vector<std::uint8_t> enabled(g.ncell());
-  for (std::size_t n = 0; n < enabled.size(); ++n) enabled[n] = static_cast<std::uint8_t>(g.actnum[n] != 0);
-  ijk->setEnabledCells(enabled.data(), hdf);
+  // active cells: a discrete property of the RESQML kind "active" (read as such by resqpy)
+  {
+    std::vector<std::int8_t> act(g.ncell());
+    for (std::size_t n = 0; n < act.size(); ++n) act[n] = static_cast<std::int8_t>(g.actnum[n] != 0);
+    auto* ap = repr_active(repo, ijk);
+    ap->pushBackInt8Hdf5Array3dOfValues(act.data(), static_cast<std::uint64_t>(nx), static_cast<std::uint64_t>(ny), static_cast<std::uint64_t>(nz), hdf, -1);
+  }
   std::size_t nprops = 0;
   if (c.cells.props)
     for (auto& p : c.cells.props->props) {
       if (p.integer) {
         std::vector<std::int64_t> v(p.v.size());
         for (std::size_t n = 0; n < v.size(); ++n) v[n] = std::isnan(p.v[n]) ? -1 : std::llround(p.v[n]);
-        auto* dp = repo.createDiscreteProperty(ijk, "", p.name, 1, gsoap_eml2_3::resqml22__IndexableElement::cells,
+        auto* dp = repo.createDiscreteProperty(ijk, "", p.name, 1, gsoap_eml2_3::eml23__IndexableElement::cells,
                                                gsoap_resqml2_0_1::resqml20__ResqmlPropertyKind::discrete);
         dp->pushBackInt64Hdf5Array3dOfValues(v.data(), static_cast<std::uint64_t>(nx), static_cast<std::uint64_t>(ny), static_cast<std::uint64_t>(nz), hdf, -1);
       } else {
-        auto* cp = repo.createContinuousProperty(ijk, "", p.name, 1, gsoap_eml2_3::resqml22__IndexableElement::cells,
+        auto* cp = repo.createContinuousProperty(ijk, "", p.name, 1, gsoap_eml2_3::eml23__IndexableElement::cells,
                                                  gsoap_resqml2_0_1::resqml20__ResqmlUom::Euc, gsoap_resqml2_0_1::resqml20__ResqmlPropertyKind::continuous);
         std::vector<double> v = p.v;  // NaN is the missing value
         cp->pushBackDoubleHdf5Array3dOfValues(v.data(), static_cast<std::uint64_t>(nx), static_cast<std::uint64_t>(ny), static_cast<std::uint64_t>(nz), hdf);
@@ -143,7 +154,6 @@ std::vector<ExportedFile> write_resqml_grid(ExportContext& c, const fs::path& fo
     }
   COMMON_NS::EpcDocument doc(epc.string());
   doc.serializeFrom(repo);
-  doc.close();
   hdf->close();
   return {{"grid/" + base + ".epc", "RESQML 2.0.1 EPC package (FESAPI)", "RESQML 2.0.1 (*.epc)",
            "IJK grid " + std::to_string(nx) + " x " + std::to_string(ny) + " x " + std::to_string(nz) + ", " + std::to_string(splits.size()) +
