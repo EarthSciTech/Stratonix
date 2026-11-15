@@ -105,6 +105,14 @@ has its own version (`stratonix_schema`).
 - Upscaling interface: registry kind `Upscaler` with `volume_weighted_mean`; the grid extractors
   `corner_point` and `tetrahedral` are registry plugins of kind `Extractor`.
 - Tests: `test_v3_grids` (thirteen cases, all passing since Prompt 39).
+- Stage 3C specification (STX-TN-13): uncertainty. Distributions on labelled parameters
+  (uniform, normal, triangular, discrete) with Gaussian-copula correlations, scenarios of
+  alternative mechanisms with labelled weights, a seeded ensemble runner (xoshiro256** seeded by
+  SplitMix64 per member), key-number statistics, one-at-a-time and first-order variance-based
+  sensitivity, probability maps, and C API 1.2 functions to set a parameter before building.
+  Interfaces, additive and not yet built: `package/uncertainty.hpp`, the C API 1.2 functions
+  (returning STX_E_NOT_IMPLEMENTED).
+- Tests: `test_v3_uncertainty` (ten cases), expected to fail until Prompt 41.
 
 ### Changed
 - GemPy and LoopStructural input sets: no pick where a series relation removes a horizon

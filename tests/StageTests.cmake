@@ -33,6 +33,10 @@ set_tests_properties(test_v3_grids PROPERTIES TIMEOUT 3600)
 if(STRATONIX_WITH_FESAPI)
   target_compile_definitions(test_v3_grids PRIVATE STRATONIX_HAVE_FESAPI=1)
 endif()
+# Stage 3C analytical tests (STX-TN-13), written before the features (Prompt 40) and made to pass
+# by Prompt 41.
+stx_test(test_v3_uncertainty stratonix_package)
+set_tests_properties(test_v3_uncertainty PROPERTIES WILL_FAIL TRUE TIMEOUT 3600)
 # Stage 3A benchmark: 100 000 points within 300 s (release builds; others skip with code 77).
 stx_test(bench_implicit_100k stratonix_package)
 set_tests_properties(bench_implicit_100k PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)

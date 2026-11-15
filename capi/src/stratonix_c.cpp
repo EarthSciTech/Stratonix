@@ -151,4 +151,24 @@ stx_status stx_package(const char* path, const char* out_dir, const char* option
   });
 }
 
+// ---- C API 1.2: parameters set before building (STX-TN-13 section 7); implemented by Prompt 41 ----
+stx_status stx_description_load(const char*, stx_description** out) {
+  if (out) *out = nullptr;
+  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_description_load: not implemented yet (STX-TN-13, Prompt 41)"); });
+}
+void stx_description_free(stx_description*) {}
+stx_status stx_description_get_parameter(const stx_description*, const char*, double*, char*, size_t) {
+  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_description_get_parameter: not implemented yet (STX-TN-13, Prompt 41)"); });
+}
+stx_status stx_description_set_parameter(stx_description*, const char*, double, const char*) {
+  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_description_set_parameter: not implemented yet (STX-TN-13, Prompt 41)"); });
+}
+stx_status stx_model_build_from(const stx_description*, stx_model** out) {
+  if (out) *out = nullptr;
+  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_model_build_from: not implemented yet (STX-TN-13, Prompt 41)"); });
+}
+stx_status stx_ensemble_run(const char*, const char*, const char*) {
+  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_ensemble_run: not implemented yet (STX-TN-13, Prompt 41)"); });
+}
+
 }  // extern "C"

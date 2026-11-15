@@ -16,7 +16,7 @@ extern "C" {
 #endif
 
 #define STX_CAPI_VERSION_MAJOR 1
-#define STX_CAPI_VERSION_MINOR 1
+#define STX_CAPI_VERSION_MINOR 2
 
 /** Status codes (mirror stratonix::ErrorCode; values never change).
  *  STX_OK                  success
@@ -88,6 +88,26 @@ stx_status stx_export(const char* description_path, const char* out_dir, const c
  *  with the keys of the package configuration (formats, figures, zip, terms_of_use, contact,
  *  assumptions, limitations, banned_patterns, translations, default_patterns). */
 stx_status stx_package(const char* description_path, const char* out_dir, const char* options_json);
+
+/* ---- Since C API 1.2 (stage 3C, STX-TN-13 section 7): parameters set before building ---- */
+
+/** Opaque handle to a loaded description whose parameters can be set before building. */
+typedef struct stx_description stx_description;
+
+/** Load and validate a description file. */
+stx_status stx_description_load(const char* description_path, stx_description** out);
+void stx_description_free(stx_description* d);
+/** Value of a scalar parameter by path (e.g. "faults.F1.throw.max") in its own unit, which is
+ *  copied into `unit` (NUL-terminated, truncated to unit_len). */
+stx_status stx_description_get_parameter(const stx_description* d, const char* path, double* value, char* unit, size_t unit_len);
+/** Set a scalar parameter by path. `unit` NULL: the parameter's own unit; otherwise a unit of the
+ *  same dimension, converted. The value is labelled user_instruction, "set through the C API". */
+stx_status stx_description_set_parameter(stx_description* d, const char* path, double value, const char* unit);
+/** Validate the (edited) description and build its model. */
+stx_status stx_model_build_from(const stx_description* d, stx_model** out);
+/** Run the ensemble of a description's uncertainty block into out_dir (options_json: members,
+ *  seed, threads, figures; NULL for the description's values). */
+stx_status stx_ensemble_run(const char* description_path, const char* out_dir, const char* options_json);
 
 #ifdef __cplusplus
 }
