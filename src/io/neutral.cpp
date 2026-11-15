@@ -670,7 +670,12 @@ class LoopExporter final : public Exporter {
       c.model().evaluate_fault(static_cast<int>(f), m.v, fe);
       double dmax = 0;
       for (double v : fe.displacement) dmax = std::max(dmax, v);
-      faults_json += std::string(f ? ", " : "") + "{\"name\": \"" + fn + "\", \"displacement_max_m\": " + num(dmax, 3) + "}";
+      std::string abuts;
+      for (auto& r : inf.faults[f].relations)
+        for (const char* pre : {"abuts ", "splay of "})
+          if (r.rfind(pre, 0) == 0) abuts = petrel_name(r.substr(std::string(pre).size()));
+      faults_json += std::string(f ? ", " : "") + "{\"name\": \"" + fn + "\", \"displacement_max_m\": " + num(dmax, 3) +
+                     (abuts.empty() ? std::string() : ", \"abuts\": \"" + abuts + "\"") + "}";
     }
     faults_json += "]";
     put(folder, "loopstructural/data.csv", write_csv(t, {}));  // no comments: read directly by pandas

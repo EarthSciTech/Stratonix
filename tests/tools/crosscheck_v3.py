@@ -78,22 +78,45 @@ def first_crossing(values, zs, target):
     return out
 
 
-def loopstructural_surfaces(root, setup, rows, horizons, grids):  # pragma: no cover - needs LoopStructural
+# LoopStructural set-ups tried by --diagnose (the first is the acceptance set-up):
+#   order: "young_first" creates the series youngest first, each erosional base added as an
+#          unconformity right after its series; "old_first" creates the older series first and
+#          adds the unconformity after the younger one; "none" adds no unconformity.
+#   abut:  apply the exported fault abutting relations (add_abutting_fault).
+VARIANTS = [dict(order="young_first", abut=True), dict(order="old_first", abut=True), dict(order="none", abut=True),
+            dict(order="young_first", abut=False)]
+
+
+def loopstructural_surfaces(root, setup, rows, horizons, grids, variant=None):  # pragma: no cover - needs LoopStructural
     import pandas as pd
     from LoopStructural import GeologicalModel
+    variant = variant or VARIANTS[0]
     df = pd.read_csv(root / "loopstructural/data.csv")
     df = df.rename(columns={"gx": "nx", "gy": "ny", "gz": "nz"})
     df = df.drop(columns=[c for c in df.columns if c.startswith("stx_")])
     model = GeologicalModel(setup["origin"], setup["maximum"])
     model.data = df
+    faults = {}
     for f in setup["faults_oldest_first"]:
-        model.create_and_add_fault(f["name"], f["displacement_max_m"], nelements=20000, interpolatortype="FDI")
+        faults[f["name"]] = model.create_and_add_fault(f["name"], f["displacement_max_m"], nelements=20000, interpolatortype="FDI")
+        if variant["abut"] and f.get("abuts") in faults:
+            try:
+                faults[f["name"]].add_abutting_fault(faults[f["abuts"]])
+            except Exception as e:  # noqa: BLE001 - report and go on without the relation
+                print("  abutting %s on %s not applied: %s" % (f["name"], f["abuts"], e))
     series = setup.get("series_youngest_first") or [{"name": "strati", "base": "conformable", "horizons": horizons}]
-    for s in series:
-        feat = model.create_and_add_foliation(s["name"], interpolatortype="FDI", nelements=100000)
-        if s["base"] == "erosional":
-            base = s["horizons"][-1]
-            model.add_unconformity(feat, setup["strati_values"][base])
+    if variant["order"] == "old_first":
+        feats = {}
+        for s in reversed(series):
+            feats[s["name"]] = model.create_and_add_foliation(s["name"], interpolatortype="FDI", nelements=100000)
+            if s["base"] == "erosional":
+                model.add_unconformity(feats[s["name"]], setup["strati_values"][s["horizons"][-1]])
+    else:
+        for s in series:
+            feat = model.create_and_add_foliation(s["name"], interpolatortype="FDI", nelements=100000)
+            if s["base"] == "erosional" and variant["order"] == "young_first":
+                base = s["horizons"][-1]
+                model.add_unconformity(feat, setup["strati_values"][base])
     model.update()
     feature_of = {h: s["name"] for s in series for h in s["horizons"]}
     out = {}
@@ -172,6 +195,50 @@ def fault_throws(rows, horizons, surfaces, fault, feet):
     return float(np.median(throws)) if throws else float("nan")
 
 
+def diagnose(exe, exdir):  # pragma: no cover - needs LoopStructural
+    """Every LoopStructural set-up in VARIANTS on every example: mean |dz| away from faults per
+    horizon and throws, printed for choosing the set-up."""
+    for ex in EXAMPLES:
+        with tempfile.TemporaryDirectory() as td:
+            out = pathlib.Path(td) / "out"
+            subprocess.run([exe, "export", str(exdir / f"{ex}.yaml"), "-o", str(out), "--formats", "petrel,csv,loopstructural"], check=True,
+                           stdout=subprocess.DEVNULL)
+            root = out / "exports"
+            setup = json.loads((root / "loopstructural/model_setup.json").read_text())
+            rows = list(csv.DictReader(io.StringIO((root / "loopstructural/data.csv").read_text())))
+            horizons = [h for h in setup["strati_values"]]
+            grids, feet = {}, {}
+            for h in horizons:
+                X, Y, z, dx = read_irap(root / "horizons" / f"{h}_faulted.irap")
+                grids[h] = (X[::STRIDE, ::STRIDE], Y[::STRIDE, ::STRIDE], z[::STRIDE, ::STRIDE], dx * STRIDE)
+                px = [float(r["X"]) for r in rows if r["stx_horizon"] == h and r["val"]]
+                py = [float(r["Y"]) for r in rows if r["stx_horizon"] == h and r["val"]]
+                feet[h] = near_data(grids[h][0], grids[h][1], px, py, FOOTPRINT)
+            for v in VARIANTS:
+                if not setup.get("series_youngest_first") and v["order"] != "young_first":
+                    continue
+                if not any(f.get("abuts") for f in setup["faults_oldest_first"]) and not v["abut"]:
+                    continue
+                try:
+                    other = loopstructural_surfaces(root, setup, rows, horizons, grids, v)
+                except Exception as e:  # noqa: BLE001
+                    print("DIAG %s %s: failed: %s" % (ex, v, e))
+                    continue
+                parts = []
+                for h in horizons:
+                    X, Y, z, dx = grids[h]
+                    d = other[h] - z
+                    m = feet[h] & np.isfinite(d) & (distance_to_gaps(z, dx) > NEAR)
+                    parts.append("%s %.1f/%.1f" % (h, stats(d[m])["mean"], stats(d[m])["p95"]))
+                th = []
+                for f in setup["faults_oldest_first"]:
+                    t_s = fault_throws(rows, horizons, {h: grids[h][:3] for h in horizons}, f["name"], feet)
+                    t_o = fault_throws(rows, horizons, {h: (grids[h][0], grids[h][1], other[h]) for h in horizons}, f["name"], feet)
+                    th.append("%s %.1f/%.1f" % (f["name"], t_s, t_o))
+                print("DIAG %s order=%s abut=%s: away mean/p95 %s; throws stx/ls %s" % (ex, v["order"], v["abut"], ", ".join(parts), ", ".join(th)))
+    return 0
+
+
 def main(argv):
     exe, exdir, report = argv[1], pathlib.Path(argv[2]), pathlib.Path(argv[3])
     require = "--require-loopstructural" in argv
@@ -186,6 +253,8 @@ def main(argv):
         if require:
             print("LoopStructural is required (--require-loopstructural) but cannot be imported")
             return 2
+    if "--diagnose" in argv and have_ls:
+        return diagnose(exe, exdir)
     table, ftable, verdicts = [], [], []
     for ex in EXAMPLES:
         with tempfile.TemporaryDirectory() as td:

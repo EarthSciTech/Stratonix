@@ -53,7 +53,8 @@ has its own version (`stratonix_schema`).
   implicit examples in LoopStructural from the exported input sets and compares horizons and
   throws against the STX-TN-11 tolerances. CI job `crosscheck` installs LoopStructural and runs it.
 - LoopStructural input set: with stage 2C series, one feature per series and
-  `series_youngest_first` in `model_setup.json`. Models without series are unchanged.
+  `series_youngest_first` in `model_setup.json`. Models without series are unchanged. A fault
+  that abuts another (or is its splay) lists it as `abuts` in `faults_oldest_first`.
 - Rules F29 (solver, uncertainties, isochore horizons) and F30 (throw estimates). Coincident data
   of different horizons are refused with their positions, not left to a singular system.
 - Examples `implicit_unconformity_from_samples`, `implicit_relay_splay_from_samples`,
