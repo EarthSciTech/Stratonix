@@ -30,9 +30,17 @@ struct FaultRockPoint {
   double sgr = kNaN, csp = kNaN, thickness = kNaN, seal_bar = kNaN;
   double sigma_n = kNaN, tau = kNaN, ts = kNaN, td = kNaN, dp = kNaN;  ///< Pa; tendencies dimensionless
   double ts_max = kNaN;
+  int fw_unit_col = -1, hw_unit_col = -1;  ///< units at d_fw, d_hw in the restored columns (C19)
+  bool near_horizon = false;               ///< within 0.5 m of a horizon on either side (C19 skips)
+  bool valid = true;                       ///< false for lattice nodes outside the tip line or the domain
   std::string missing;
 };
 FaultRockPoint fault_rock_at(const Model& m, int fault, const Vec3& p, const FaultRockInput& in, const StressInput& s);
+
+struct FaultSurface;
+/// Attributes at every lattice node of a fault surface (invalid outside `max_extent` or the domain).
+std::vector<FaultRockPoint> fault_rock_surface(const Model& m, const FaultSurface& fs, const FaultRockInput& in, const StressInput& s,
+                                               double max_extent = 1.0);
 
 /// Curvature attributes of a horizon (Roberts 2001), 1/m, and the fracture-trend azimuth (deg;
 /// NaN where the curvature is below `fracture_threshold`).

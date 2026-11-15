@@ -101,6 +101,13 @@ struct StratigraphyQuery {
   virtual std::string termination_at(int unit, double x, double y, double radius) const = 0;
 };
 
+/// The restored-frame stratigraphic column a model may offer through capability("column")
+/// (stage 2F, STX-TN-10): the elevation of every horizon at restored (x, y), top first.
+struct ColumnQuery {
+  virtual ~ColumnQuery() = default;
+  virtual void column(double x, double y, double* elevations) const = 0;
+};
+
 /// Which fields evaluate() should fill.
 enum EvalFields : unsigned { kEvalUnit = 1u, kEvalBlock = 2u, kEvalScalars = 4u, kEvalAll = 7u };
 

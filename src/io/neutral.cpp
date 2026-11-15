@@ -308,8 +308,33 @@ class VtkExporter final : public Exporter {
       FaultEval fe;
       c.model().evaluate_fault(static_cast<int>(f), m.v, fe);
       fs::path p = fs::path("vtk") / (petrel_name(inf.faults[f].name) + ".vtu");
-      put(folder, p, write_vtu(mesh_vtu(m, "displacement_m", fe.displacement, static_cast<int>(f), "fault"), c.decimals));
-      out.push_back({g(p), "VTK XML unstructured grid", "-", inf.faults[f].name + " plane; point data displacement_m"});
+      auto vd = mesh_vtu(m, "displacement_m", fe.displacement, static_cast<int>(f), "fault");
+      std::string extra;
+      if (c.fault_rock || c.stress.present) {  // stage 2F attributes as further point data
+        std::vector<repr::FaultRockPoint> pr;
+        for (auto& q : m.v) pr.push_back(repr::fault_rock_at(c.model(), static_cast<int>(f), q, c.rock, c.stress));
+        auto add = [&](const char* name, auto get, double scale) {
+          std::vector<double> v;
+          for (auto& r : pr) v.push_back(get(r) * scale);
+          vd.point_data.push_back({name, v});
+          extra += std::string(", ") + name;
+        };
+        add("footwall_unit", [](const repr::FaultRockPoint& r) { return static_cast<double>(r.fw_unit); }, 1.0);
+        add("hanging_wall_unit", [](const repr::FaultRockPoint& r) { return static_cast<double>(r.hw_unit); }, 1.0);
+        if (c.fault_rock) {
+          add("sgr", [](const repr::FaultRockPoint& r) { return r.sgr; }, 1.0);
+          add("csp", [](const repr::FaultRockPoint& r) { return r.csp; }, 1.0);
+          add("fault_thickness_m", [](const repr::FaultRockPoint& r) { return r.thickness; }, 1.0);
+          add("seal_capacity_bar", [](const repr::FaultRockPoint& r) { return r.seal_bar; }, 1.0);
+        }
+        if (c.stress.present) {
+          add("slip_tendency", [](const repr::FaultRockPoint& r) { return r.ts; }, 1.0);
+          add("dilation_tendency", [](const repr::FaultRockPoint& r) { return r.td; }, 1.0);
+          add("reactivation_dp_MPa", [](const repr::FaultRockPoint& r) { return r.dp; }, 1e-6);
+        }
+      }
+      put(folder, p, write_vtu(vd, c.decimals));
+      out.push_back({g(p), "VTK XML unstructured grid", "-", inf.faults[f].name + " plane; point data displacement_m" + extra});
       datasets.push_back(p.filename().string());
     }
     if (!c.wells().empty()) {
@@ -447,6 +472,29 @@ class CsvExporter final : public Exporter {
       put(folder, "csv/well_tops.csv", write_csv(t, c.comments()));
       out.push_back({"csv/well_tops.csv", "CSV", "-", "model tops on all wells"});
     }
+    // Stage 2F: fault-surface attributes at the lattice nodes inside the tip line (STX-TN-10).
+    if (c.fault_rock || c.stress.present)
+      for (std::size_t f = 0; f < inf.faults.size(); ++f) {
+        const auto& fsu = c.fault_surface(static_cast<int>(f));
+        auto pr = repr::fault_rock_surface(c.model(), fsu, c.rock, c.stress);
+        CsvTable t{{"x", "y", "elevation_m", "footwall_unit", "hanging_wall_unit", "d_fw_m", "d_hw_m", "sgr", "csp", "thickness_m",
+                    "seal_capacity_bar", "sigma_n_MPa", "tau_MPa", "slip_tendency", "dilation_tendency", "reactivation_dp_MPa", "missing"},
+                   {}};
+        auto nm = [&](double v, int dec) { return std::isfinite(v) ? num(v, dec) : std::string(); };
+        auto un = [&](int u) { return u >= 0 && static_cast<std::size_t>(u) < inf.units.size() ? petrel_name(inf.units[static_cast<std::size_t>(u)].name) : std::string(); };
+        for (std::size_t k = 0; k < pr.size(); ++k) {
+          const auto& r = pr[k];
+          if (!r.valid) continue;
+          const auto& q = fsu.nodes[k];
+          t.rows.push_back({num(q.x, 2), num(q.y, 2), num(q.z, 2), un(r.fw_unit), un(r.hw_unit), nm(r.d_fw, 2), nm(r.d_hw, 2), nm(r.sgr, 4),
+                            nm(r.csp, 3), nm(r.thickness, 4), nm(r.seal_bar, 3), nm(r.sigma_n * 1e-6, 4), nm(r.tau * 1e-6, 4), nm(r.ts, 4),
+                            nm(r.td, 4), nm(r.dp * 1e-6, 4), r.missing});
+        }
+        const std::string fn = petrel_name(inf.faults[f].name);
+        put(folder, fs::path("csv") / (fn + "_fault_attributes.csv"), write_csv(t, c.comments()));
+        out.push_back({"csv/" + fn + "_fault_attributes.csv", "CSV", "-",
+                       inf.faults[f].name + " surface nodes: juxtaposed units, SGR, CSP, thickness, seal capacity, stresses, tendencies"});
+      }
     return out;
   }
 };

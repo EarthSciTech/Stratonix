@@ -76,6 +76,7 @@ ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& 
 
 const void* ParametricModel::capability(std::string_view name) const {
   if (name == "structure") return structure_.get();
+  if (name == "column") return static_cast<const ColumnQuery*>(structure_.get());
   if (name == "stratigraphy") return structure_->has_stratigraphy() ? static_cast<const StratigraphyQuery*>(structure_.get()) : nullptr;
   if (name == "faults") return faults_.get();
   return nullptr;

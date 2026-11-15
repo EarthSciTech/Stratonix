@@ -55,8 +55,9 @@ struct FoldPrimitive {
 };
 
 /// Unfaulted horizon functions.
-class Structure final : public StratigraphyQuery {
+class Structure final : public StratigraphyQuery, public ColumnQuery {
  public:
+  void column(double x, double y, double* elevations) const override { z_all(x, y, elevations); }
   bool horizon_absent(int h, double x, double y) const override { return absent(static_cast<std::size_t>(h), x, y); }
   std::string termination_at(int unit, double x, double y, double radius) const override;
   /// Whether series relations or thickness trends are in force (stratigraphy queries apply).

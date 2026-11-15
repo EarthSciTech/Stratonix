@@ -17,6 +17,7 @@
 #include "stratonix/core/well.hpp"
 #include "stratonix/model/model.hpp"
 #include "stratonix/registry/registry.hpp"
+#include "stratonix/repr/faultrock.hpp"
 #include "stratonix/repr/repr.hpp"
 
 namespace stratonix::io {
@@ -103,6 +104,12 @@ class ExportContext {
   double vertical_exaggeration = 1;          ///< for viewer state files
   double voxel_dx = 0, voxel_dy = 0, voxel_dz = 0;  ///< voxel grid spacing (0: none)
   double sample_spacing = 250;               ///< point sampling for GemPy / LoopStructural sets
+  /// Stage 2F (STX-TN-10): fault-surface attributes and curvature grids, written only when given.
+  bool fault_rock = false;
+  repr::FaultRockInput rock;
+  repr::StressInput stress;
+  std::vector<int> curvature_horizons;
+  double fracture_threshold = kNaN;
   /// Lines written at the top of every file that takes comments (model, CRS, z convention).
   std::vector<std::string> comments() const;
 

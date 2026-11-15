@@ -3,7 +3,7 @@
 # (flexural-slip) mechanics (stage 2B).
 # DESIGN model; every parameter carries value, unit, evidence and source.
 stratonix_schema: 1
-model: {name: example_detachment_folds, version: "1.0.0", status: DESIGN,
+model: {name: example_detachment_folds, version: "1.1.0", status: DESIGN,
         title: "Detachment fold and en echelon folds"}
 crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
 domain:
@@ -53,6 +53,9 @@ structure:
       mechanics: parallel
       array: {count: 3, step_along: "2000 m | user_instruction | worked example", step_across: "700 m | user_instruction | worked example"}
 outputs:
+  curvature:
+    horizons: [H1]
+    fracture_threshold: "0.000005 1/m | assumed | worked example: curvature above which fractures are drawn"
   sections:
     - name: XS_EW
       polyline: "[[500, 5000], [9500, 5000]] m | user_instruction | worked example: across both folds"

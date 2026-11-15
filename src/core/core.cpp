@@ -71,6 +71,11 @@ std::optional<UnitDef> find_unit(std::string_view name) {
       {"m2", Dimension::Area, 1.0},           {"km2", Dimension::Area, 1.0e6},
       {"1/m", Dimension::InverseLength, 1.0}, {"1/km", Dimension::InverseLength, 1.0e-3},
       {"Ma", Dimension::Time, 1.0},
+      {"Pa", Dimension::Pressure, 1.0},       {"kPa", Dimension::Pressure, 1.0e3},
+      {"MPa", Dimension::Pressure, 1.0e6},    {"bar", Dimension::Pressure, 1.0e5},
+      {"psi", Dimension::Pressure, 6894.757293168},
+      {"MPa/km", Dimension::PressureGradient, 1.0e3}, {"kPa/m", Dimension::PressureGradient, 1.0e3},
+      {"bar/m", Dimension::PressureGradient, 1.0e5},  {"psi/ft", Dimension::PressureGradient, 6894.757293168 / 0.3048},
   };
   for (auto& u : table)
     if (u.name == name) return u;
@@ -86,6 +91,8 @@ const char* dimension_name(Dimension d) {
     case Dimension::Flag: return "flag";
     case Dimension::InverseLength: return "inverse length";
     case Dimension::Time: return "time";
+    case Dimension::Pressure: return "pressure";
+    case Dimension::PressureGradient: return "pressure gradient";
     default: return "any";
   }
 }

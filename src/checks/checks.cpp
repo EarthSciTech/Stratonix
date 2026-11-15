@@ -12,6 +12,8 @@
 #include "stratonix/engines/faults.hpp"
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/history.hpp"
+#include "stratonix/repr/faultrock.hpp"
+#include "stratonix/repr/repr.hpp"
 
 // Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c1);
@@ -32,6 +34,8 @@ STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c15);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c16);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c17);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c18);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c19);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c20);
 
 namespace stratonix {
 
@@ -997,6 +1001,78 @@ STRATONIX_REGISTER(check_c7, registry::Kind::Check, "C7_faults_in_domain", "1.0.
                    [] { return std::make_unique<C7>(); })
 STRATONIX_REGISTER(check_c8, registry::Kind::Check, "C8_fault_intersections", "1.0.0", "Fault-fault intersections resolved",
                    [] { return std::make_unique<C8>(); })
+/// Fault attributes on each fault surface at the check spacing (stage 2F).
+std::vector<std::vector<repr::FaultRockPoint>> fault_rock_nodes(CheckContext& c, double max_extent) {
+  std::vector<std::vector<repr::FaultRockPoint>> out;
+  const auto& d = c.description();
+  const auto in = fault_rock_input(d, c.model());
+  const auto st = stress_input(d);
+  const double spacing = std::max(c.model().info().domain.spacing * 2, 50.0);
+  for (std::size_t f = 0; f < c.model().info().faults.size(); ++f) {
+    auto fs = repr::fault_surface(c.model(), static_cast<int>(f), spacing);
+    out.push_back(repr::fault_rock_surface(c.model(), fs, in, st, max_extent));
+  }
+  return out;
+}
+
+/// C19: juxtaposition consistent with the cut-offs (STX-TN-10 section 6).
+class C19 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const auto& d = c.description();
+    if (!d.fault_rock.present || !c.model().capability("column") || c.model().info().faults.empty()) return out;
+    auto nodes = fault_rock_nodes(c, 0.98);
+    for (std::size_t f = 0; f < nodes.size(); ++f) {
+      std::size_t n = 0, bad = 0;
+      for (auto& p : nodes[f]) {
+        if (!p.valid || p.near_horizon || p.fw_unit < 0) continue;
+        ++n;
+        if (p.fw_unit != p.fw_unit_col || p.hw_unit != p.hw_unit_col) ++bad;
+      }
+      auto r = base(c, "C19", "juxtaposition consistent with the cut-offs", c.model().info().faults[f].name);
+      r.unit = "fraction";
+      r.value = n ? static_cast<double>(bad) / static_cast<double>(n) : 0.0;
+      r.tolerance = 0;
+      r.tolerance_source = "STX-TN-10 section 6 (exact)";
+      r.passed = bad == 0;
+      r.detail = std::to_string(n) + " nodes; " + std::to_string(bad) + " disagree";
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
+/// C20: slip and dilation tendency within their bounds (STX-TN-10 section 6).
+class C20 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const auto& d = c.description();
+    if (!d.stress.present || c.model().info().faults.empty()) return out;
+    auto nodes = fault_rock_nodes(c, 1.0);
+    for (std::size_t f = 0; f < nodes.size(); ++f) {
+      std::size_t n = 0, bad = 0;
+      double worst = 0;
+      for (auto& p : nodes[f]) {
+        if (!p.valid || std::isnan(p.td)) continue;
+        ++n;
+        const double e = 1e-9;
+        const bool ok = p.td >= -e && p.td <= 1 + e && (std::isnan(p.ts) || (p.ts >= -e && p.ts <= p.ts_max * (1 + 1e-9) + e));
+        if (!ok) ++bad;
+        if (!std::isnan(p.ts) && p.ts_max > 0) worst = std::max(worst, p.ts / p.ts_max);
+      }
+      auto r = base(c, "C20", "slip and dilation tendency bounded", c.model().info().faults[f].name);
+      r.unit = "count";
+      r.value = static_cast<double>(bad);
+      r.tolerance = 0;
+      r.tolerance_source = "STX-TN-10 section 6 (by definition)";
+      r.passed = bad == 0;
+      r.detail = std::to_string(n) + " nodes; largest Ts / Ts_max " + fmt_fixed(worst, 3);
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 STRATONIX_REGISTER(check_c9, registry::Kind::Check, "C9_closure", "1.0.0", "Closure, spill point and area against targets",
                    [] { return std::make_unique<C9>(); })
 STRATONIX_REGISTER(check_c10, registry::Kind::Check, "C10_fault_scaling", "1.0.0", "Displacement-length scaling (warning)",
@@ -1015,6 +1091,10 @@ STRATONIX_REGISTER(check_c17, registry::Kind::Check, "C17_restorability", "1.0.0
                    [] { return std::make_unique<C17>(); })
 STRATONIX_REGISTER(check_c18, registry::Kind::Check, "C18_balance", "1.0.0", "Line-length and area balance (warning)",
                    [] { return std::make_unique<C18>(); })
+STRATONIX_REGISTER(check_c19, registry::Kind::Check, "C19_juxtaposition", "1.0.0", "Juxtaposition consistent with the cut-offs",
+                   [] { return std::make_unique<C19>(); })
+STRATONIX_REGISTER(check_c20, registry::Kind::Check, "C20_tendencies", "1.0.0", "Slip and dilation tendency bounded",
+                   [] { return std::make_unique<C20>(); })
 STRATONIX_REGISTER(check_c11, registry::Kind::Check, "C11_fault_system", "1.0.0",
                    "Throw continuous across branch lines and relays", [] { return std::make_unique<C11>(); })
 
@@ -1101,6 +1181,50 @@ std::vector<BalanceRow> balance_rows(const Model& m, const desc::Description& d)
   return rows;
 }
 
+repr::FaultRockInput fault_rock_input(const desc::Description& d, const Model& m) {
+  repr::FaultRockInput in;
+  const auto& units = m.info().units;
+  in.unit_clay.assign(units.size(), kNaN);
+  for (const auto& u : d.units) {
+    if (!u.clay_fraction.present) continue;
+    const int b = d.horizon_index(u.base), t = d.horizon_index(u.top);
+    for (std::size_t k = 0; k < units.size(); ++k)
+      if ((b >= 0 && units[k].base_horizon == b) || (b < 0 && units[k].name == u.name) ||
+          (b < 0 && t >= 0 && units[k].top_horizon == t && units[k].base_horizon < 0))
+        in.unit_clay[k] = u.clay_fraction.si();
+  }
+  const auto& fr = d.fault_rock;
+  if (fr.shale_threshold.present) in.shale_threshold = fr.shale_threshold.si();
+  if (fr.thickness_ratio.present) in.thickness_ratio = fr.thickness_ratio.si();
+  if (fr.seal_type == "sgr_power" && fr.seal_a.present && fr.seal_c.present) {
+    in.seal = true;
+    in.seal_a = fr.seal_a.si();
+    in.seal_c = fr.seal_c.si();
+  }
+  return in;
+}
+repr::StressInput stress_input(const desc::Description& d) {
+  repr::StressInput s;
+  const auto& st = d.stress;
+  if (!st.present) return s;
+  if (st.tensor_gradient.present && st.tensor_gradient.values.size() == 6) {
+    for (std::size_t k = 0; k < 6; ++k) s.g[k] = st.tensor_gradient.si(k);
+    s.present = true;
+  } else if (st.regime() && st.sv_gradient.present && st.shmax_ratio.present && st.shmin_ratio.present && st.shmax_azimuth.present) {
+    const double sv = st.sv_gradient.si(), sh = st.shmax_ratio.si() * sv, sl = st.shmin_ratio.si() * sv, th = st.shmax_azimuth.si();
+    const double sn = std::sin(th), cs = std::cos(th);  // SHmax along (sin, cos), Shmin along (cos, -sin)
+    s.g[0] = sh * sn * sn + sl * cs * cs;
+    s.g[1] = sh * cs * cs + sl * sn * sn;
+    s.g[2] = sv;
+    s.g[3] = (sh - sl) * sn * cs;
+    s.present = true;
+  }
+  if (st.pore_pressure_gradient.present) s.pp = st.pore_pressure_gradient.si();
+  if (st.friction.present) s.friction = st.friction.si();
+  if (st.cohesion.present) s.cohesion = st.cohesion.si();
+  return s;
+}
+
 CheckReport run_checks(CheckContext& ctx) {
   CheckReport rep;
   for (auto* e : registry::Registry::global().list(registry::Kind::Check)) {
@@ -1134,6 +1258,8 @@ void register_check_plugins() {
   STRATONIX_PLUGIN_ANCHOR(check_c16);
   STRATONIX_PLUGIN_ANCHOR(check_c17);
   STRATONIX_PLUGIN_ANCHOR(check_c18);
+  STRATONIX_PLUGIN_ANCHOR(check_c19);
+  STRATONIX_PLUGIN_ANCHOR(check_c20);
 }
 
 }  // namespace stratonix

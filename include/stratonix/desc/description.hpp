@@ -81,6 +81,19 @@ struct EventDesc {
   double start() const { return from.present ? from.si() : age.si(); }  ///< older end (Ma)
   double end() const { return to.present ? to.si() : age.si(); }        ///< younger end (Ma)
 };
+/// Fault rock and stress (STX-TN-10).
+struct FaultRockDesc {
+  bool present = false;
+  Param shale_threshold, thickness_ratio, seal_a, seal_c;
+  std::string seal_type;           ///< "" or sgr_power
+};
+struct StressDesc {
+  bool present = false;
+  Param sv_gradient, shmax_ratio, shmin_ratio, shmax_azimuth;  ///< regime
+  Param tensor_gradient;           ///< xx, yy, zz, xy, xz, yz (east, north, up)
+  Param pore_pressure_gradient, friction, cohesion;
+  bool regime() const { return sv_gradient.present || shmax_ratio.present; }
+};
 /// Salt (STX-TN-08 section 1).
 struct SaltBodyDesc {
   std::string type, name;          ///< pillow, diapir or wall
@@ -106,7 +119,7 @@ struct CompactionDesc {
 };
 /// A unit between consecutive horizons; top "model_top" / base "model_base" name the units above
 /// the first and below the last horizon.
-struct UnitDesc { std::string name, top, base, role, color, label; };
+struct UnitDesc { std::string name, top, base, role, color, label; Param clay_fraction; };
 struct PrimitiveDesc {
   std::string type, name;
   Param crest, axis_azimuth, plunge, half_length, half_width_left, half_width_right;
@@ -218,6 +231,10 @@ struct Description {
   std::vector<SeriesDesc> series;  ///< empty: one conformable series
   CompactionDesc compaction;       ///< stage 2D
   std::vector<EventDesc> events;   ///< stage 2E: empty = implicit timeline
+  FaultRockDesc fault_rock;        ///< stage 2F
+  StressDesc stress;               ///< stage 2F
+  std::vector<std::string> curvature_horizons;  ///< stage 2F: outputs.curvature.horizons
+  Param fracture_threshold;        ///< stage 2F: outputs.curvature.fracture_threshold (1/m)
   SaltDesc salt;                   ///< stage 2D
   std::string above_top_name, below_base_name;
   std::string regional_type = "flat";

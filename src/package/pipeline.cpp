@@ -147,6 +147,15 @@ fig::FigureContext figure_context(const desc::Description& d, const Model& m, co
       c.burial.push_back(std::move(b));
     }
   }
+  c.fault_rock = d.fault_rock.present;
+  if (d.fault_rock.present || d.stress.present) {
+    c.rock = fault_rock_input(d, m);
+    c.stress = stress_input(d);
+  }
+  for (auto& hn : d.curvature_horizons)
+    for (std::size_t h = 0; h < m.info().horizons.size(); ++h)
+      if (m.info().horizons[h].name == hn) c.curvature_horizons.push_back(static_cast<int>(h));
+  if (d.fracture_threshold.present) c.fracture_threshold = d.fracture_threshold.si();
   return c;
 }
 
@@ -297,6 +306,16 @@ std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Mo
   double sticks = d.fault_stick_spacing.present ? d.fault_stick_spacing.si() : 250.0;  // Stratonix default when not given
   io::ExportContext c(m, make_well_paths(d), GridSpec::covering(m.info().domain, sp), std::max(10.0, sp / 2), sticks);
   c.vertical_exaggeration = d.vertical_exaggeration.present ? d.vertical_exaggeration.si() : 1.0;
+  c.fault_rock = d.fault_rock.present;
+  if (d.fault_rock.present || d.stress.present) {
+    c.rock = fault_rock_input(d, m);
+    c.stress = stress_input(d);
+  }
+  for (auto& hn : d.curvature_horizons) {
+    const int h = d.horizon_index(hn);
+    if (h >= 0) c.curvature_horizons.push_back(h);
+  }
+  if (d.fracture_threshold.present) c.fracture_threshold = d.fracture_threshold.si();
   if (d.voxel_spacing.present) {
     auto v = d.voxel_spacing.si_list();
     if (v.size() == 3) { c.voxel_dx = v[0]; c.voxel_dy = v[1]; c.voxel_dz = v[2]; }
@@ -329,6 +348,73 @@ std::vector<std::pair<std::string, std::string>> event_rows(const desc::Descript
         if (b.name == e.ref) what = "salt body " + e.ref + ": height " + fmt_fixed(b.height.si(), 1) + " m";
     }
     k.push_back({"Event " + e.name + " (" + when + ")", what});
+  }
+  return k;
+}
+
+/// Summary rows for fault rock and stress (stage 2F): the inputs, labelled, then per fault the
+/// range of each attribute over its surface.
+std::vector<std::pair<std::string, std::string>> fault_rock_rows(const desc::Description& d, const Model& m) {
+  std::vector<std::pair<std::string, std::string>> k;
+  if (!d.fault_rock.present && !d.stress.present) return k;
+  auto lab = [](const desc::Param& p) { return p.present ? std::string(p.text) + " (" + desc::evidence_name(p.evidence) + (p.source.empty() ? std::string() : ", " + p.source) + ")" : std::string("not given"); };
+  if (d.fault_rock.present) {
+    std::string clay;
+    for (auto& u : d.units)
+      if (u.clay_fraction.present) clay += (clay.empty() ? "" : "; ") + u.name + " " + u.clay_fraction.text;
+    k.push_back({"Fault rock: clay fractions", clay.empty() ? "not given" : clay});
+    k.push_back({"Fault rock: shale threshold", lab(d.fault_rock.shale_threshold)});
+    k.push_back({"Fault rock: thickness / displacement", lab(d.fault_rock.thickness_ratio)});
+    k.push_back({"Fault rock: seal calibration", d.fault_rock.seal_type.empty() ? "none (no seal capacity reported)"
+                                                                                  : d.fault_rock.seal_type + ", a " + lab(d.fault_rock.seal_a) + ", c " + lab(d.fault_rock.seal_c)});
+  }
+  if (d.stress.present) {
+    const auto& st = d.stress;
+    if (st.regime())
+      k.push_back({"Stress: regime", "Sv " + lab(st.sv_gradient) + "; SHmax/Sv " + lab(st.shmax_ratio) + "; Shmin/Sv " + lab(st.shmin_ratio) +
+                                         "; SHmax azimuth " + lab(st.shmax_azimuth)});
+    else
+      k.push_back({"Stress: tensor gradient (xx, yy, zz, xy, xz, yz; east, north, up)", lab(st.tensor_gradient)});
+    k.push_back({"Stress: pore pressure gradient", lab(st.pore_pressure_gradient)});
+    k.push_back({"Stress: friction", lab(st.friction)});
+    k.push_back({"Stress: cohesion", st.cohesion.present ? lab(st.cohesion) : "0 (not given)"});
+  }
+  const auto in = fault_rock_input(d, m);
+  const auto sin = stress_input(d);
+  const double spacing = std::max(m.info().domain.spacing * 2, 50.0);
+  for (std::size_t f = 0; f < m.info().faults.size(); ++f) {
+    auto pts = repr::fault_rock_surface(m, repr::fault_surface(m, static_cast<int>(f), spacing), in, sin);
+    auto range = [&](auto get, double scale, int dec, const std::string& unit) {
+      double lo = 1e300, hi = -1e300;
+      for (auto& p : pts)
+        if (p.valid && std::isfinite(get(p))) { lo = std::min(lo, get(p) * scale); hi = std::max(hi, get(p) * scale); }
+      return hi >= lo ? fmt_fixed(lo, dec) + " to " + fmt_fixed(hi, dec) + (unit.empty() ? "" : " " + unit) : std::string("missing");
+    };
+    const std::string fn = "Fault " + m.info().faults[f].name + ": ";
+    if (d.fault_rock.present) {
+      std::size_t n = 0, self = 0, sand = 0;
+      for (auto& p : pts) {
+        if (!p.valid || p.fw_unit < 0 || p.hw_unit < 0) continue;
+        ++n;
+        if (p.fw_unit == p.hw_unit) ++self;
+        auto clay = [&](int u) { return static_cast<std::size_t>(u) < in.unit_clay.size() ? in.unit_clay[static_cast<std::size_t>(u)] : kNaN; };
+        const double cf = clay(p.fw_unit), ch = clay(p.hw_unit);
+        if (!std::isnan(in.shale_threshold) && cf < in.shale_threshold && ch < in.shale_threshold) ++sand;
+      }
+      auto pct = [&](std::size_t x) { return n ? fmt_fixed(100.0 * static_cast<double>(x) / static_cast<double>(n), 1) + " %" : std::string("-"); };
+      k.push_back({fn + "juxtaposition", "self-juxtaposed " + pct(self) + "; sand on sand (both below the shale threshold) " +
+                                             (std::isnan(in.shale_threshold) ? std::string("missing (no shale threshold)") : pct(sand)) +
+                                             "; of the fault surface area"});
+      k.push_back({fn + "SGR", range([](const repr::FaultRockPoint& p) { return p.sgr; }, 1.0, 3, "")});
+      k.push_back({fn + "CSP", range([](const repr::FaultRockPoint& p) { return p.csp; }, 1.0, 1, "m")});
+      k.push_back({fn + "fault-zone thickness", range([](const repr::FaultRockPoint& p) { return p.thickness; }, 1.0, 2, "m")});
+      if (in.seal) k.push_back({fn + "seal capacity", range([](const repr::FaultRockPoint& p) { return p.seal_bar; }, 1.0, 2, "bar")});
+    }
+    if (sin.present) {
+      k.push_back({fn + "slip tendency", range([](const repr::FaultRockPoint& p) { return p.ts; }, 1.0, 3, "")});
+      k.push_back({fn + "dilation tendency", range([](const repr::FaultRockPoint& p) { return p.td; }, 1.0, 3, "")});
+      k.push_back({fn + "pressure to reactivate", range([](const repr::FaultRockPoint& p) { return p.dp; }, 1e-6, 2, "MPa")});
+    }
   }
   return k;
 }
@@ -425,6 +511,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
   auto keys = key_numbers(d, *o.model, rep, ctx);
   auto rows = keys;
   for (auto& r : event_rows(d)) rows.push_back(r);
+  for (auto& r : fault_rock_rows(d, *o.model)) rows.push_back(r);
   write_file(out_dir / "summary_table.csv", summary_csv(rows));
   if (!o.checks_passed) {
     log(LogLevel::Error, "checks failed: exports and figures are not written (see checks_report.txt)");
@@ -534,11 +621,4 @@ BuildOutcome run_state(const std::filesystem::path& description, const std::file
 }
 
 // Stage 2F (STX-TN-10): implemented in Prompts 32 and 33.
-repr::FaultRockInput fault_rock_input(const desc::Description&, const Model& m) {
-  repr::FaultRockInput in;
-  in.unit_clay.assign(m.info().units.size(), kNaN);
-  return in;
-}
-repr::StressInput stress_input(const desc::Description&) { return {}; }
-
 }  // namespace stratonix

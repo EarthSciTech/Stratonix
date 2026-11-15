@@ -192,6 +192,25 @@ class IrapGridExporter final : public Exporter {
         out.push_back({rel(p), "IRAP classic ASCII grid", "IRAP classic grid (ASCII)",
                        inf.units[u].name + " present-day mean porosity (fraction) from its compaction law; restored-frame positions"});
       }
+    // Stage 2F: curvature attributes of the horizons asked for (STX-TN-10 section 5).
+    for (int h : c.curvature_horizons) {
+      auto cg = repr::curvature(c.model(), h, c.grid(), std::isnan(c.fracture_threshold) ? 1e300 : c.fracture_threshold);
+      const std::string hn = petrel_name(inf.horizons[static_cast<std::size_t>(h)].name);
+      for (auto [grid, name, what] : {std::tuple<const Grid2D*, const char*, const char*>{&cg.mean, "mean", "mean curvature (1/m)"},
+                                      {&cg.gaussian, "gaussian", "Gaussian curvature (1/m^2)"},
+                                      {&cg.kmax, "kmax", "maximum principal curvature (1/m)"},
+                                      {&cg.kmin, "kmin", "minimum principal curvature (1/m)"},
+                                      {&cg.most_pos, "most_positive", "most positive curvature (1/m)"},
+                                      {&cg.most_neg, "most_negative", "most negative curvature (1/m)"},
+                                      {&cg.dip, "dip_curvature", "dip curvature (1/m)"},
+                                      {&cg.strike, "strike_curvature", "strike curvature (1/m)"},
+                                      {&cg.trend, "fracture_trend", "fracture-trend azimuth (deg) where the curvature passes the threshold"}}) {
+        fs::path p = fs::path("curvature") / (hn + "_" + name + ".irap");
+        put(folder, p, write_irap_ascii(*grid, std::max(c.decimals, 9)));
+        out.push_back({rel(p), "IRAP classic ASCII grid", "IRAP classic grid (ASCII)",
+                       inf.horizons[static_cast<std::size_t>(h)].name + " " + what + "; convex up positive; fault gaps undefined"});
+      }
+    }
     // Stage 2C: isopachs and stratal termination lines of units that terminate (STX-TN-07 section 2).
     for (std::size_t u = 1; u + 1 < inf.units.size(); ++u) {
       if (inf.units[u].termination.empty()) continue;

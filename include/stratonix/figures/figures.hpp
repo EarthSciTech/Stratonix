@@ -14,6 +14,7 @@
 #include "stratonix/core/well.hpp"
 #include "stratonix/figures/canvas.hpp"
 #include "stratonix/model/model.hpp"
+#include "stratonix/repr/faultrock.hpp"
 #include "stratonix/repr/repr.hpp"
 
 namespace stratonix::fig {
@@ -42,6 +43,12 @@ struct FigureContext {
     std::vector<std::vector<double>> depth;  ///< [step][horizon]
   };
   std::vector<Burial> burial;
+  /// Fault rock and stress (stage 2F, STX-TN-10): Allan diagram and fault-surface attributes.
+  bool fault_rock = false;
+  repr::FaultRockInput rock;
+  repr::StressInput stress;
+  std::vector<int> curvature_horizons;
+  double fracture_threshold = kNaN;  ///< 1/m
 };
 
 /// Naming rule: STX_<model>_v<version>_<kind>_<name> (letters, digits, '-', '_' only).
@@ -70,6 +77,18 @@ struct StrikeThrowSeries {
 };
 Figure strike_throw_figure(const FigureContext& c, const std::vector<StrikeThrowSeries>& series, const std::string& system_name);
 /// Displacement on one fault surface (lattice of fault_surface) with the cut-offs of each horizon.
+/// Stage 2F (STX-TN-10): a fault-surface attribute (SGR, CSP, thickness, seal capacity, slip or
+/// dilation tendency, reactivation pressure) seen from the hanging wall, with the cut-offs.
+/// vmin/vmax NaN: the range of the values.
+Figure fault_attribute_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<double>& values,
+                              const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const std::string& attribute,
+                              const std::string& unit, double vmin = kNaN, double vmax = kNaN);
+/// Allan diagram: each cell of the fault surface split into its footwall (upper left) and
+/// hanging-wall (lower right) unit colours, with the cut-offs of every horizon.
+Figure allan_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<repr::FaultRockPoint>& pts,
+                    const std::vector<std::vector<repr::CutoffLine>>& cutoffs);
+/// Curvature map of a horizon: mean curvature (convex up red, concave blue) and fracture-trend ticks.
+Figure curvature_figure(const FigureContext& c, int horizon, const repr::CurvatureGrids& cg);
 Figure fault_plane_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<double>& displacement,
                           const std::vector<std::vector<repr::CutoffLine>>& cutoffs);
 

@@ -3,7 +3,7 @@
 # crestal graben of two normal faults cuts the roof (stage 2D). DESIGN model; every parameter carries
 # value, unit, evidence and source.
 stratonix_schema: 1
-model: {name: example_salt_diapir, version: "1.0.0", status: DESIGN,
+model: {name: example_salt_diapir, version: "1.1.0", status: DESIGN,
         title: "Salt diapir with crestal faults"}
 crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
 domain:
@@ -71,7 +71,19 @@ faults:
     slip_mode: dip_slip
     hanging_wall: {type: rigid}
 frame: {fixed: {well: W1}}
+# Stage 2F: the stress field and fault response (STX-TN-10).
+stress:
+  regime:
+    sv_gradient: "23 MPa/km | assumed | worked example: overburden of mean density 2.35 g/cm3"
+    shmax_ratio: "0.85 ratio | assumed | worked example: normal-faulting regime over the diapir"
+    shmin_ratio: "0.65 ratio | assumed | worked example: normal-faulting regime over the diapir"
+    shmax_azimuth: "0 deg | assumed | worked example"
+  pore_pressure_gradient: "10 MPa/km | assumed | worked example: hydrostatic"
+  friction: "0.6 ratio | literature_derived | Byerlee (1978)"
 outputs:
+  curvature:
+    horizons: [H2]
+    fracture_threshold: "0.000005 1/m | assumed | worked example: curvature above which fractures are drawn"
   sections:
     - name: XS_EW
       polyline: "[[200, 5000], [9800, 5000]] m | user_instruction | worked example: across the diapir and graben"

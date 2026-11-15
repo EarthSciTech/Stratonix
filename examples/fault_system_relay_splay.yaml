@@ -2,7 +2,7 @@
 # in its hanging wall, and a soft-linked relay ramp where F1 hands its throw over to F3.
 # DESIGN model; every parameter carries value, unit, evidence and source.
 stratonix_schema: 1
-model: {name: example_fault_system, version: "1.0.0", status: DESIGN,
+model: {name: example_fault_system, version: "1.1.0", status: DESIGN,
         title: "Fault system: master fault, linked splay and relay ramp"}
 crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
 domain:
@@ -23,9 +23,9 @@ stratigraphy:
   reference: {well: W1}
   horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]   # the faults cut top and base on purpose
   units:
-    - {name: Unit_1, top: H1, base: H2}
-    - {name: Unit_2, top: H2, base: H3}
-    - {name: Unit_3, top: H3, base: H4}
+    - {name: Unit_1, top: H1, base: H2, clay_fraction: "0.15 fraction | assumed | worked example: clean sand"}
+    - {name: Unit_2, top: H2, base: H3, clay_fraction: "0.70 fraction | assumed | worked example: shale"}
+    - {name: Unit_3, top: H3, base: H4, clay_fraction: "0.20 fraction | assumed | worked example: sand"}
 structure:
   regional: {type: flat}
 faults:
@@ -86,11 +86,28 @@ faults:
     hanging_wall: {type: rigid}
     abuts: {fault: F1, side: hanging_wall, transfer: true}
 frame: {fixed: {well: W1}}
+# Stage 2F: faults as rock and the stress field (STX-TN-10).
+fault_rock:
+  shale_threshold: "0.5 fraction | assumed | worked example: clay fraction of a smearing shale"
+  thickness_displacement_ratio: "0.01 ratio | literature_derived | Hull (1988): fault-zone thickness about 1/100 of displacement"
+  seal_calibration: {type: sgr_power, a: "27 ratio | literature_derived | Sperrevik et al. (2002) form, illustrative coefficients",
+                     c: "0.5 ratio | literature_derived | Sperrevik et al. (2002) form, illustrative coefficients"}
+stress:
+  regime:
+    sv_gradient: "23 MPa/km | assumed | worked example: overburden of mean density 2.35 g/cm3"
+    shmax_ratio: "0.85 ratio | assumed | worked example: normal-faulting regime"
+    shmin_ratio: "0.65 ratio | assumed | worked example: normal-faulting regime"
+    shmax_azimuth: "10 deg | assumed | worked example: about parallel to the master fault"
+  pore_pressure_gradient: "10 MPa/km | assumed | worked example: hydrostatic"
+  friction: "0.6 ratio | literature_derived | Byerlee (1978)"
 outputs:
+  curvature:
+    horizons: [H1]
+    fracture_threshold: "0.000005 1/m | assumed | worked example: curvature above which fractures are drawn"
   sections:
     - name: XS_South
       polyline: "[[500, 2500], [11500, 2500]] m | user_instruction | worked example: across master and splay"
     - name: XS_Relay
       polyline: "[[500, 6000], [11500, 6000]] m | user_instruction | worked example: across the relay ramp"
   vertical_exaggeration: "2 ratio | user_instruction | worked example"
-  exports: [petrel, vtk]
+  exports: [petrel, vtk, csv]

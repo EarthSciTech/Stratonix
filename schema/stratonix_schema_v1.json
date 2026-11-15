@@ -374,6 +374,9 @@
               "label": {
                 "type": "string",
                 "description": "display name (UTF-8) for figures"
+              },
+              "clay_fraction": {
+                "$ref": "#/$defs/param"
               }
             }
           }
@@ -1617,6 +1620,25 @@
           "items": {
             "type": "string"
           }
+        },
+        "curvature": {
+          "type": "object",
+          "required": [
+            "horizons",
+            "fracture_threshold"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "horizons": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "fracture_threshold": {
+              "$ref": "#/$defs/param"
+            }
+          }
         }
       }
     },
@@ -1671,6 +1693,82 @@
               "reverse"
             ]
           }
+        }
+      }
+    },
+    "fault_rock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shale_threshold": {
+          "$ref": "#/$defs/param"
+        },
+        "thickness_displacement_ratio": {
+          "$ref": "#/$defs/param"
+        },
+        "seal_calibration": {
+          "type": "object",
+          "required": [
+            "type",
+            "a",
+            "c"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "enum": [
+                "sgr_power"
+              ]
+            },
+            "a": {
+              "$ref": "#/$defs/param"
+            },
+            "c": {
+              "$ref": "#/$defs/param"
+            }
+          }
+        }
+      }
+    },
+    "stress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "regime": {
+          "type": "object",
+          "required": [
+            "sv_gradient",
+            "shmax_ratio",
+            "shmin_ratio",
+            "shmax_azimuth"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "sv_gradient": {
+              "$ref": "#/$defs/param"
+            },
+            "shmax_ratio": {
+              "$ref": "#/$defs/param"
+            },
+            "shmin_ratio": {
+              "$ref": "#/$defs/param"
+            },
+            "shmax_azimuth": {
+              "$ref": "#/$defs/param"
+            }
+          }
+        },
+        "tensor_gradient": {
+          "$ref": "#/$defs/param"
+        },
+        "pore_pressure_gradient": {
+          "$ref": "#/$defs/param"
+        },
+        "friction": {
+          "$ref": "#/$defs/param"
+        },
+        "cohesion": {
+          "$ref": "#/$defs/param"
         }
       }
     }

@@ -160,6 +160,31 @@ has its own version (`stratonix_schema`).
   reactivation, curvature and fracture trends; checks C19 and C20; rules F27 and F28. New
   interfaces, additive: `repr::fault_rock_at`, `repr::curvature` (repr/faultrock.hpp),
   `fault_rock_input`, `stress_input`.
+- Juxtaposition and fault rock (Prompt 32). Allan diagrams per fault. Shale gouge ratio and clay
+  smear potential from the restored stratigraphic positions on both walls. Fault-zone thickness
+  from displacement. Seal capacity only with a labelled `sgr_power` calibration. New description
+  keys: `units[].clay_fraction` and `fault_rock {shale_threshold,
+  thickness_displacement_ratio, seal_calibration}`. Attributes whose inputs are missing are
+  reported as missing, with the reason.
+- Stress, reactivation and fractures (Prompt 33). New `stress` key: a regime (`sv_gradient`,
+  `shmax_ratio`, `shmin_ratio`, `shmax_azimuth`) or `tensor_gradient`, with
+  `pore_pressure_gradient`, `friction` and `cohesion`. Slip and dilation tendency and the
+  pore-pressure change to reactivation on every fault surface. Curvature attributes (Roberts
+  2001) and fracture trends for the horizons in `outputs.curvature`.
+- New figure kinds (four formats): Allan diagram, fault-surface attribute map, curvature map with
+  fracture ticks. New exports:
+  - fault attributes as VTK point data and as `csv/<fault>_fault_attributes.csv`;
+  - nine curvature grids per horizon in `curvature/` (IRAP classic).
+- The summary table lists every fault-rock and stress input with its evidence and source. Below
+  them, each fault's attribute ranges and its self-juxtaposed and sand-on-sand shares.
+- Model-layer capability `column` (`ColumnQuery`): the restored-frame stratigraphic column, offered
+  by the parametric engine. `repr::fault_rock_surface` evaluates every node of a fault surface.
+- Checks C19 (juxtaposition consistent with the restored columns) and C20 (slip and dilation
+  tendency within their bounds); rules F27 and F28; units MPa, kPa, Pa, bar, psi, MPa/km,
+  kPa/m, bar/m, psi/ft.
+- Examples `fault_system_relay_splay`, `trishear_fold`, `detachment_folds` and
+  `salt_diapir_crestal_faults` (model version 1.1.0) carry fault-rock, stress and curvature
+  inputs.
 
 ### Changed
 - The well-correction field measures control-well residuals against the effective horizons
@@ -177,7 +202,7 @@ has its own version (`stratonix_schema`).
   unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
   and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
-  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`); stage 2E (`test_v2_history`); stage 2F (`test_v2_faultrock`), expected to fail until its features are built.
+  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`); stage 2E (`test_v2_history`); stage 2F (`test_v2_faultrock`).
 
 ## [2026.1] - 2026-11-14 - First public release
 

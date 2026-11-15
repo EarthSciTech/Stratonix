@@ -124,6 +124,11 @@ std::vector<const Param*> Description::all_params() const {
   }
   for (auto& h : horizons) { add(h.depth); add(h.thickness_above); add(h.iso_thickness); add(h.iso_gradient); add(h.iso_centre); }
   for (auto& h : horizons) add(h.age);
+  for (auto& u : units) add(u.clay_fraction);
+  for (auto* q : {&fault_rock.shale_threshold, &fault_rock.thickness_ratio, &fault_rock.seal_a, &fault_rock.seal_c, &stress.sv_gradient,
+                  &stress.shmax_ratio, &stress.shmin_ratio, &stress.shmax_azimuth, &stress.tensor_gradient, &stress.pore_pressure_gradient,
+                  &stress.friction, &stress.cohesion, &fracture_threshold})
+    add(*q);
   for (auto& e : events)
     for (auto* q : {&e.age, &e.from, &e.to, &e.throw_}) add(*q);
   add(salt.source_thickness);
@@ -380,8 +385,11 @@ struct Typer {
         d.horizons.push_back(std::move(hd));
       }
     if (const Node* us = st ? st->get("units") : nullptr)
-      for (auto& u : us->seq)
-        d.units.push_back({S(&u, "name"), S(&u, "top"), S(&u, "base"), S(&u, "role"), S(&u, "color"), S(&u, "label")});
+      for (std::size_t k = 0; k < us->seq.size(); ++k) {
+        const Node& u = us->seq[k];
+        d.units.push_back({S(&u, "name"), S(&u, "top"), S(&u, "base"), S(&u, "role"), S(&u, "color"), S(&u, "label"),
+                           P(&u, "clay_fraction", "stratigraphy.units[" + std::to_string(k) + "]", Dimension::Dimensionless, false, 1)});
+      }
     if (const Node* ss = st ? st->get("series") : nullptr)
       for (std::size_t k = 0; k < ss->seq.size(); ++k) {
         const Node& sn = ss->seq[k];
@@ -769,6 +777,35 @@ struct Typer {
       if (const Node* ip = o->get("isopachs"))
         for (auto& x : ip->seq) d.isopachs.push_back(x.str);
     }
+    if (const Node* fr = root.get("fault_rock")) {
+      d.fault_rock.present = true;
+      d.fault_rock.shale_threshold = P(fr, "shale_threshold", "fault_rock", Dimension::Dimensionless, false, 1);
+      d.fault_rock.thickness_ratio = P(fr, "thickness_displacement_ratio", "fault_rock", Dimension::Dimensionless, false, 1);
+      if (const Node* sc = fr->get("seal_calibration")) {
+        d.fault_rock.seal_type = S(sc, "type");
+        d.fault_rock.seal_a = P(sc, "a", "fault_rock.seal_calibration", Dimension::Dimensionless, true, 1);
+        d.fault_rock.seal_c = P(sc, "c", "fault_rock.seal_calibration", Dimension::Dimensionless, true, 1);
+      }
+    }
+    if (const Node* sn = root.get("stress")) {
+      d.stress.present = true;
+      if (const Node* rg = sn->get("regime")) {
+        d.stress.sv_gradient = P(rg, "sv_gradient", "stress.regime", Dimension::PressureGradient, true, 1);
+        d.stress.shmax_ratio = P(rg, "shmax_ratio", "stress.regime", Dimension::Dimensionless, true, 1);
+        d.stress.shmin_ratio = P(rg, "shmin_ratio", "stress.regime", Dimension::Dimensionless, true, 1);
+        d.stress.shmax_azimuth = P(rg, "shmax_azimuth", "stress.regime", Dimension::Angle, true, 1);
+      }
+      d.stress.tensor_gradient = P(sn, "tensor_gradient", "stress", Dimension::PressureGradient, false, 6);
+      d.stress.pore_pressure_gradient = P(sn, "pore_pressure_gradient", "stress", Dimension::PressureGradient, true, 1);
+      d.stress.friction = P(sn, "friction", "stress", Dimension::Dimensionless, false, 1);
+      d.stress.cohesion = P(sn, "cohesion", "stress", Dimension::Pressure, false, 1);
+    }
+    if (const Node* o2 = root.get("outputs"))
+      if (const Node* cv = o2->get("curvature")) {
+        if (const Node* hs2 = cv->get("horizons"))
+          for (auto& x : hs2->seq) d.curvature_horizons.push_back(x.str);
+        d.fracture_threshold = P(cv, "fracture_threshold", "outputs.curvature", Dimension::InverseLength, true, 1);
+      }
     if (const Node* ev = root.get("events"))
       for (std::size_t k = 0; k < ev->seq.size(); ++k) {
         const Node& en = ev->seq[k];
@@ -940,6 +977,32 @@ struct Typer {
         }
       }
     }
+    // STX-TN-10 (F27, F28): fault rock and stress
+    for (std::size_t k = 0; k < d.units.size(); ++k)
+      if (d.units[k].clay_fraction.present && !(d.units[k].clay_fraction.si() >= 0 && d.units[k].clay_fraction.si() <= 1))
+        c.err("stratigraphy.units[" + std::to_string(k) + "].clay_fraction", "F27", "clay fraction must be in [0, 1]");
+    if (d.fault_rock.present) {
+      const auto& fr = d.fault_rock;
+      if (fr.shale_threshold.present && !(fr.shale_threshold.si() > 0 && fr.shale_threshold.si() <= 1))
+        c.err("fault_rock.shale_threshold", "F27", "the shale threshold is a clay fraction in (0, 1]");
+      if (fr.thickness_ratio.present && !(fr.thickness_ratio.si() > 0)) c.err("fault_rock.thickness_displacement_ratio", "F27", "must be positive");
+      if (!fr.seal_type.empty() && fr.seal_type != "sgr_power") c.err("fault_rock.seal_calibration.type", "F27", "calibration type must be sgr_power");
+      if (fr.seal_a.present && !(fr.seal_a.si() > 0)) c.err("fault_rock.seal_calibration.a", "F27", "a must be positive");
+      if (!fr.seal_type.empty() && std::none_of(d.units.begin(), d.units.end(), [](const UnitDesc& u) { return u.clay_fraction.present; }))
+        c.err("fault_rock.seal_calibration", "F27", "a seal calibration needs clay fractions on the units");
+    }
+    if (d.stress.present) {
+      const auto& st2 = d.stress;
+      if (st2.regime() == st2.tensor_gradient.present)
+        c.err("stress", "F28", "give the stress as a regime or as a tensor gradient, one of the two");
+      for (auto [p, nm] : {std::pair{&st2.sv_gradient, "regime.sv_gradient"}, {&st2.shmax_ratio, "regime.shmax_ratio"},
+                           {&st2.shmin_ratio, "regime.shmin_ratio"}, {&st2.pore_pressure_gradient, "pore_pressure_gradient"},
+                           {&st2.friction, "friction"}})
+        if (p->present && !(p->si() > 0)) c.err(std::string("stress.") + nm, "F28", std::string(nm) + " must be positive");
+      if (st2.cohesion.present && st2.cohesion.si() < 0) c.err("stress.cohesion", "F28", "cohesion must not be negative");
+    }
+    for (auto& h : d.curvature_horizons)
+      if (d.horizon_index(h) < 0) c.err("outputs.curvature.horizons", "O1", "unknown horizon '" + h + "'");
     // STX-TN-09 (F26): the event timeline
     if (!d.events.empty()) {
       std::set<std::string> enames;

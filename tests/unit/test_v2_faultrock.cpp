@@ -103,10 +103,12 @@ TEST_CASE("P33 curvature and fracture trend at an anticline crest") {
                                          q("[5000, 5000] m") + ", axis_azimuth: " + q("0 deg") + ", half_width_left: " + q("1500 m") +
                                          ", half_width_right: " + q("1500 m") + ", relief: {H1: " + q("300 m") + "}}\n"));
   auto c = repr::curvature(*m, 0, GridSpec{4900, 4900, 10, 10, 21, 21}, 1e-4);
-  const double kexp = -300 * kPi * kPi / (2 * 1500.0 * 1500.0);
-  std::cout << "  k_min " << c.kmin.at(10, 10) << " (expected " << kexp << "), Gaussian " << c.gaussian.at(10, 10) << ", trend "
-            << c.trend.at(10, 10) << " deg\n";
-  CHECK_NEAR(c.kmin.at(10, 10), kexp, 0.01 * std::fabs(kexp));
+  // convex upwards is positive (STX-TN-10 section 5): across the axis k_max = A pi^2 / (2 w^2), along it 0
+  const double kexp = 300 * kPi * kPi / (2 * 1500.0 * 1500.0);
+  std::cout << "  k_max " << c.kmax.at(10, 10) << " (expected " << kexp << "), k_min " << c.kmin.at(10, 10) << ", Gaussian "
+            << c.gaussian.at(10, 10) << ", trend " << c.trend.at(10, 10) << " deg\n";
+  CHECK_NEAR(c.kmax.at(10, 10), kexp, 0.01 * kexp);
+  CHECK(std::fabs(c.kmin.at(10, 10)) < 0.01 * kexp);
   CHECK(std::fabs(c.gaussian.at(10, 10)) < 1e-9);
   CHECK(std::fabs(std::fmod(c.trend.at(10, 10) + 180.0, 180.0)) < 1.0 || std::fabs(std::fmod(c.trend.at(10, 10) + 180.0, 180.0) - 180) < 1.0);
 }

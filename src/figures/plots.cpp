@@ -1052,6 +1052,217 @@ Figure fault_plane_figure(const FigureContext& c, int ff, const repr::FaultSurfa
   return f;
 }
 
+namespace {
+/// Layout of a fault surface seen from the hanging wall (the part inside the tip line).
+struct FaultFrame {
+  double a0, a1, b0, b1, px = 70, py = 60, sc = 1, pw = 0, ph = 0;
+  Pt P(double a, double b) const { return Pt{px + (a - a0) * sc, py + (b - b0) * sc}; }
+};
+FaultFrame fault_frame(const repr::FaultSurface& fs) {
+  FaultFrame fr{fs.a.front(), fs.a.back(), fs.b.front(), fs.b.back()};
+  double ia0 = 1e300, ia1 = -1e300, ib0 = 1e300, ib1 = -1e300;
+  for (std::size_t j = 0; j < fs.nb; ++j)
+    for (std::size_t i = 0; i < fs.na; ++i) {
+      if (fs.extent[i + fs.na * j] > 1) continue;
+      ia0 = std::min(ia0, fs.a[i]); ia1 = std::max(ia1, fs.a[i]);
+      ib0 = std::min(ib0, fs.b[j]); ib1 = std::max(ib1, fs.b[j]);
+    }
+  if (ia1 > ia0) { fr.a0 = ia0; fr.a1 = ia1; }
+  if (ib1 > ib0) { fr.b0 = ib0; fr.b1 = ib1; }
+  const double maxw = 842 - 70 - 260, maxh = 560 - 60 - 80;
+  fr.sc = std::min(maxw / (fr.a1 - fr.a0), maxh / (fr.b1 - fr.b0));
+  fr.pw = (fr.a1 - fr.a0) * fr.sc;
+  fr.ph = (fr.b1 - fr.b0) * fr.sc;
+  return fr;
+}
+void fault_frame_axes_and_cutoffs(Figure& f, const FaultFrame& fr, const FaultInfo& fi, const std::vector<std::vector<repr::CutoffLine>>& cutoffs) {
+  for (auto& lines : cutoffs)
+    for (auto& cl : lines)
+      for (auto& part : cl.parts) {
+        std::vector<Pt> pts;
+        for (auto& p : part) pts.push_back(fr.P(dot(p - fi.ref_point, fi.strike_dir), dot(p - fi.ref_point, fi.dip_dir)));
+        if (pts.size() >= 2) f.path(pts, false, none(), rgb(40, 40, 40), 0.8, cl.hanging_wall ? std::vector<double>{} : std::vector<double>{3, 2});
+      }
+  f.rect(fr.px, fr.py, fr.pw, fr.ph, none(), kInk, 0.6);
+  for (double t : nice_ticks(fr.a0, fr.a1, 7)) f.text({fr.P(t, fr.b0).x, fr.py + fr.ph + 11}, km_or_m(t), 7, Anchor::Middle, false, kInk);
+  for (double t : nice_ticks(fr.b0, fr.b1, 6)) f.text({fr.px - 4, fr.P(fr.a0, t).y + 2.5}, km_or_m(t), 7, Anchor::End, false, kInk);
+  f.text({fr.px + fr.pw / 2, fr.py + fr.ph + 26}, "Along strike from the reference point (m)", 8, Anchor::Middle, false, kInk);
+  f.text({fr.px - 44, fr.py + fr.ph / 2}, "Down dip (m)", 8, Anchor::Middle, false, kInk, -90);
+}
+Color viridis_like(double t) {  // dark blue (0) through green to yellow (1)
+  t = std::clamp(t, 0.0, 1.0);
+  const double r = std::clamp(-0.1 + 1.2 * t * t, 0.0, 1.0), g = std::clamp(0.1 + 0.85 * t, 0.0, 1.0), b = std::clamp(0.45 + 0.5 * std::sin(kPi * (0.15 + 0.85 * t)) - 0.4 * t, 0.0, 1.0);
+  return rgb(static_cast<int>(40 + 215 * r), static_cast<int>(20 + 215 * g), static_cast<int>(60 + 140 * b));
+}
+Color diverging(double t) {  // -1 blue, 0 white, +1 red
+  t = std::clamp(t, -1.0, 1.0);
+  if (t >= 0) return rgb(255, static_cast<int>(255 - 190 * t), static_cast<int>(255 - 210 * t));
+  return rgb(static_cast<int>(255 + 210 * t), static_cast<int>(255 + 150 * t), 255);
+}
+}  // namespace
+
+Figure fault_attribute_figure(const FigureContext& c, int ff, const repr::FaultSurface& fs, const std::vector<double>& v,
+                              const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const std::string& attr, const std::string& unit,
+                              double vmin, double vmax) {
+  Figure f(842, 560);
+  const auto& fi = c.model->info().faults.at(static_cast<std::size_t>(ff));
+  auto fr = fault_frame(fs);
+  double lo = 1e300, hi = -1e300;
+  for (std::size_t k = 0; k < v.size(); ++k)
+    if (fs.extent[k] <= 1 && std::isfinite(v[k])) { lo = std::min(lo, v[k]); hi = std::max(hi, v[k]); }
+  if (!(hi >= lo)) { lo = 0; hi = 1; }
+  const bool uniform = hi - lo <= 1e-6 * std::max(1.0, std::fabs(hi));
+  const double uval = hi;
+  if (!std::isnan(vmin)) lo = vmin;
+  if (!std::isnan(vmax)) hi = vmax;
+  if (!(hi > lo)) hi = lo + 1;
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - " + attr + " on fault " + fi.name,
+        "Fault surface seen from the hanging wall; colour: " + attr + " (" + unit + ")" +
+            (uniform ? ", uniform at " + fmt_fixed(uval, 3) + " (planar fault, stresses proportional to depth)" : std::string()) +
+            ", grey where not defined; lines: hanging-wall (solid) and footwall (dashed) cut-offs");
+  for (std::size_t j = 0; j + 1 < fs.nb; ++j)
+    for (std::size_t i = 0; i + 1 < fs.na; ++i) {
+      std::size_t k = i + fs.na * j;
+      if (fs.extent[k] > 1 || fs.extent[k + 1] > 1 || fs.extent[k + fs.na] > 1 || fs.extent[k + fs.na + 1] > 1) continue;
+      double s = 0;
+      int n = 0;
+      for (std::size_t q : {k, k + 1, k + fs.na, k + fs.na + 1})
+        if (std::isfinite(v[q])) { s += v[q]; ++n; }
+      Pt q0 = fr.P(fs.a[i], fs.b[j]), r = fr.P(fs.a[i + 1], fs.b[j + 1]);
+      f.rect(q0.x, q0.y, r.x - q0.x + 0.3, r.y - q0.y + 0.3, n ? viridis_like((s / n - lo) / (hi - lo)) : rgb(215, 215, 215), none());
+    }
+  fault_frame_axes_and_cutoffs(f, fr, fi, cutoffs);
+  double cbx = 842 - 214, cby = 60;
+  f.text({cbx, cby + 8}, attr + " (" + unit + ")", 7.5, Anchor::Start, true, kInk);
+  for (int k = 0; k < 100; ++k) f.rect(cbx + 1.6 * k, cby + 14, 1.7, 10, viridis_like(k / 99.0), none());
+  f.rect(cbx, cby + 14, 160, 10, none(), kInk, 0.4);
+  auto num = [](double x) { return std::fabs(x) >= 100 || x == 0 ? fmt_fixed(x, 0) : std::fabs(x) >= 1 ? fmt_fixed(x, 2) : fmt_fixed(x, 3); };
+  f.text({cbx, cby + 34}, num(lo), 7, Anchor::Start, false, kInk);
+  f.text({cbx + 160, cby + 34}, num(hi), 7, Anchor::End, false, kInk);
+  std::vector<LegendEntry> es{{"Cut-offs", "Hanging wall", none(), true, rgb(40, 40, 40), 0.8},
+                              {"Cut-offs", "Footwall (dashed)", none(), true, rgb(40, 40, 40), 0.8},
+                              {"Not defined", "Missing input or no separation", rgb(215, 215, 215)}};
+  double ly = legend(f, cbx, cby + 44, 196, es, 560.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, cbx, ly, 196);
+  footer(f, c);
+  return f;
+}
+
+Figure allan_figure(const FigureContext& c, int ff, const repr::FaultSurface& fs, const std::vector<repr::FaultRockPoint>& pts,
+                    const std::vector<std::vector<repr::CutoffLine>>& cutoffs) {
+  Figure f(842, 560);
+  const auto& fi = c.model->info().faults.at(static_cast<std::size_t>(ff));
+  auto fr = fault_frame(fs);
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - Allan diagram of fault " + fi.name,
+        "Fault surface seen from the hanging wall; each cell: footwall unit (upper left) against hanging-wall unit (lower right); "
+        "lines: hanging-wall (solid) and footwall (dashed) cut-offs");
+  auto col = [&](int u) { return u >= 0 ? unit_color(c, static_cast<std::size_t>(u)) : rgb(215, 215, 215); };
+  for (std::size_t j = 0; j + 1 < fs.nb; ++j)
+    for (std::size_t i = 0; i + 1 < fs.na; ++i) {
+      std::size_t k = i + fs.na * j;
+      if (fs.extent[k] > 1 || fs.extent[k + 1] > 1 || fs.extent[k + fs.na] > 1 || fs.extent[k + fs.na + 1] > 1) continue;
+      const auto& p = pts[k];
+      if (!p.valid) continue;
+      Pt a = fr.P(fs.a[i], fs.b[j]), b = fr.P(fs.a[i + 1], fs.b[j + 1]);
+      f.path({{a.x, a.y}, {b.x + 0.3, a.y}, {a.x, b.y + 0.3}}, true, col(p.fw_unit), none());
+      f.path({{b.x + 0.3, a.y}, {b.x + 0.3, b.y + 0.3}, {a.x, b.y + 0.3}}, true, col(p.hw_unit), none());
+    }
+  fault_frame_axes_and_cutoffs(f, fr, fi, cutoffs);
+  auto es = unit_legend(c);
+  es.push_back({"Cut-offs", "Hanging wall", none(), true, rgb(40, 40, 40), 0.8});
+  es.push_back({"Cut-offs", "Footwall (dashed)", none(), true, rgb(40, 40, 40), 0.8});
+  double cbx = 842 - 214;
+  double ly = legend(f, cbx, 60, 196, es, 560.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, cbx, ly, 196);
+  footer(f, c);
+  return f;
+}
+
+Figure curvature_figure(const FigureContext& c, int h, const repr::CurvatureGrids& cg) {
+  Figure f(842, 595);
+  const auto& inf = c.model->info();
+  const auto& d = inf.domain;
+  double side = std::min(595.0 - 110, 842.0 - 280);
+  double sc = side / std::max(d.sx, d.sy);
+  double mx0 = 60, my0 = 60, mw = d.sx * sc, mh = d.sy * sc;
+  auto P = [&](double x, double y) { return Pt{mx0 + (x - d.x0) * sc, my0 + mh - (y - d.y0) * sc}; };
+  const auto& g = cg.mean;
+  std::vector<double> mags;
+  for (double v : g.v)
+    if (std::isfinite(v)) mags.push_back(std::fabs(v));
+  double kmax = 1e-6;
+  if (!mags.empty()) {
+    std::sort(mags.begin(), mags.end());
+    kmax = std::max(1e-9, mags[static_cast<std::size_t>(0.98 * static_cast<double>(mags.size() - 1))]);
+  }
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - " + inf.horizons[static_cast<std::size_t>(h)].name + " curvature",
+        "Mean curvature of " + inf.horizons[static_cast<std::size_t>(h)].name +
+            " (convex up red, concave up blue; fault gaps grey) and fracture trends (ticks) where the curvature passes the threshold");
+  Image im;
+  im.w = std::max(1, static_cast<int>(std::lround(mw * 3)));
+  im.h = std::max(1, static_cast<int>(std::lround(mh * 3)));
+  im.rgba.resize(static_cast<std::size_t>(im.w) * im.h * 4);
+  const auto& gs = g.spec;
+  for (int yy = 0; yy < im.h; ++yy)
+    for (int xx = 0; xx < im.w; ++xx) {
+      double x = d.x0 + (xx + 0.5) / im.w * d.sx, y = d.y0 + d.sy - (yy + 0.5) / im.h * d.sy;
+      long i = std::clamp(std::lround((x - gs.x0) / gs.dx), 0L, static_cast<long>(gs.nx) - 1);
+      long j = std::clamp(std::lround((y - gs.y0) / gs.dy), 0L, static_cast<long>(gs.ny) - 1);
+      double v = g.v[gs.index(static_cast<std::size_t>(i), static_cast<std::size_t>(j))];
+      Color cc = std::isnan(v) ? rgb(225, 225, 225) : diverging(v / kmax);
+      std::uint8_t* p = &im.rgba[(static_cast<std::size_t>(yy) * im.w + xx) * 4];
+      p[0] = cc.r; p[1] = cc.g; p[2] = cc.b; p[3] = 255;
+    }
+  const Image* img = f.own(std::move(im));
+  f.clip(mx0, my0, mw, mh);
+  f.image(mx0, my0, mw, mh, img);
+  // fracture-trend ticks on a coarse lattice (about 25 across)
+  const std::size_t stride = std::max<std::size_t>(1, std::max(gs.nx, gs.ny) / 25);
+  const double len = 0.4 * static_cast<double>(stride) * std::min(gs.dx, gs.dy) * sc;
+  std::size_t nticks = 0;
+  for (std::size_t j = stride / 2; j < gs.ny; j += stride)
+    for (std::size_t i = stride / 2; i < gs.nx; i += stride) {
+      const double az = cg.trend.v[gs.index(i, j)];
+      if (std::isnan(az)) continue;
+      Pt p = P(gs.x0 + i * gs.dx, gs.y0 + j * gs.dy);
+      const double ux = std::sin(az * kPi / 180) * len, uy = -std::cos(az * kPi / 180) * len;
+      f.line({p.x - ux, p.y - uy}, {p.x + ux, p.y + uy}, rgb(20, 20, 20), 0.9);
+      ++nticks;
+    }
+  for (auto& w : c.wells) {
+    Pt p = P(w.x(), w.y());
+    f.path({{p.x - 2.5, p.y}, {p.x, p.y - 2.5}, {p.x + 2.5, p.y}, {p.x, p.y + 2.5}}, true, rgb(255, 255, 255), kWell, 0.9);
+    f.text({p.x + 4, p.y - 3}, w.name(), 7, Anchor::Start, true, kWell);
+  }
+  f.unclip();
+  f.rect(mx0, my0, mw, mh, none(), kInk, 0.6);
+  for (double t : nice_ticks(d.x0, d.x0 + d.sx, 6)) {
+    Pt p = P(t, d.y0);
+    f.line(p, {p.x, p.y + 3}, kInk, 0.5);
+    f.text({p.x, p.y + 11}, km_or_m(t), 6.5, Anchor::Middle, false, kInk);
+  }
+  for (double t : nice_ticks(d.y0, d.y0 + d.sy, 6)) {
+    Pt p = P(d.x0, t);
+    f.line({p.x - 3, p.y}, p, kInk, 0.5);
+    f.text({p.x - 5, p.y + 2.5}, km_or_m(t), 6.5, Anchor::End, false, kInk);
+  }
+  f.text({mx0 + mw / 2, my0 + mh + 24}, "Easting (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({mx0 - 40, my0 + mh / 2}, "Northing (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  double rx = 842 - 200, ry = 60;
+  f.text({rx, ry}, "Mean curvature (1/km)", 7.5, Anchor::Start, true, kInk);
+  for (int k = 0; k < 100; ++k) f.rect(rx, ry + 6 + k * 1.6, 14, 1.7, diverging(1 - 2 * k / 99.0), none());
+  f.rect(rx, ry + 6, 14, 160, none(), kInk, 0.4);
+  f.text({rx + 18, ry + 12}, "+" + fmt_fixed(kmax * 1000, 3), 6.5, Anchor::Start, false, kInk);
+  f.text({rx + 18, ry + 88}, "0", 6.5, Anchor::Start, false, kInk);
+  f.text({rx + 18, ry + 166}, "-" + fmt_fixed(kmax * 1000, 3), 6.5, Anchor::Start, false, kInk);
+  std::vector<LegendEntry> es{{"Fractures", "Trend (" + std::to_string(nticks) + " ticks)", none(), true, rgb(20, 20, 20), 0.9},
+                              {"Wells", "Well", rgb(255, 255, 255), false, kWell, 0.9, 1}};
+  double ly = legend(f, rx, ry + 186, 180, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, rx, ly, 180);
+  footer(f, c);
+  return f;
+}
+
 WrittenFigure write_figure(const Figure& f, const std::filesystem::path& folder, const std::string& base, const std::string& t,
                            const std::string& caption, const std::string& notes) {
   WrittenFigure w;
@@ -1135,6 +1346,15 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
                                "Burial-history curves at " + b.location + ": burial depth of each horizon through the deposition steps.",
                                notes_common));
   }
+  // Curvature maps (stage 2F)
+  for (int h : c.curvature_horizons) {
+    auto cg = repr::curvature(*c.model, h, g, std::isnan(c.fracture_threshold) ? 1e300 : c.fracture_threshold);
+    auto fgr = curvature_figure(c, h, cg);
+    const auto& hn = inf.horizons[static_cast<std::size_t>(h)].name;
+    out.push_back(write_figure(fgr, folder, figure_basename(c, "curvature", hn), c.model_name + " - " + hn + " curvature",
+                               "Mean curvature of " + hn + " (Roberts 2001) with fracture trends where the curvature passes the threshold.",
+                               notes_common));
+  }
   // 3D views
   for (auto [az, el, name] : {std::tuple<double, double, std::string>{135, 22, "SE-oblique"}, {315, 22, "NW-oblique"}}) {
     auto fgr = view3d_figure(c, az, el, name);
@@ -1167,6 +1387,45 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
       out.push_back(write_figure(fgr, folder, figure_basename(c, "fault-plane", inf.faults[ff].name),
                                  c.model_name + " - displacement on fault " + inf.faults[ff].name,
                                  "Displacement on fault " + inf.faults[ff].name + " with the cut-offs of every horizon.", notes_common));
+      // fault rock and stress (stage 2F)
+      if (c.fault_rock || c.stress.present) {
+        const auto& fname = inf.faults[ff].name;
+        auto pts = repr::fault_rock_surface(*c.model, surfs[ff], c.rock, c.stress);
+        auto attr = [&](const char* kind, const std::string& label, const std::string& unit, auto get, double scale, double lo, double hi,
+                        const std::string& caption) {
+          std::vector<double> v(pts.size(), kNaN);
+          bool any = false;
+          for (std::size_t k = 0; k < pts.size(); ++k)
+            if (pts[k].valid) {
+              v[k] = get(pts[k]) * scale;
+              any = any || std::isfinite(v[k]);
+            }
+          if (!any) return;
+          auto fg = fault_attribute_figure(c, static_cast<int>(ff), surfs[ff], v, cuts[ff], label, unit, lo, hi);
+          out.push_back(write_figure(fg, folder, figure_basename(c, kind, fname), c.model_name + " - " + label + " on fault " + fname,
+                                     caption, notes_common));
+        };
+        if (c.fault_rock) {
+          auto fg = allan_figure(c, static_cast<int>(ff), surfs[ff], pts, cuts[ff]);
+          out.push_back(write_figure(fg, folder, figure_basename(c, "allan", fname), c.model_name + " - Allan diagram of fault " + fname,
+                                     "Allan diagram of fault " + fname + ": units juxtaposed across the fault, with the cut-offs of every horizon.",
+                                     notes_common));
+          attr("fault-sgr", "Shale gouge ratio", "fraction", [](const repr::FaultRockPoint& p) { return p.sgr; }, 1.0, 0.0, 1.0,
+               "Shale gouge ratio on fault " + fname + " (Yielding et al. 1997) from the clay fractions of the units slipped past each point.");
+          attr("fault-csp", "Clay smear potential", "m", [](const repr::FaultRockPoint& p) { return p.csp; }, 1.0, kNaN, kNaN,
+               "Clay smear potential on fault " + fname + " (Bouvier et al. 1989) from the shale beds of both walls.");
+          attr("fault-seal", "Seal capacity", "bar", [](const repr::FaultRockPoint& p) { return p.seal_bar; }, 1.0, kNaN, kNaN,
+               "Seal capacity (across-fault pressure difference) on fault " + fname + " from the SGR calibration in the description.");
+        }
+        if (c.stress.present) {
+          attr("fault-ts", "Slip tendency", "ratio", [](const repr::FaultRockPoint& p) { return p.ts; }, 1.0, 0.0, kNaN,
+               "Slip tendency (Morris et al. 1996) on fault " + fname + " under the stress in the description.");
+          attr("fault-td", "Dilation tendency", "ratio", [](const repr::FaultRockPoint& p) { return p.td; }, 1.0, 0.0, 1.0,
+               "Dilation tendency (Ferrill et al. 1999) on fault " + fname + " under the stress in the description.");
+          attr("fault-dp", "Pressure to reactivate", "MPa", [](const repr::FaultRockPoint& p) { return p.dp; }, 1e-6, kNaN, kNaN,
+               "Pore-pressure increase to reactivation (Mohr-Coulomb) on fault " + fname + ".");
+        }
+      }
     }
     // fault systems: faults joined by recorded relations
     std::vector<int> group(inf.faults.size());

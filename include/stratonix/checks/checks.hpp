@@ -10,6 +10,7 @@
 #include "stratonix/desc/description.hpp"
 #include "stratonix/model/model.hpp"
 #include "stratonix/registry/registry.hpp"
+#include "stratonix/repr/faultrock.hpp"
 #include "stratonix/repr/repr.hpp"
 
 namespace stratonix {
@@ -93,5 +94,9 @@ std::vector<BalanceRow> balance_rows(const Model& m, const desc::Description& d)
 
 /// Register this layer's plugins.
 void register_check_plugins();
+
+/// Fault-rock and stress inputs from a description (stage 2F, STX-TN-10), in SI units.
+repr::FaultRockInput fault_rock_input(const desc::Description& d, const Model& m);
+repr::StressInput stress_input(const desc::Description& d);
 
 }  // namespace stratonix
