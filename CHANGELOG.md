@@ -72,6 +72,11 @@ has its own version (`stratonix_schema`).
   hanging wall (Jacobian determinant in the dip plane), tolerance `checks.tolerances.area`
   (default 0.01).
 
+- Stage 2C specification (technical note STX-TN-07): stratigraphic series with conformable,
+  erosional and onlap relations, stratal terminations, thickness trends and pinch-outs, growth
+  strata, clinoforms; checks C13 and C14; rules F20 to F23. New interfaces, additive:
+  `Structure::missing_section`, `repr::unit_thickness_grid`, `repr::termination_lines`.
+
 ### Changed
 - Check C4 skips trishear and fault-parallel-flow faults, whose throw is not a profile; C12
   checks them instead.
@@ -84,7 +89,7 @@ has its own version (`stratonix_schema`).
   unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
   and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
-  integrations).
+  integrations); stage 2C (`test_v2_strat`), expected to fail until its features are built.
 
 ## [2026.1] - 2026-11-14 - First public release
 

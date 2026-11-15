@@ -346,4 +346,8 @@ FaultedSurface horizon_grid_faulted(const Model& m, int h, const GridSpec& g) {
   return fs;
 }
 
+// Stage 2C (STX-TN-07 section 2): implemented in Prompt 23.
+Grid2D unit_thickness_grid(const Model&, int, const GridSpec& g) { return Grid2D(g, std::nan("")); }
+std::vector<TerminationLine> termination_lines(const Model&, int, const GridSpec&) { return {}; }
+
 }  // namespace stratonix::repr

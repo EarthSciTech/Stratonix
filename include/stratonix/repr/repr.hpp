@@ -42,6 +42,18 @@ struct FaultedSurface {
 /// from the per-block root. Parity tested.
 FaultedSurface horizon_grid_faulted(const Model& m, int horizon, const GridSpec& g);
 
+// ---- stratigraphic terminations (stage 2C, STX-TN-07 section 2) ----------------------------
+/// Vertical thickness of model unit `unit` (between horizons unit-1 and unit) in the present
+/// geometry, per node where both horizons are in one fault block; NaN in fault gaps.
+Grid2D unit_thickness_grid(const Model& m, int unit, const GridSpec& g);
+/// Where a unit's thickness falls to zero, with the kind of termination from ModelInfo
+/// ("onlap", "truncation", "pinch-out", "clinoform"); empty for a unit that does not terminate.
+struct TerminationLine {
+  std::string unit, kind;
+  Polyline line;
+};
+std::vector<TerminationLine> termination_lines(const Model& m, int unit, const GridSpec& g);
+
 // ---- faults --------------------------------------------------------------------------------
 struct FaultSurface {
   int fault = -1;

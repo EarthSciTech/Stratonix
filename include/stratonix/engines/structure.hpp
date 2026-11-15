@@ -70,6 +70,9 @@ class Structure {
   const std::vector<FoldPrimitive>& primitives() const { return prims_; }
   /// Maximum |correction| at the wells' neighbourhood per horizon (reported).
   const std::vector<double>& max_correction() const { return max_corr_; }
+  /// Missing (eroded) section of model unit `unit` (between horizons unit-1 and unit, both in one
+  /// series) at (x, y) in the restored frame (STX-TN-07 section 1).
+  double missing_section(int unit, double x, double y) const;
   /// Reference depths (positive down) at the reference location.
   const std::vector<double>& reference_depths() const { return ref_depth_; }
 

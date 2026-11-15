@@ -392,6 +392,8 @@ std::shared_ptr<const FoldPrimitive::Offset> Structure::parallel_offset(const Fo
   return o;
 }
 
+double Structure::missing_section(int, double, double) const { return 0.0; }  // stage 2C, Prompt 23
+
 double Structure::regional(double x, double y) const { return reg_gx_ * (x - reg_x0_) + reg_gy_ * (y - reg_y0_); }
 
 double Structure::z_uncorrected(std::size_t h, double x, double y) const {
