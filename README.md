@@ -4,7 +4,18 @@ Stratonix is a general 2D/3D geomodelling toolkit written in C++. It builds stru
 (horizons and fault planes) from a parametric design, checks them, and exports them in formats
 other software can load, Petrel first.
 
-Release 2026.2 (version 2) adds:
+Release 2026.3 (version 3) adds:
+
+- models conditioned to data: a large-data implicit solver, one field per stratigraphic series,
+  fault throws and profiles estimated from data, per-point data uncertainty, and parametric
+  models fitted to wells and picks with stated uncertainties;
+- grids and properties: corner-point grids conforming to faults and horizons, tetrahedral
+  grids, zones, facies, compaction porosity, labelled transforms, fault transmissibility
+  multipliers, exported as GRDECL, VTK and RESQML;
+- uncertainty: distributions and scenarios on any labelled parameter, seeded ensembles,
+  statistics, sensitivity and probability maps.
+
+Release 2026.2 (version 2) added:
 
 - fault systems: listric, ramp-flat and curved faults, splays, relays, drag, and oblique and
   strike-slip movement;
@@ -15,8 +26,8 @@ Release 2026.2 (version 2) adds:
 - faults as rock: Allan diagrams, shale gouge ratio, clay smear, seal capacity, slip and
   dilation tendency, and horizon curvature with fracture trends.
 
-Next come data conditioning, grids and uncertainty (v3), applications (v4) and a graphical
-application with bindings (v5).
+Next come applications (v4: petroleum, CO2 and hydrogen storage, geothermal, groundwater) and a
+graphical application with bindings (v5).
 
 - Library: `libstratonix` (namespace `stratonix`), one static library per layer.
 - Program: `stratonix` (`stratonix.exe` on Windows).

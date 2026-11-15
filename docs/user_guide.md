@@ -1,7 +1,7 @@
 ---
 title: Stratonix user guide
 doc_id: STX-UG
-version: 2.0
+version: 3.0
 date: 2026-11-15
 ---
 
@@ -339,6 +339,122 @@ fault_rock:
 Examples: `fault_system_relay_splay`, `trishear_fold`, `salt_diapir_crestal_faults`,
 `detachment_folds`.
 
+## 2.12 Models conditioned to data (2026.3)
+
+The implicit builder (2.4) now takes large data sets, series and faults from data, and the
+parametric builder can fit its parameters to data.
+
+- **Large data.** `implicit.solver: {type: auto | dense | partition_of_unity, points_per_patch,
+  overlap}`. `auto` uses the dense solver up to 3000 interface data and a partition of unity
+  above, which keeps exact interpolation: 100 000 points build in about 12 s.
+- **Series.** With `stratigraphy.series`, one field per series, combined by their relations
+  (erosional, onlap). A horizon that thins out within its series is listed in
+  `implicit.isochore_horizons`: it is built from the horizon above minus a thickness from its own
+  picks.
+- **Faults from data.**
+  - `throw: {estimate: {band, station_spacing}}` estimates throw, length, centre and vertical tips
+    from horizon cut-offs (labelled calibrated).
+  - `geometry: {type: sticks, fit: profile}` fits a listric or ramp-flat profile to the sticks.
+- **Uncertainty of data.** Give `uncertainty` on an `implicit.data` entry, `sigma` (m) and
+  `sigma_deg` columns in a CSV, or `wells[].top_uncertainty`. A point with an uncertainty is
+  approached within it rather than honoured exactly. `implicit.data_influence: true` adds
+  leave-one-out errors and the ten most influential data.
+- **Hybrid conditioning.** A top-level `conditioning` block fits any scalar parameter of a
+  parametric description to points, orientations and well tops with stated uncertainties:
+
+```yaml
+conditioning:
+  data: [{input: picks, kind: points, horizon: H2, uncertainty: "3 m | interpreted | pick accuracy"}]
+  parameters:
+    - {path: faults.F1.throw.max, min: "60 m | assumed | ...", max: "200 m | assumed | ..."}
+```
+
+  Fitted values are labelled calibrated, with their uncertainty (`conditioning.csv`) and the data
+  that control them (`influence.csv`). A fit that does not converge inside its range, or that no
+  datum controls, is refused with the reason.
+- **Checks.** C21 (data misfit within the stated uncertainty) and C22 (the conditioning
+  converged inside its ranges).
+
+Examples: `implicit_unconformity_from_samples`, `implicit_relay_splay_from_samples`,
+`implicit_detachment_folds_from_samples`, `implicit_faults_series_from_data`,
+`hybrid_fault_fold_conditioning`.
+
+## 2.13 Grids and properties (2026.3)
+
+A top-level `grid` block grids any model into a corner-point grid that honours its faults and
+horizons:
+
+```yaml
+grid:
+  spacing: "[200, 200] m | user_instruction | areal cell size"
+  margin: "50 m | user_instruction | pillars above the top and below the base horizon"
+  zones:
+    - {unit: Unit_1, layers: "4 ordinal | user_instruction | ...", layering: proportional}
+    - {unit: Unit_2, layers: "3 ordinal | user_instruction | ...", layering: follow_top, layer_thickness: "70 m | user_instruction | ..."}
+  facies: [{unit: Unit_1, code: "1 ordinal | user_instruction | ...", name: sand}]
+  porosity: compaction                       # from the stage 2D compaction laws
+  transforms:
+    - {name: PERMX, unit: mD, from: PORO, law: exponential, a: "0.01 mD | assumed | ...", b: "30 ratio | assumed | ..."}
+  fault_transmissibility: {calibration: manzocchi_1999}   # needs fault_rock and PERMX, PERMY
+  tetrahedral: true
+```
+
+- **Pillars.** Pillars lie on the faults; cells take the zone and fault block they are in. Cells
+  thinner than `min_thickness` are inactive, with the reason.
+- **Properties.** Each carries a unit, an evidence class and a source. A value that cannot be
+  computed (a unit without a compaction law, a face without a shale gouge ratio) is left missing,
+  counted and explained in the summary table; it is never defaulted.
+- **Transmissibility.** Multipliers (MULTX, MULTY) follow Manzocchi et al. (1999) from the
+  shale gouge ratio and fault-zone thickness of 2.11. `grid/fault_faces.csv` lists every fault
+  face with its inputs and multiplier.
+- **Outputs.** `grid/cells.csv`, grid sections, layer maps and 3D views. Exports `grdecl`,
+  `grid_vtk` and `resqml` (5).
+- **Checks.** C23 (positive cell volumes), C24 (no inverted cells), C25 (fault faces on the
+  fault surfaces).
+- **Rule F32** checks the block.
+
+Examples: `fault_system_relay_splay`, `rift_inversion_history`.
+
+## 2.14 Uncertainty and ensembles (2026.3)
+
+A top-level `uncertainty` block lets labelled parameters vary. A parameter without a
+distribution stays at its value.
+
+```yaml
+uncertainty:
+  members: "200 ordinal | user_instruction | ensemble size"
+  seed: "20261115 ordinal | user_instruction | recorded in the manifest"
+  parameters:
+    - {path: faults.F1.throw.max, distribution: normal, mean: "120 m | assumed | ...", sd: "15 m | assumed | ..."}
+    - {path: wells.W1.tops.H2, distribution: uniform, min: "1180 m | assumed | ...", max: "1220 m | assumed | ..."}
+  correlations: [{a: faults.F1.throw.max, b: faults.F3.throw.max, rho: "0.6 ratio | assumed | ..."}]
+  scenarios:
+    - name: splay
+      options:
+        - {name: with_F2, weight: "0.7 fraction | assumed | ..."}
+        - {name: without_F2, weight: "0.3 fraction | assumed | ...", remove: [faults.F2]}
+  one_at_a_time: true
+  probability_maps: [{kind: unit, unit: Unit_1, depth: "1150 m | ...", spacing: "200 m | ..."}]
+```
+
+- **Paths and distributions.** Paths name faults, primitives, horizons and wells by name.
+  Distributions are `uniform` (min, max), `normal` (mean, sd, optional min and max), `triangular`
+  (min, mode, max) and `discrete` (values, weights). Scenario options `set` description nodes or
+  `remove` list items.
+- **Running.** `stratonix ensemble model.yaml -o out/ens` builds every member with its checks,
+  in parallel. The same seed gives the same files on every computer and for any `--threads`.
+- **Outputs.**
+  - `ensemble/members.csv`: every member, with seed, values, options, status, reason, failed
+    checks and key numbers. A failed member is listed, never dropped.
+  - `statistics.csv`: P10, P50 and P90 of each key number, with N and the seed.
+  - `sensitivity_sobol.csv`: first-order indices.
+  - `sensitivity_oat.csv`: one-at-a-time swings.
+  - `maps/` probability maps, and `figures/` histograms, index charts, tornado charts and maps.
+  - The base case's full build in `base/`.
+- **Rule F33** checks the block.
+
+Example: `fault_system_uncertainty`.
+
 # 3. Running
 
 | Command | What it does |
@@ -349,6 +465,7 @@ Examples: `fault_system_relay_splay`, `trishear_fold`, `salt_diapir_crestal_faul
 | `stratonix export model.yaml -o out/e1 --formats petrel,vtk` | exports only |
 | `stratonix package model.yaml -o out/delivery --config package.yaml --zip` | delivery package (section 6) |
 | `stratonix state model.yaml --age 45 -o out/45Ma` | the model at an event of its timeline, with its package (2026.2) |
+| `stratonix ensemble model.yaml -o out/ens [--members N] [--seed S]` | the seeded ensemble of the description's uncertainty block (2026.3) |
 | `stratonix verify out/run1/manifest.json` | checks every file against its SHA-256 |
 | `stratonix plugins` | lists structure builders, kinematics, hanging-wall fields, exporters, importers, checks |
 | `stratonix bench --spacing 100,50` | timings of the kernels |
@@ -389,6 +506,11 @@ exports and figures.
 | C18 balance | WARNING: line length or area differs between present and restored |
 | C19 juxtaposition | the units on a fault's walls disagree with the restored stratigraphy |
 | C20 tendencies | a slip or dilation tendency lies outside its bounds |
+| C21 data misfit | fewer than 95 % of the data with an uncertainty lie within 3 sigma, or an exact datum is missed |
+| C22 conditioning | a fitted parameter did not converge strictly inside its range (WARNING when the reduced chi2 exceeds 4) |
+| C23 cell volumes | an active grid cell has a volume of zero or less |
+| C24 inverted cells | an active grid cell is inverted (corner order or corner Jacobian) |
+| C25 fault faces | a fault face of the grid lies off its fault surface by more than 1 % of the cell size |
 
 Targets are reported, never used to tune the model.
 
@@ -417,6 +539,14 @@ From 2026.2 the exports add, where the description asks for them:
   `curvature/` (nine grids per horizon), all IRAP classic;
 - fault attributes as VTK point data on the fault surfaces;
 - `csv/<fault>_fault_attributes.csv`, one row per surface node.
+
+From 2026.3, with a `grid` block (2.13):
+
+| Id | Files |
+|---|---|
+| `grdecl` | `grid/<model>_grid.grdecl`: SPECGRID, COORD, ZCORN, ACTNUM (depth positive down), ZONE, BLOCK, FACIES and the real properties with unit and evidence in comments, MULTX, MULTY and FAULTS; missing values written as -999.25 and explained in the header |
+| `grid_vtk` | `grid/grid_cells.vtu` (hexahedra) and, with `tetrahedral: true`, `grid/grid_tetrahedra.vtu` |
+| `resqml` | RESQML 2.0.1 EPC and HDF5 (IJK grid, split coordinate lines, properties). It needs a build with FESAPI (`STRATONIX_WITH_FESAPI`); other builds say so and write nothing |
 
 Load into Petrel with the Petrel import checklist: it gives the dialog option for each file and
 what to look at to confirm a correct load.
@@ -450,3 +580,8 @@ the package is marked DRAFT. Settings: `docs/package_config.md`.
 - Where a reverse fault repeats a horizon, grids keep the upper occurrence (reported as overlap
   nodes).
 - At most 64 faults per model.
+- Grids follow faults oblique to the lattice in stair steps, and are of the present-day model
+  only. RESQML export needs a build with FESAPI; validation against the RESQML schemas needs the
+  Energistics schema files.
+- A unit that thins out within a series must be declared in `implicit.isochore_horizons`.
+- Sensitivity gives first-order indices only; the key numbers are those of the summary table.

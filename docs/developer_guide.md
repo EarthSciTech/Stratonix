@@ -1,7 +1,7 @@
 ---
 title: Stratonix developer guide
 doc_id: STX-DG
-version: 2.0
+version: 3.0
 date: 2026-11-15
 ---
 
@@ -20,12 +20,12 @@ check.
 | 1 | `stratonix_desc` | YAML/JSON reader, embedded JSON Schema and validator, typed description, semantic rules, migration |
 | 1 | `stratonix_registry` | plugin registry (kinds, entries, factories) and the plugin C ABI header |
 | 2 | `stratonix_model` | the `Model` interface, the flat-layers reference model, the interface conformance suite |
-| 3 | `stratonix_engines` | structure builder, structure field (series, salt, compaction), fault network and kinematics (curved faults, trishear, fault-parallel flow), event timeline and states (`history.hpp`), parametric model, wells |
-| 4 | `stratonix_repr` | grids with gaps, per-block grids, fault surfaces and sticks, cut-offs, throws, well tops, sections, voxels, closure, contours, thickness and termination lines, flexural unfolding, fault rock and curvature (`faultrock.hpp`) |
-| 5 | `stratonix_checks` | checks C1-C20, balance rows, fault-rock and stress inputs from a description, run manifest |
-| 5 | `stratonix_io` | file formats, exporters, importers |
+| 3 | `stratonix_engines` | structure builder, structure field (series, salt, compaction), fault network and kinematics (curved faults, trishear, fault-parallel flow), event timeline and states (`history.hpp`), parametric model, implicit model (dense and partition-of-unity solvers, series, isochore horizons), hybrid conditioning (`conditioning.hpp`), wells |
+| 4 | `stratonix_repr` | grids with gaps, per-block grids, fault surfaces and sticks, cut-offs, throws, well tops, sections, voxels, closure, contours, thickness and termination lines, flexural unfolding, fault rock and curvature (`faultrock.hpp`), corner-point and tetrahedral grids, properties, transmissibility and upscaling (`grid.hpp`) |
+| 5 | `stratonix_checks` | checks C1-C25, balance rows, fault-rock, stress and grid inputs from a description (`make_grid_products`), run manifest |
+| 5 | `stratonix_io` | file formats, exporters (GRDECL, grid VTK, RESQML through FESAPI when built with it), importers |
 | 5 | `stratonix_figures` | display list, SVG, Cairo raster, PNG/TIFF encoders, PPTX, software 3D renderer, the figure set |
-| 6 | `stratonix_package` | build pipeline, exports, figures, benchmarks, delivery package |
+| 6 | `stratonix_package` | build pipeline, exports, figures, benchmarks, delivery package, ensembles (`uncertainty.hpp`) |
 | 7 | `stratonix_capi`, `stratonix_c`, `stratonix` | C API (static and shared), command line |
 
 Choices that keep later stages open (specification section 2): everything reads a model only
@@ -58,7 +58,9 @@ interface declared in the model layer, or null:
 | `faults` | `FaultNetwork` (engines) | parametric | checks C11, C12 |
 | `stratigraphy` | `StratigraphyQuery` (model) | parametric | termination lines, isopachs (repr) |
 | `column` | `ColumnQuery` (model) | parametric | fault rock: restored stratigraphic positions (repr) |
-| `data_misfit` | (engines) | implicit | reports |
+| `data_misfit` | (engines) | implicit, conditioned | reports, C21 |
+| `conditioning` | `ConditioningResult` (engines) | conditioned parametric | reports, C22 |
+| `porosity` | `PorosityQuery` (model) | parametric with compaction | grid porosity (repr) |
 
 A new engine that cannot answer a capability returns null; the callers then report the dependent
 attribute as missing, never a default.
@@ -76,7 +78,9 @@ check it.
   `linux-gcc-debug`, `linux-clang-release`, `linux-asan` (address and undefined-behaviour
   sanitisers), `windows-msvc-release`, `windows-msvc-debug`.
 - Dependencies: libyaml (MIT), zlib (zlib licence), Cairo (LGPL 2.1, dynamically linked; optional:
-  without it only SVG figures are written). On Windows they come from vcpkg (`vcpkg.json`); the
+  without it only SVG figures are written). FESAPI (Apache 2.0, optional, `STRATONIX_WITH_FESAPI`
+  and `FESAPI_ROOT`) for the RESQML exporter; the CI job `resqml` builds it from source with HDF5,
+  Minizip and Boost, and reads the result back with resqpy. On Windows they come from vcpkg (`vcpkg.json`); the
   vcpkg baseline must be pinned on the first networked build (`vcpkg x-update-baseline
   --add-initial-baseline`). No GPL code. See `THIRD_PARTY.md`.
 - Tests: `ctest` runs the unit tests (own minimal harness, `tests/stx_test.hpp`), the model suite,
@@ -176,6 +180,34 @@ reason in `missing` when an input is absent. A new attribute is:
 - a column in the CSV exporter and a VTK array;
 - a summary row in `fault_rock_rows`;
 - an analytical case in `test_v2_faultrock`.
+
+### Grids and properties (2026.3)
+
+`repr/grid.hpp` takes plain inputs (`GridOptions`, `PropertyInputs`, `FaultRockInput`).
+`make_grid_products` (checks layer) builds the grid through the `corner_point` extractor plugin,
+the properties, the transmissibility and the tetrahedral grid once per run; checks C23-C25,
+`grid/cells.csv`, the grid figures and the grid exporters share them (`CheckContext::grid_products`).
+A new property is:
+
+- a branch of `grid_properties` (or a transform), with unit, evidence class and source, and a
+  missing count with the reason;
+- a column in `grid/cells.csv` and a keyword in GRDECL (automatic for properties in the set);
+- an analytical case in `test_v3_grids`.
+
+Other grid extractors (kind `Extractor`, interfaces `CornerPointExtractor`,
+`TetrahedralExtractor`) and upscalers (kind `Upscaler`, `UpscalerPlugin`) register like any plugin.
+
+### Ensembles (2026.3)
+
+`package/uncertainty.hpp`. An ensemble edits the description document by path
+(`unc::set_parameter`, scenario `set`/`remove`), validates it again and builds it through the
+usual pipeline. Members run in parallel; results are written in member order. Rules for code
+touched by ensembles:
+
+- random numbers only from `unc::Rng` streams seeded by `member_seed(seed, member)`;
+- no use of `std::` distributions (their output differs between standard libraries);
+- outputs written in member order, numbers through `fmt_fixed`/`fmt_shortest`;
+- `test_v3_uncertainty` U9 compares files from 1 and 4 threads.
 
 ## 4.3 An importer
 

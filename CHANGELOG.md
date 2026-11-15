@@ -3,7 +3,32 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
-## [Unreleased] - v3 (2026.3) in progress
+## [2026.3] - 2026-11-15 - Version 3: data, grids and uncertainty
+
+Version 3 adds:
+
+- data-conditioned modelling (stage 3A);
+- grids and properties (3B);
+- uncertainty (3C).
+
+Checks C21-C25, rules F29-F33 and C API 1.2 come with them.
+
+### Migration notes for description files
+- Nothing to change. The schema stays `stratonix_schema: 1`; every new key is optional. A
+  description written for 2026.2 builds unchanged, with the same checks, figures and exports,
+  except the version in manifests, figure footers and export comments.
+- New top-level keys: `conditioning` (3A), `grid` (3B), `uncertainty` (3C).
+- New keys under `implicit`: `solver`, `data_influence`, `isochore_horizons`, and
+  `data[].uncertainty`.
+- New fault keys: `geometry.fit` (sticks) and `throw.estimate`; `extent` is required by rule F10
+  rather than by the schema.
+- New well key: `top_uncertainty`.
+- New units: mD and D (permeability).
+- Example models changed in this release are issued under a new model version
+  (`fault_system_relay_splay` 1.2.0, `rift_inversion_history` 1.1.0); the earlier example
+  packages stay as issued.
+- The LoopStructural input set lists abutting faults and isochore horizons in
+  `model_setup.json` (new keys only).
 
 ### Added
 - Stage 3A specification (STX-TN-11): data-conditioned modelling. It covers a large-data implicit
