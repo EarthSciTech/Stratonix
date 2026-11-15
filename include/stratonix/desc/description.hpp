@@ -56,8 +56,21 @@ struct HorizonDesc {
   std::string surface_input, surface_format, surface_z_is = "depth";
   std::string iso_from, iso_input, iso_format;
   Param iso_thickness;
+  std::string iso_trend;           ///< "" (constant), "linear" or "radial" (STX-TN-07 section 3)
+  Param iso_gradient, iso_centre;
   bool intended_offset = false;
 };
+/// Stratigraphic series (STX-TN-07 section 1): consecutive horizons, youngest first.
+struct SeriesDesc {
+  std::string name;
+  std::vector<std::string> horizons;
+  std::string base;                ///< conformable, erosional or onlap
+  Param tilt_dip, tilt_azimuth;
+  std::string clino_profile;       ///< "" or sigmoidal / oblique (section 5)
+  Param clino_height, clino_width, clino_direction, clino_first_break, clino_progradation;
+};
+/// Growth strata (STX-TN-07 section 4): movement between onset and end.
+struct GrowthDesc { std::string onset, end; bool present() const { return !onset.empty(); } };
 /// A unit between consecutive horizons; top "model_top" / base "model_base" name the units above
 /// the first and below the last horizon.
 struct UnitDesc { std::string name, top, base, role, color, label; };
@@ -66,6 +79,8 @@ struct PrimitiveDesc {
   Param crest, axis_azimuth, plunge, half_length, half_width_left, half_width_right;
   Param radius_major, radius_minor, rim_depth, rim_width;
   std::vector<std::pair<std::string, Param>> relief;  ///< horizon name -> relief
+  std::string series;              ///< stage 2C: youngest series folded ("" = all)
+  GrowthDesc growth;               ///< stage 2C: growth strata
   // Stage 2B (STX-TN-06 sections 3 to 5)
   Param half_width, shortening;    ///< detachment_fold
   std::string detachment;          ///< detachment_fold: horizon of the detachment
@@ -112,6 +127,7 @@ struct FaultDesc {
   Param rake;                      ///< oblique: rake (Aki and Richards convention)
   bool strike_component() const { return slip_mode == "oblique" || slip_mode == "strike_slip"; }
   // Fault-related folding (STX-TN-06 section 1).
+  GrowthDesc growth;               ///< stage 2C: growth strata (layer_rigid hanging walls)
   std::string fold_type;           ///< trishear (empty: none)
   Param fold_apical_angle, fold_ps_ratio;
 };
@@ -166,6 +182,7 @@ struct Description {
   Param ref_point;
   std::vector<HorizonDesc> horizons;
   std::vector<UnitDesc> units;
+  std::vector<SeriesDesc> series;  ///< empty: one conformable series
   std::string above_top_name, below_base_name;
   std::string regional_type = "flat";
   Param regional_dip, regional_dip_azimuth;
@@ -187,11 +204,14 @@ struct Description {
   std::vector<SheetDesc> sheets;
   Param vertical_exaggeration, voxel_spacing, fault_stick_spacing;
   std::vector<std::string> exports;
+  std::vector<std::string> isopachs;  ///< units with isopach maps besides those that terminate
 
   bool is_design() const { return model.status == "DESIGN"; }
   int horizon_index(const std::string& name) const;
   int unit_index(const std::string& name) const;
   int fault_index(const std::string& name) const;
+  /// Series of horizon h (index into series), -1 when no series are given.
+  int series_of(int h) const;
   const WellDesc* well(const std::string& name) const;
   /// Every parameter present in the description (for the parameters table and manifest).
   std::vector<const Param*> all_params() const;

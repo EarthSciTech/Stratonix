@@ -30,12 +30,16 @@ struct HorizonInfo {
   std::string name;
   int index = 0;
   bool intended_offset = false;  ///< true if a top/base horizon may be offset on purpose
+  std::string series;            ///< stratigraphic series (stage 2C; empty: one series)
 };
 struct UnitInfo {
   std::string name;
   int top_horizon = -1;   ///< -1 for the unit above the top horizon
   int base_horizon = -1;  ///< -1 for the unit below the base horizon
   std::string color;      ///< "#rrggbb" or empty
+  /// Designed termination inside the model (stage 2C): "truncation", "onlap", "pinch-out",
+  /// "clinoform", or empty.
+  std::string termination;
 };
 /// Approximate plane and extent of a fault, used by extractors to locate its surface.
 struct FaultInfo {
@@ -84,6 +88,17 @@ struct DataMisfit {
   std::string kind;       ///< "point", "orientation" or "well_top"
   Vec3 p;                 ///< present-day position
   double misfit = 0;      ///< points: vertical distance to the horizon (m, + above); orientations: angle (deg)
+};
+
+/// Stratigraphic queries a model may offer through capability("stratigraphy") (stage 2C,
+/// STX-TN-07): whether horizon h is clamped by a series relation at a restored-frame (x, y), so
+/// it has no top there.
+struct StratigraphyQuery {
+  virtual ~StratigraphyQuery() = default;
+  virtual bool horizon_absent(int h, double x, double y) const = 0;
+  /// Kind of termination of model unit `unit` near restored (x, y) within `radius`: "truncation",
+  /// "onlap", "pinch-out", "clinoform", or empty where the unit is present.
+  virtual std::string termination_at(int unit, double x, double y, double radius) const = 0;
 };
 
 /// Which fields evaluate() should fill.

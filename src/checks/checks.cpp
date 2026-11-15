@@ -25,6 +25,8 @@ STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c9);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c10);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c11);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c12);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c13);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c14);
 
 namespace stratonix {
 
@@ -166,9 +168,11 @@ std::vector<CheckResult> thickness_checks(CheckContext& c, bool crossing) {
       }
       EvalResult r;
       c.model().evaluate(p, kEvalBlock, r);
+      const bool terminates = !crossing && !inf.units[h + 1].termination.empty();
       for (std::size_t q = 0; q < idx.size(); ++q) {
         if (r.block[q] != b) continue;
         double t = a.v[idx[q]] - z.v[idx[q]];
+        if (terminates && t < 0.01) continue;  // absent by design (stage 2C): C13 checks it
         if (t < worst) {
           worst = t;
           where = "block " + std::to_string(b) + " at (" + fmt_fixed(p[q].x, 0) + ", " + fmt_fixed(p[q].y, 0) + ")";
@@ -183,6 +187,12 @@ std::vector<CheckResult> thickness_checks(CheckContext& c, bool crossing) {
     r.tolerance_source = src;
     r.passed = crossing ? worst >= -tol : worst >= tol;
     r.detail = "minimum thickness, " + where;
+    if (!crossing && !inf.units[h + 1].termination.empty()) {
+      // thins to zero towards its designed termination: positive wherever present (C13 checks the rest)
+      r.tolerance = 0;
+      r.passed = worst > 0;
+      r.detail += "; where present, thinning to its " + inf.units[h + 1].termination + " by design";
+    }
     out.push_back(r);
   }
   return out;
@@ -553,6 +563,89 @@ class C12 final : public Check {
   }
 };
 
+/// C13: no negative thickness in the restored frame, after the series relations and, within each
+/// series, before them (STX-TN-07 section 6). Designed pinch-outs (trends clamped) are exempt.
+class C13 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* st = static_cast<const Structure*>(c.model().capability("structure"));
+    if (!st || !st->has_relations()) return out;
+    std::string src;
+    const double tol = c.tolerance("crossing", &src);
+    const auto& inf = c.model().info();
+    const std::size_t nh = st->horizons();
+    const auto& g = c.grid();
+    std::vector<double> raw(nh), eff(nh), worst(nh, 1e300);
+    std::vector<unsigned char> fl(nh);
+    std::vector<std::string> where(nh);
+    for (std::size_t k = 0; k < g.size(); ++k) {
+      const double x = g.x(k % g.nx), y = g.y(k / g.nx);
+      st->z_detail(x, y, raw.data(), eff.data(), fl.data());
+      for (std::size_t u = 1; u < nh; ++u) {
+        double t = eff[u - 1] - eff[u];
+        if (st->series_of(u - 1) == st->series_of(u) && !st->trend_clamped(u, x, y)) t = std::min(t, raw[u - 1] - raw[u]);
+        if (t < worst[u]) { worst[u] = t; where[u] = "(" + fmt_fixed(x, 0) + ", " + fmt_fixed(y, 0) + ")"; }
+      }
+    }
+    for (std::size_t u = 1; u < nh; ++u) {
+      auto r = base(c, "C13", "no negative thickness (restored frame, series relations)", inf.units[u].name);
+      r.value = worst[u];
+      r.tolerance = -tol;
+      r.tolerance_source = src;
+      r.passed = worst[u] >= -tol;
+      r.detail = "minimum thickness at " + where[u] + ", before the relations within a series and after them";
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
+/// C14: truncation consistent with age order (STX-TN-07 section 6): a lowered horizon lies on a
+/// younger erosional surface; a raised horizon lies on an older surface.
+class C14 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* st = static_cast<const Structure*>(c.model().capability("structure"));
+    if (!st || !st->has_relations()) return out;
+    const auto& inf = c.model().info();
+    const std::size_t nh = st->horizons();
+    const auto& g = c.grid();
+    std::vector<double> raw(nh), eff(nh);
+    std::vector<unsigned char> fl(nh);
+    std::vector<std::size_t> low(nh, 0), up(nh, 0), bad(nh, 0);
+    for (std::size_t k = 0; k < g.size(); ++k) {
+      st->z_detail(g.x(k % g.nx), g.y(k / g.nx), raw.data(), eff.data(), fl.data());
+      for (std::size_t h = 0; h < nh; ++h) {
+        if (fl[h] & 1) {
+          ++low[h];
+          bool ok = false;  // a younger horizon at the same level
+          for (std::size_t j = 0; j < h && !ok; ++j) ok = st->series_of(j) < st->series_of(h) && std::fabs(eff[j] - eff[h]) < 1e-9;
+          if (!ok) ++bad[h];
+        }
+        if (fl[h] & 2) {
+          ++up[h];
+          bool ok = false;  // an older horizon at the same level
+          for (std::size_t j = h + 1; j < nh && !ok; ++j) ok = st->series_of(j) > st->series_of(h) && std::fabs(eff[j] - eff[h]) < 1e-9;
+          if (!ok) ++bad[h];
+        }
+      }
+    }
+    for (std::size_t h = 0; h < nh; ++h) {
+      if (!low[h] && !up[h]) continue;
+      auto r = base(c, "C14", "truncation consistent with age order", inf.horizons[h].name);
+      r.unit = "columns";
+      r.value = static_cast<double>(bad[h]);
+      r.tolerance = 0;
+      r.tolerance_source = "exact";
+      r.passed = bad[h] == 0;
+      r.detail = std::to_string(low[h]) + " truncated and " + std::to_string(up[h]) + " onlapping columns of " +
+                 std::to_string(g.size());
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 /// C5: control wells honoured (check wells reported as warnings).
 class C5 final : public Check {
   std::vector<CheckResult> run(CheckContext& c) const override {
@@ -757,6 +850,10 @@ STRATONIX_REGISTER(check_c10, registry::Kind::Check, "C10_fault_scaling", "1.0.0
                    [] { return std::make_unique<C10>(); })
 STRATONIX_REGISTER(check_c12, registry::Kind::Check, "C12_area", "1.0.0", "Area conserved by fold kinematics",
                    [] { return std::make_unique<C12>(); })
+STRATONIX_REGISTER(check_c13, registry::Kind::Check, "C13_thickness_restored", "1.0.0", "No negative thickness (series relations)",
+                   [] { return std::make_unique<C13>(); })
+STRATONIX_REGISTER(check_c14, registry::Kind::Check, "C14_truncation_order", "1.0.0", "Truncation consistent with age order",
+                   [] { return std::make_unique<C14>(); })
 STRATONIX_REGISTER(check_c11, registry::Kind::Check, "C11_fault_system", "1.0.0",
                    "Throw continuous across branch lines and relays", [] { return std::make_unique<C11>(); })
 
@@ -787,6 +884,8 @@ void register_check_plugins() {
   STRATONIX_PLUGIN_ANCHOR(check_c10);
   STRATONIX_PLUGIN_ANCHOR(check_c11);
   STRATONIX_PLUGIN_ANCHOR(check_c12);
+  STRATONIX_PLUGIN_ANCHOR(check_c13);
+  STRATONIX_PLUGIN_ANCHOR(check_c14);
 }
 
 }  // namespace stratonix

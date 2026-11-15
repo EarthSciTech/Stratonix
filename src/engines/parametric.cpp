@@ -14,6 +14,7 @@ ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& 
     : info_(model_info_from(d)) {
   info_.engine = "parametric";
   structure_ = std::make_shared<Structure>(d, in, log);
+  for (std::size_t u = 1; u < info_.units.size() && u < info_.horizons.size(); ++u) info_.units[u].termination = structure_->unit_termination(u);
   faults_ = std::make_shared<FaultNetwork>(d, *structure_, log);
   for (auto& f : faults_->faults()) {
     FaultInfo fi;
@@ -62,6 +63,7 @@ ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& 
 
 const void* ParametricModel::capability(std::string_view name) const {
   if (name == "structure") return structure_.get();
+  if (name == "stratigraphy") return structure_->has_stratigraphy() ? static_cast<const StratigraphyQuery*>(structure_.get()) : nullptr;
   if (name == "faults") return faults_.get();
   return nullptr;
 }

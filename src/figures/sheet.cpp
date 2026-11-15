@@ -784,6 +784,16 @@ SheetResult section_sheet(const FigureContext& c, const SheetSpec& sp) {
         v.text = fmt_dec(v.value, k.decimals);
         bv = {{"throw", std::fabs(t)}, {"thickness", std::fabs(thk)}};
       }
+    } else if (k.kind == "growth_index" && k.unit >= 0) {
+      // Thorsen (1963): hanging-wall over footwall thickness of the unit at the fault (stage 2C)
+      const int ha = inf.units[static_cast<std::size_t>(k.unit)].top_horizon, hb = inf.units[static_cast<std::size_t>(k.unit)].base_horizon;
+      double ta, tb, thk;
+      if (ha >= 0 && hb >= 0 && throw_at_h(k.fault, ha, ta) && throw_at_h(k.fault, hb, tb) && footwall_thickness(k.fault, ha, hb, thk) &&
+          std::fabs(thk) > 1e-9) {
+        v.value = (std::fabs(thk) + std::fabs(tb) - std::fabs(ta)) / std::fabs(thk);
+        v.text = fmt_dec(v.value, k.decimals);
+        bv = {{"throw_top", std::fabs(ta)}, {"throw_base", std::fabs(tb)}, {"footwall_thickness", std::fabs(thk)}};
+      }
     } else if (k.kind == "fault_gap") {
       auto tr = fault_trace(gm, k.faults[0]);
       if (tr.size() >= 2) {

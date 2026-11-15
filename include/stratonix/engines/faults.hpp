@@ -142,6 +142,10 @@ struct Fault {
   /// Down-dip position where stratigraphic level s (horizon index, fractional inside units;
   /// -1 domain top, nh domain base) meets the plane at strike position a.
   double layer_b(double s, double a) const;
+  /// Growth strata (STX-TN-07 section 4): fraction of the displacement each horizon carries
+  /// (empty: 1 everywhere); between horizons linear in the level s.
+  std::vector<double> growth_f;
+  double growth_at(double s) const;
 
   /// Curved geometry (null for a planar fault). For a curved fault the down-dip coordinate b of
   /// at(), tips(), ab() and profile_coords() is the horizontal distance u along the dip direction.

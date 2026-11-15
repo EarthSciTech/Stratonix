@@ -31,6 +31,7 @@ struct FigureContext {
   double grid_spacing = 50;
   int closure_horizon = -1;
   bool faults_seal = false;
+  std::vector<int> isopach_units;  ///< units drawn as isopach maps besides those that terminate
 };
 
 /// Naming rule: STX_<model>_v<version>_<kind>_<name> (letters, digits, '-', '_' only).
@@ -40,7 +41,10 @@ Color unit_color(const FigureContext& c, std::size_t unit);
 
 Figure section_figure(const FigureContext& c, const repr::Section& s, const std::vector<double>* detail_window);
 Figure map_figure(const FigureContext& c, int horizon, const repr::FaultedSurface& surface,
-                  const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const repr::Closure* closure);
+                  const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const repr::Closure* closure,
+                  const std::vector<repr::TerminationLine>* terminations = nullptr);
+/// Isopach map of a unit (stage 2C): vertical thickness per fault block, with its termination lines.
+Figure isopach_figure(const FigureContext& c, int unit, const Grid2D& thickness, const std::vector<repr::TerminationLine>& terminations);
 Figure view3d_figure(const FigureContext& c, double azimuth_deg, double elevation_deg, const std::string& preset_name);
 Figure fence_figure(const FigureContext& c, const std::vector<repr::Section>& legs);
 /// Throw along strike of a fault system: points (strike distance, throw) per series.

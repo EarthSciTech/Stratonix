@@ -81,6 +81,13 @@ int Description::fault_index(const std::string& n) const {
     if (faults[i].name == n) return static_cast<int>(i);
   return -1;
 }
+int Description::series_of(int h) const {
+  if (h < 0 || static_cast<std::size_t>(h) >= horizons.size()) return -1;
+  for (std::size_t k = 0; k < series.size(); ++k)
+    for (auto& n : series[k].horizons)
+      if (n == horizons[static_cast<std::size_t>(h)].name) return static_cast<int>(k);
+  return -1;
+}
 const WellDesc* Description::well(const std::string& n) const {
   for (auto& w : wells)
     if (w.name == n) return &w;
@@ -109,7 +116,11 @@ std::vector<const Param*> Description::all_params() const {
     for (auto& [h, p] : w.tops) add(p);
     for (auto& c : w.completions) { add(c.top); add(c.base); }
   }
-  for (auto& h : horizons) { add(h.depth); add(h.thickness_above); add(h.iso_thickness); }
+  for (auto& h : horizons) { add(h.depth); add(h.thickness_above); add(h.iso_thickness); add(h.iso_gradient); add(h.iso_centre); }
+  for (auto& sr : series)
+    for (auto* q : {&sr.tilt_dip, &sr.tilt_azimuth, &sr.clino_height, &sr.clino_width, &sr.clino_direction, &sr.clino_first_break,
+                    &sr.clino_progradation})
+      add(*q);
   for (auto& p : primitives) {
     for (auto* q : {&p.crest, &p.axis_azimuth, &p.plunge, &p.half_length, &p.half_width_left,
                     &p.half_width_right, &p.radius_major, &p.radius_minor, &p.rim_depth, &p.rim_width,
@@ -342,6 +353,12 @@ struct Typer {
           hd.iso_input = S(s, "input");
           hd.iso_format = S(s, "format");
           hd.iso_thickness = P(s, "thickness", b + ".isochore", Dimension::Length, false, 1);
+          if (const Node* tr = s->get("trend")) {
+            hd.iso_trend = S(tr, "type");
+            const std::string tb = b + ".isochore.trend";
+            hd.iso_gradient = P(tr, "gradient", tb, Dimension::Dimensionless, true, hd.iso_trend == "radial" ? 1 : 2);
+            hd.iso_centre = P(tr, "centre", tb, Dimension::Length, hd.iso_trend == "radial", 2);
+          }
         }
         if (const Node* io = h.get("intended_offset")) hd.intended_offset = io->boolean;
         d.horizons.push_back(std::move(hd));
@@ -349,6 +366,30 @@ struct Typer {
     if (const Node* us = st ? st->get("units") : nullptr)
       for (auto& u : us->seq)
         d.units.push_back({S(&u, "name"), S(&u, "top"), S(&u, "base"), S(&u, "role"), S(&u, "color"), S(&u, "label")});
+    if (const Node* ss = st ? st->get("series") : nullptr)
+      for (std::size_t k = 0; k < ss->seq.size(); ++k) {
+        const Node& sn = ss->seq[k];
+        std::string b = "stratigraphy.series[" + std::to_string(k) + "]";
+        SeriesDesc sd;
+        sd.name = S(&sn, "name");
+        sd.base = S(&sn, "base");
+        if (const Node* hs2 = sn.get("horizons"))
+          for (auto& x : hs2->seq) sd.horizons.push_back(x.str);
+        if (const Node* t = sn.get("tilt")) {
+          sd.tilt_dip = P(t, "dip", b + ".tilt", Dimension::Angle, true, 1);
+          sd.tilt_azimuth = P(t, "azimuth", b + ".tilt", Dimension::Angle, true, 1);
+        }
+        if (const Node* cf = sn.get("clinoforms")) {
+          const std::string cb = b + ".clinoforms";
+          sd.clino_profile = S(cf, "profile");
+          sd.clino_height = P(cf, "height", cb, Dimension::Length, true, 1);
+          sd.clino_width = P(cf, "width", cb, Dimension::Length, true, 1);
+          sd.clino_direction = P(cf, "direction", cb, Dimension::Angle, true, 1);
+          sd.clino_first_break = P(cf, "first_break", cb, Dimension::Length, true, 2);
+          sd.clino_progradation = P(cf, "progradation", cb, Dimension::Length, true, 1);
+        }
+        d.series.push_back(std::move(sd));
+      }
     d.above_top_name = S(st, "above_top_name");
     d.below_base_name = S(st, "below_base_name");
     for (auto& u : d.units) {
@@ -379,6 +420,8 @@ struct Typer {
           pd.shortening = P(&p, "shortening", b, Dimension::Length, det, 1);
           pd.detachment = S(&p, "detachment");
           pd.mechanics = S(&p, "mechanics");
+          pd.series = S(&p, "series");
+          if (const Node* g = p.get("growth")) pd.growth = {S(g, "onset"), S(g, "end")};
           if (const Node* ar = p.get("array")) {
             std::string c0 = S(ar, "count", "1");
             pd.array_count = std::max(1, std::atoi(c0.c_str()));
@@ -466,6 +509,7 @@ struct Typer {
         };
         prof("profile_dip", fd.profile_dip);
         prof("profile_strike", fd.profile_strike);
+        if (const Node* g = f.get("growth")) fd.growth = {S(g, "onset"), S(g, "end")};
         const Node* fo = f.get("fold");
         if (fo) {
           fd.fold_type = S(fo, "type");
@@ -659,6 +703,8 @@ struct Typer {
       d.fault_stick_spacing = P(o, "fault_stick_spacing", "outputs", Dimension::Length, false, 1);
       if (const Node* ex = o->get("exports"))
         for (auto& x : ex->seq) d.exports.push_back(x.str);
+      if (const Node* ip = o->get("isopachs"))
+        for (auto& x : ip->seq) d.isopachs.push_back(x.str);
     }
   }
 
@@ -685,6 +731,86 @@ struct Typer {
     return z;
   }
 
+  /// STX-TN-07: series (F20), trends (F21), growth (F22), clinoforms (F23).
+  void series_rules() {
+    const std::size_t nh = d.horizons.size();
+    if (!d.series.empty()) {
+      std::size_t next = 0;
+      std::set<std::string> names;
+      for (std::size_t k = 0; k < d.series.size(); ++k) {
+        const auto& sr = d.series[k];
+        const std::string b = "stratigraphy.series[" + std::to_string(k) + "]";
+        if (!names.insert(sr.name).second) c.err(b + ".name", "F20", "duplicate series name '" + sr.name + "'");
+        for (auto& h : sr.horizons) {
+          if (next < nh && d.horizons[next].name == h) { ++next; continue; }
+          c.err(b + ".horizons", "F20", "the series must list every horizon once, youngest first, in the order of stratigraphy.horizons: "
+                                        "expected '" + (next < nh ? d.horizons[next].name : std::string("(none)")) + "', found '" + h + "'");
+          next = nh + 1;
+          break;
+        }
+        if (sr.base != "conformable" && sr.base != "erosional" && sr.base != "onlap")
+          c.err(b + ".base", "F20", "base must be conformable, erosional or onlap");
+        if (k + 1 == d.series.size() && sr.base != "conformable" && !sr.base.empty())
+          c.err(b + ".base", "F20", "the oldest series rests on nothing: its base is conformable");
+        if (sr.tilt_dip.present && !(sr.tilt_dip.si() >= 0 && sr.tilt_dip.si() < kPi / 4))
+          c.err(b + ".tilt.dip", "F20", "tilt dip must be in [0, 45) degrees");
+        if (!sr.clino_profile.empty()) {
+          if (k + 1 == d.series.size())
+            c.err(b + ".clinoforms", "F23", "clinoforms rest on the top of the series below; '" + sr.name + "' is the oldest series");
+          if (sr.clino_height.present && !(sr.clino_height.si() > 0)) c.err(b + ".clinoforms.height", "F23", "height must be positive");
+          if (sr.clino_width.present && !(sr.clino_width.si() > 0)) c.err(b + ".clinoforms.width", "F23", "width must be positive");
+          if (sr.clino_progradation.present && sr.clino_progradation.si() < 0)
+            c.err(b + ".clinoforms.progradation", "F23", "progradation must not be negative");
+          if (sr.base == "onlap") c.err(b + ".base", "F23", "clinoforms downlap onto the series below: give base conformable or erosional");
+        }
+      }
+      if (next == nh + 1) {
+      } else if (next != nh)
+        c.err("stratigraphy.series", "F20", "the series must list every horizon once; '" + d.horizons[next].name + "' is in none");
+    }
+    for (std::size_t i = 0; i < nh; ++i) {
+      const auto& h = d.horizons[i];
+      if (h.iso_trend.empty()) continue;
+      const std::string b = "stratigraphy.horizons[" + std::to_string(i) + "].isochore.trend";
+      if (h.iso_trend != "linear" && h.iso_trend != "radial") c.err(b + ".type", "F21", "trend type must be linear or radial");
+      if (!h.iso_thickness.present) c.err(b, "F21", "a thickness trend needs the isochore's thickness at its origin");
+      for (std::size_t q = 0; h.iso_gradient.present && q < h.iso_gradient.values.size(); ++q)
+        if (!std::isfinite(h.iso_gradient.si(q))) c.err(b + ".gradient", "F21", "gradient must be finite");
+      int j = d.horizon_index(h.iso_from);
+      if (j >= 0 && d.series_of(j) != d.series_of(static_cast<int>(i)))
+        c.err(b, "F21", "the isochore hangs from a horizon of another series");
+    }
+    auto growth = [&](const GrowthDesc& g, const std::string& b) {
+      if (!g.present()) return;
+      int on = d.horizon_index(g.onset), en = d.horizon_index(g.end);
+      if (on < 0) c.err(b + ".growth.onset", "F22", "unknown horizon '" + g.onset + "'");
+      if (en < 0) c.err(b + ".growth.end", "F22", "unknown horizon '" + g.end + "'");
+      if (on >= 0 && en >= 0 && !(on > en))
+        c.err(b + ".growth", "F22", "the onset horizon (pre-growth top) must be older than the end horizon (post-growth base)");
+    };
+    for (std::size_t k = 0; k < d.primitives.size(); ++k) {
+      const auto& pd = d.primitives[k];
+      const std::string b = "structure.primitives[" + std::to_string(k) + "]";
+      if (!pd.series.empty() && std::none_of(d.series.begin(), d.series.end(), [&](const SeriesDesc& s) { return s.name == pd.series; }))
+        c.err(b + ".series", "F20", "unknown series '" + pd.series + "'");
+      growth(pd.growth, b);
+      if (pd.growth.present() && pd.mechanics == "parallel")
+        c.err(b + ".growth", "F22", "growth is not combined with parallel mechanics (offsets keep the anchor's thickness)");
+    }
+    for (std::size_t k = 0; k < d.faults.size(); ++k) {
+      const auto& fd = d.faults[k];
+      const std::string b = "faults[" + std::to_string(k) + "]";
+      growth(fd.growth, b);
+      if (fd.growth.present()) {
+        if (fd.hw_type != "layer_rigid")
+          c.err(b + ".hanging_wall.type", "F22", "growth faults take hanging_wall: layer_rigid (each layer moves by its own throw)");
+        int en = d.horizon_index(fd.growth.end);
+        if (fd.upper.rule == "horizon" && en >= 0 && d.horizon_index(fd.upper.horizon) > en)
+          c.err(b + ".extent.upper_tip", "F22", "the upper tip of a growth fault must be free or above the end horizon");
+      }
+    }
+  }
+
   void semantic() {
     // domain
     if (d.size.present && d.size.values.size() == 2 && (d.size.si(0) <= 0 || d.size.si(1) <= 0))
@@ -706,7 +832,13 @@ struct Typer {
           for (auto& [n, p] : w->tops) from_well = from_well || n == h.name;
       if (from_well && (h.depth.present || h.thickness_above.present))
         c.err(b, "S3", "horizon '" + h.name + "' is defined twice: by the reference well top and by depth/thickness");
-      else if (!from_well && defs == 0)
+      const int si = d.series_of(static_cast<int>(i));
+      const bool clino = si >= 0 && !d.series[static_cast<std::size_t>(si)].clino_profile.empty();
+      if (clino && (defs > 0 || from_well))
+        c.err(b, "F23", "horizon '" + h.name + "' is a clinoform surface: its depth follows from the clinoform formula; give no depth, "
+                                                "thickness, surface, isochore or reference-well top");
+      else if (clino) {
+      } else if (!from_well && defs == 0)
         c.err(b, "S3", "horizon '" + h.name + "' has no definition (reference-well top, depth, thickness_above, surface or isochore)");
       else if (defs > 1)
         c.err(b, "S3", "horizon '" + h.name + "' is defined more than once");
@@ -727,7 +859,8 @@ struct Typer {
     }
     auto zref = reference_depths();
     for (std::size_t i = 1; i < zref.size(); ++i)
-      if (!std::isnan(zref[i]) && !std::isnan(zref[i - 1]) && zref[i] < zref[i - 1])
+      if (!std::isnan(zref[i]) && !std::isnan(zref[i - 1]) && zref[i] < zref[i - 1] &&
+          d.series_of(static_cast<int>(i)) == d.series_of(static_cast<int>(i - 1)))
         c.err("stratigraphy.horizons[" + std::to_string(i) + "]", "S1",
               "horizon '" + d.horizons[i].name + "' is shallower than '" + d.horizons[i - 1].name + "' at the reference location");
     if (d.depth_range.present && d.depth_range.values.size() == 2)
@@ -735,6 +868,9 @@ struct Typer {
         if (!std::isnan(zref[i]) && (zref[i] < d.depth_range.si(0) || zref[i] > d.depth_range.si(1)))
           c.err("stratigraphy.horizons[" + std::to_string(i) + "]", "S4",
                 "horizon '" + d.horizons[i].name + "' lies outside the domain depth range at the reference location");
+    series_rules();
+    for (auto& n : d.isopachs)
+      if (d.unit_index(n) < 0) c.err("outputs.isopachs", "O1", "unknown unit '" + n + "'");
     // reference
     if (d.ref_well.empty() && !d.ref_point.present)
       c.err("stratigraphy.reference", "R1", "give a reference well or a reference point");
@@ -1106,7 +1242,7 @@ struct Typer {
                                                  "well_fault_distance", "block_highest_at_fault", "relief_to_end", "text",
                                                  "completion", "vertical_exaggeration", "fold_relief", "limb_dip", "fault_dip",
                                                  "fault_tip_units", "fault_cutoff_position", "fault_cutoff_depths", "fault_overlap",
-                                                 "throw_ratio", "fault_gap"};
+                                                 "throw_ratio", "fault_gap", "growth_index"};
         if (!kinds.count(kd.kind)) { c.err(bk, "O1", "unknown key-number kind '" + kd.kind + "'"); continue; }
         if (!kd.from.empty() && d.horizon_index(kd.from) < 0) c.err(bk, "O1", "unknown horizon '" + kd.from + "'");
         if (!kd.to.empty() && d.horizon_index(kd.to) < 0) c.err(bk, "O1", "unknown horizon '" + kd.to + "'");
@@ -1116,7 +1252,7 @@ struct Typer {
         if (with_h.count(kd.kind) && kd.horizon.empty()) c.err(bk, "O1", kd.kind + " needs a horizon");
         static const std::set<std::string> with_f{"fault_tips", "fault_throw", "block_highest_at_fault", "relief_to_end", "fault_dip",
                                                   "fault_tip_units", "fault_cutoff_position", "fault_cutoff_depths", "fault_overlap",
-                                                  "throw_ratio"};
+                                                  "throw_ratio", "growth_index"};
         if (with_f.count(kd.kind) && kd.fault.empty()) c.err(bk, "O1", kd.kind + " needs a fault");
         if ((kd.kind == "block_offset" || kd.kind == "fault_gap") && kd.faults.size() != 2)
           c.err(bk, "O1", kd.kind + " needs two faults");
@@ -1126,7 +1262,7 @@ struct Typer {
           c.err(bk, "O1", kd.kind + " needs a well");
         if (kd.kind == "completion" && kd.completion.empty()) c.err(bk, "O1", "completion needs a completion name");
         if (kd.kind == "text" && kd.value.empty()) c.err(bk, "O1", "text needs a value");
-        if (kd.kind == "fault_overlap" && kd.unit.empty()) c.err(bk, "O1", "fault_overlap needs a unit");
+        if ((kd.kind == "fault_overlap" || kd.kind == "growth_index") && kd.unit.empty()) c.err(bk, "O1", kd.kind + " needs a unit");
         if (kd.kind == "throw_ratio" && (kd.from.empty() || kd.to.empty())) c.err(bk, "O1", "throw_ratio needs from and to horizons");
         if (kd.side != "footwall" && kd.side != "hanging_wall") c.err(bk, "O1", "side must be footwall or hanging_wall");
         if (kd.coordinate != "x" && kd.coordinate != "y" && kd.coordinate != "distance") c.err(bk, "O1", "coordinate must be x, y or distance");

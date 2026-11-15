@@ -334,6 +334,16 @@ double Fault::throw_at(double a, double b) const {
   return tmax * profile_value(pdip, taper_dip, eta) * fs;
 }
 
+double Fault::growth_at(double s) const {
+  if (growth_f.empty()) return 1.0;
+  const double hi = static_cast<double>(growth_f.size() - 1);
+  if (s <= 0) return growth_f.front();
+  if (s >= hi) return growth_f.back();
+  const std::size_t l = static_cast<std::size_t>(s);
+  const double w = s - static_cast<double>(l);
+  return growth_f[l] + w * (growth_f[std::min(l + 1, growth_f.size() - 1)] - growth_f[l]);
+}
+
 double Fault::slip_at(double a) const {
   double L2 = 0.5 * length;
   if (std::fabs(a) >= L2) return 0;
@@ -501,6 +511,22 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
       f.abuts = d.fault_index(fd.abuts_fault);
       f.abut_hw_side = fd.abuts_side == "hanging_wall";
       f.transfer = fd.abuts_transfer;
+    }
+    if (fd.growth.present()) {
+      const int on = d.horizon_index(fd.growth.onset), en = d.horizon_index(fd.growth.end);
+      for (std::size_t h = 0; h < st.horizons(); ++h) f.growth_f.push_back(st.growth_fraction(h, on, en));
+      // growth index per unit at the reference strike position (Thorsen 1963)
+      const double T = std::fabs(f.tmax);
+      const auto& rd = st.reference_depths();
+      for (std::size_t h = 1; h < st.horizons(); ++h) {
+        std::string un = d.horizons[h - 1].name + "_" + d.horizons[h].name;
+        for (auto& u : d.units)
+          if (u.top == d.horizons[h - 1].name && u.base == d.horizons[h].name) un = u.name;
+        const double t = rd[h] - rd[h - 1];
+        if (t > 0) log.value(f.name + "." + un + ".growth_index", fmt_fixed((t + (f.growth_f[h] - f.growth_f[h - 1]) * T) / t, 4));
+      }
+      for (std::size_t h = 0; h < st.horizons(); ++h)
+        log.value(f.name + "." + d.horizons[h].name + ".growth_fraction", fmt_fixed(f.growth_f[h], 4));
     }
     if (fd.fold_type == "trishear") {
       auto t = std::make_shared<TrishearFold>();
@@ -1338,7 +1364,7 @@ double FaultNetwork::layer_throw(int fi, double s, const Vec3& q) const {
   const Fault& f = faults_[static_cast<std::size_t>(fi)];
   double a = dot(q - f.p0, f.s);
   if (std::fabs(a) >= 0.5 * f.length) return 0.0;
-  return f.throw_at(a, f.layer_b(s, a));
+  return f.throw_at(a, f.layer_b(s, a)) * f.growth_at(s);
 }
 
 Vec3 FaultNetwork::chain(const Vec3& q0, std::size_t r0, std::size_t r1, double s, BlockCode* code, const BlockCode* forced,

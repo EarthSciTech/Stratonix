@@ -338,8 +338,22 @@ Color ramp(double t) {  // shallow (t = 0) warm, deep (t = 1) cool
 }
 }  // namespace
 
+Color termination_color(const std::string& kind) {
+  if (kind == "onlap") return rgb(0, 90, 200);
+  if (kind == "truncation") return rgb(205, 105, 0);
+  if (kind == "pinch-out") return rgb(130, 40, 160);
+  return rgb(0, 130, 130);  // clinoform
+}
+std::string termination_label(const std::string& kind) {
+  if (kind == "truncation") return "Subcrop (erosional truncation) line";
+  if (kind == "onlap") return "Onlap line";
+  if (kind == "pinch-out") return "Pinch-out line";
+  return "Clinoform termination line";
+}
+
 Figure map_figure(const FigureContext& c, int h, const repr::FaultedSurface& surf,
-                  const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const repr::Closure* cl) {
+                  const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const repr::Closure* cl,
+                  const std::vector<repr::TerminationLine>* terms) {
   Figure f(842, 595);
   const auto& inf = c.model->info();
   const auto& d = inf.domain;
@@ -492,6 +506,15 @@ Figure map_figure(const FigureContext& c, int h, const repr::FaultedSurface& sur
     Pt cp = P(cl->crest.x, cl->crest.y);
     f.path({{cp.x, cp.y - 4}, {cp.x + 3.5, cp.y + 2.5}, {cp.x - 3.5, cp.y + 2.5}}, true, rgb(0, 140, 60), none());
   }
+  // Stratal termination lines of the units above and below this horizon (stage 2C).
+  std::vector<std::string> term_kinds;
+  if (terms)
+    for (auto& t : *terms) {
+      std::vector<Pt> pl;
+      for (auto& p : t.line) pl.push_back(P(p.x, p.y));
+      f.path(pl, false, none(), termination_color(t.kind), 1.3, {4, 2});
+      if (std::find(term_kinds.begin(), term_kinds.end(), t.kind) == term_kinds.end()) term_kinds.push_back(t.kind);
+    }
   // Wells.
   for (auto& w : c.wells) {
     Pt p = P(w.x(), w.y());
@@ -545,6 +568,100 @@ Figure map_figure(const FigureContext& c, int h, const repr::FaultedSurface& sur
     es.push_back({"Symbols", "Crest", rgb(0, 140, 60), false, none(), 1, 2});
     es.push_back({"Symbols", "Spill point", none(), false, rgb(0, 110, 50), 1, 3});
   }
+  for (auto& k : term_kinds) es.push_back({"Symbols", termination_label(k), none(), true, termination_color(k), 1.3});
+  if (!c.wells.empty()) es.push_back({"Symbols", "Well", rgb(255, 255, 255), false, none(), 1, 1});
+  double ly = legend(f, rx, ry + 190, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, rx, ly, 190);
+  footer(f, c);
+  return f;
+}
+
+Figure isopach_figure(const FigureContext& c, int unit, const Grid2D& g, const std::vector<repr::TerminationLine>& terms) {
+  Figure f(842, 595);
+  const auto& inf = c.model->info();
+  const auto& d = inf.domain;
+  double side = std::min(595.0 - 110, 842.0 - 280);
+  double sc = side / std::max(d.sx, d.sy);
+  double mx0 = 60, my0 = 60, mw = d.sx * sc, mh = d.sy * sc;
+  auto P = [&](double x, double y) { return Pt{mx0 + (x - d.x0) * sc, my0 + mh - (y - d.y0) * sc}; };
+  double tmax = 0;
+  for (double v : g.v)
+    if (!std::isnan(v)) tmax = std::max(tmax, v);
+  const auto& un = inf.units[static_cast<std::size_t>(unit)];
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - " + un.name + " isopach",
+        "Vertical thickness of " + un.name + " (" + inf.horizons[static_cast<std::size_t>(unit - 1)].name + " to " +
+            inf.horizons[static_cast<std::size_t>(unit)].name + ") in each fault block; fault gaps grey" +
+            (un.termination.empty() ? "" : "; terminates by " + un.termination));
+  Image im;
+  im.w = std::max(1, static_cast<int>(std::lround(mw * 3)));
+  im.h = std::max(1, static_cast<int>(std::lround(mh * 3)));
+  im.rgba.resize(static_cast<std::size_t>(im.w) * im.h * 4);
+  const auto& gs = g.spec;
+  for (int yy = 0; yy < im.h; ++yy)
+    for (int xx = 0; xx < im.w; ++xx) {
+      double x = d.x0 + (xx + 0.5) / im.w * d.sx, y = d.y0 + d.sy - (yy + 0.5) / im.h * d.sy;
+      long i = std::lround((x - gs.x0) / gs.dx), j = std::lround((y - gs.y0) / gs.dy);
+      i = std::clamp(i, 0L, static_cast<long>(gs.nx) - 1);
+      j = std::clamp(j, 0L, static_cast<long>(gs.ny) - 1);
+      double v = g.v[gs.index(static_cast<std::size_t>(i), static_cast<std::size_t>(j))];
+      std::uint8_t* p = &im.rgba[(static_cast<std::size_t>(yy) * im.w + xx) * 4];
+      Color cc = std::isnan(v) ? rgb(235, 235, 235) : v < 0.01 ? rgb(250, 250, 250) : ramp(1 - v / std::max(1.0, tmax));
+      p[0] = cc.r; p[1] = cc.g; p[2] = cc.b; p[3] = 255;
+    }
+  const Image* img = f.own(std::move(im));
+  f.clip(mx0, my0, mw, mh);
+  f.image(mx0, my0, mw, mh, img);
+  auto ticks = nice_ticks(0, std::max(1.0, tmax), 10);
+  for (double t : ticks) {
+    if (t <= 0) continue;
+    for (auto& line : repr::contour_lines(g, t)) {
+      if (line.size() < 3) continue;
+      std::vector<Pt> pl;
+      for (auto& p : line) pl.push_back(P(p.x, p.y));
+      f.path(pl, false, none(), rgb(90, 90, 90), 0.4);
+    }
+  }
+  std::vector<std::string> kinds;
+  for (auto& t : terms) {
+    std::vector<Pt> pl;
+    for (auto& p : t.line) pl.push_back(P(p.x, p.y));
+    f.path(pl, false, none(), termination_color(t.kind), 1.4, {4, 2});
+    if (std::find(kinds.begin(), kinds.end(), t.kind) == kinds.end()) kinds.push_back(t.kind);
+  }
+  for (auto& w : c.wells) {
+    Pt p = P(w.x(), w.y());
+    f.path({{p.x - 2.5, p.y}, {p.x, p.y - 2.5}, {p.x + 2.5, p.y}, {p.x, p.y + 2.5}}, true, rgb(255, 255, 255), kWell, 0.9);
+    f.text({p.x + 4, p.y - 3}, w.name(), 7, Anchor::Start, true, kWell);
+  }
+  f.unclip();
+  f.rect(mx0, my0, mw, mh, none(), kInk, 0.6);
+  for (double t : nice_ticks(d.x0, d.x0 + d.sx, 6)) {
+    Pt p = P(t, d.y0);
+    f.line(p, {p.x, p.y + 3}, kInk, 0.5);
+    f.text({p.x, p.y + 11}, km_or_m(t), 6.5, Anchor::Middle, false, kInk);
+  }
+  for (double t : nice_ticks(d.y0, d.y0 + d.sy, 6)) {
+    Pt p = P(d.x0, t);
+    f.line({p.x - 3, p.y}, p, kInk, 0.5);
+    f.text({p.x - 5, p.y + 2.5}, km_or_m(t), 6.5, Anchor::End, false, kInk);
+  }
+  f.text({mx0 + mw / 2, my0 + mh + 24}, "Easting (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({mx0 - 40, my0 + mh / 2}, "Northing (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  double rx = 842 - 200, ry = 60;
+  f.text({rx, ry}, "Thickness (m)", 7.5, Anchor::Start, true, kInk);
+  for (int k = 0; k < 100; ++k) f.rect(rx, ry + 6 + k * 1.6, 14, 1.7, ramp(k / 99.0), none());
+  f.rect(rx, ry + 6, 14, 160, none(), kInk, 0.4);
+  for (double t : nice_ticks(0, std::max(1.0, tmax), 6)) {
+    double yy = ry + 6 + (1 - t / std::max(1.0, tmax)) * 160;
+    if (yy < ry + 6 - 0.1 || yy > ry + 166.1) continue;
+    f.line({rx + 14, yy}, {rx + 17, yy}, kInk, 0.4);
+    f.text({rx + 20, yy + 2.5}, fmt_fixed(t, 0), 6.5, Anchor::Start, false, kInk);
+  }
+  f.text({rx, ry + 178}, "Contours every " + fmt_shortest(ticks.size() > 1 ? ticks[1] - ticks[0] : tmax) + " m; white: absent",
+         6.5, Anchor::Start, false, kInk);
+  std::vector<LegendEntry> es;
+  es.push_back({"Symbols", "Fault gap", rgb(235, 235, 235)});
+  for (auto& k : kinds) es.push_back({"Symbols", termination_label(k), none(), true, termination_color(k), 1.4});
   if (!c.wells.empty()) es.push_back({"Symbols", "Well", rgb(255, 255, 255), false, none(), 1, 1});
   double ly = legend(f, rx, ry + 190, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
   key_box(f, c, rx, ly, 190);
@@ -883,7 +1000,13 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
   }
   // Maps per horizon
   GridSpec g = GridSpec::covering(d, std::max(c.grid_spacing, std::max(d.sx, d.sy) / 600));
+  // Stratal terminations per unit (stage 2C); empty for models without them.
+  std::vector<std::vector<repr::TerminationLine>> terms(inf.units.size());
+  for (std::size_t u = 1; u + 1 < inf.units.size(); ++u)
+    if (!inf.units[u].termination.empty()) terms[u] = repr::termination_lines(*c.model, static_cast<int>(u), g);
   for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
+    std::vector<repr::TerminationLine> adj = terms[h];
+    adj.insert(adj.end(), terms[h + 1].begin(), terms[h + 1].end());
     auto fs = repr::horizon_grid_faulted(*c.model, static_cast<int>(h), g);
     std::vector<std::vector<repr::CutoffLine>> cut;
     for (std::size_t ff = 0; ff < inf.faults.size(); ++ff) {
@@ -893,9 +1016,20 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
     repr::Closure cl;
     bool has = static_cast<int>(h) == c.closure_horizon;
     if (has) cl = repr::closure_analysis(fs.z, c.faults_seal);
-    auto fgr = map_figure(c, static_cast<int>(h), fs, cut, has ? &cl : nullptr);
+    auto fgr = map_figure(c, static_cast<int>(h), fs, cut, has ? &cl : nullptr, adj.empty() ? nullptr : &adj);
     out.push_back(write_figure(fgr, folder, figure_basename(c, "map", inf.horizons[h].name), c.model_name + " - " + inf.horizons[h].name + " depth map",
-                               "Depth map of " + inf.horizons[h].name + " with fault polygons and wells" + (has ? ", closure outline and spill point." : "."),
+                               "Depth map of " + inf.horizons[h].name + " with fault polygons and wells" + (has ? ", closure outline and spill point." : ".") +
+                                   (adj.empty() ? "" : " Stratal termination lines of the units above and below it."),
+                               notes_common));
+  }
+  // Isopach maps (stage 2C): units that terminate, and units asked for.
+  for (std::size_t u = 1; u + 1 < inf.units.size(); ++u) {
+    bool asked = std::find(c.isopach_units.begin(), c.isopach_units.end(), static_cast<int>(u)) != c.isopach_units.end();
+    if (inf.units[u].termination.empty() && !asked) continue;
+    auto t = repr::unit_thickness_grid(*c.model, static_cast<int>(u), g);
+    auto fgr = isopach_figure(c, static_cast<int>(u), t, terms[u]);
+    out.push_back(write_figure(fgr, folder, figure_basename(c, "isopach", inf.units[u].name), c.model_name + " - " + inf.units[u].name + " isopach",
+                               "Isopach (vertical thickness) of " + inf.units[u].name + " per fault block, with its stratal termination lines.",
                                notes_common));
   }
   // 3D views

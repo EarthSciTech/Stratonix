@@ -346,8 +346,54 @@ FaultedSurface horizon_grid_faulted(const Model& m, int h, const GridSpec& g) {
   return fs;
 }
 
-// Stage 2C (STX-TN-07 section 2): implemented in Prompt 23.
-Grid2D unit_thickness_grid(const Model&, int, const GridSpec& g) { return Grid2D(g, std::nan("")); }
-std::vector<TerminationLine> termination_lines(const Model&, int, const GridSpec&) { return {}; }
+// Stage 2C (STX-TN-07 section 2): isopachs and termination lines.
+Grid2D unit_thickness_grid(const Model& m, int unit, const GridSpec& g) {
+  Grid2D t(g, std::nan(""));
+  const int nh = static_cast<int>(m.info().horizons.size());
+  if (unit < 1 || unit >= nh) return t;
+  auto a = horizon_grid_faulted(m, unit - 1, g), b = horizon_grid_faulted(m, unit, g);
+  for (std::size_t k = 0; k < t.v.size(); ++k)
+    if (!std::isnan(a.z.v[k]) && !std::isnan(b.z.v[k]) && a.block[k] == b.block[k]) t.v[k] = std::max(0.0, a.z.v[k] - b.z.v[k]);
+  return t;
+}
+
+std::vector<TerminationLine> termination_lines(const Model& m, int unit, const GridSpec& g) {
+  std::vector<TerminationLine> out;
+  const auto& inf = m.info();
+  if (unit < 1 || unit >= static_cast<int>(inf.units.size()) || inf.units[static_cast<std::size_t>(unit)].termination.empty()) return out;
+  auto t = unit_thickness_grid(m, unit, g);
+  const auto& un = inf.units[static_cast<std::size_t>(unit)];
+  auto* sq = static_cast<const StratigraphyQuery*>(m.capability("stratigraphy"));
+  auto top = horizon_grid_faulted(m, unit - 1, g);
+  for (auto& pl : contour_lines(t, 0.01)) {
+    if (pl.size() < 2) continue;
+    if (!sq) { out.push_back({un.name, un.termination, pl}); continue; }
+    // classify each vertex in the restored frame and split the line into runs of one kind
+    std::vector<Vec3> at, rs(pl.size());
+    for (auto& p : pl) {
+      long i = std::clamp(std::lround((p.x - g.x0) / g.dx), 0L, static_cast<long>(g.nx) - 1);
+      long j = std::clamp(std::lround((p.y - g.y0) / g.dy), 0L, static_cast<long>(g.ny) - 1);
+      double z = top.z.v[g.index(static_cast<std::size_t>(i), static_cast<std::size_t>(j))];
+      at.push_back({p.x, p.y, std::isnan(z) ? 0.0 : z - 0.005});
+    }
+    m.restore(at, rs);
+    std::string cur;
+    Polyline run;
+    for (std::size_t k = 0; k < pl.size(); ++k) {
+      std::string kd = sq->termination_at(unit, rs[k].x, rs[k].y, 0.75 * std::max(g.dx, g.dy));
+      if (kd.empty()) kd = cur.empty() ? un.termination.substr(0, un.termination.find(',')) : cur;
+      if (kd != cur && !run.empty()) {
+        Polyline keep = run;
+        keep.push_back(pl[k]);  // keep the run joined to the next
+        if (keep.size() >= 2) out.push_back({un.name, cur, keep});
+        run.clear();
+      }
+      cur = kd;
+      run.push_back(pl[k]);
+    }
+    if (run.size() >= 2) out.push_back({un.name, cur, run});
+  }
+  return out;
+}
 
 }  // namespace stratonix::repr

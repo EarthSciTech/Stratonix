@@ -16,7 +16,8 @@ ModelInfo model_info_from(const desc::Description& d) {
   mi.crs = d.crs;
   mi.domain = d.domain();
   for (std::size_t i = 0; i < d.horizons.size(); ++i)
-    mi.horizons.push_back({d.horizons[i].name, static_cast<int>(i), d.horizons[i].intended_offset});
+    mi.horizons.push_back({d.horizons[i].name, static_cast<int>(i), d.horizons[i].intended_offset,
+                           d.series_of(static_cast<int>(i)) >= 0 ? d.series[static_cast<std::size_t>(d.series_of(static_cast<int>(i)))].name : ""});
   const std::size_t nh = d.horizons.size();
   mi.units.resize(nh + 1);
   mi.units[0] = {d.above_top_name.empty() ? "above_" + d.horizons[0].name : d.above_top_name, -1, 0, "#E8EEF4"};
@@ -59,8 +60,9 @@ class FlatLayersBuilder final : public StructureBuilder {
  public:
   bool accepts(const desc::Description& d) const override {
     if (d.implicit.present || !d.primitives.empty() || !d.faults.empty() || d.regional_type != "flat") return false;
+    if (!d.series.empty()) return false;  // series relations, tilts and clinoforms: parametric builder
     for (auto& h : d.horizons)
-      if (!h.surface_input.empty() || !h.iso_input.empty()) return false;
+      if (!h.surface_input.empty() || !h.iso_input.empty() || !h.iso_trend.empty()) return false;
     return true;
   }
   ModelPtr build(const desc::Description& d, const BuildInputs&, BuildLog& log) const override {

@@ -120,7 +120,7 @@ TEST_CASE("P23 onlap onto a fold of the older series") {
     worst = std::max(worst, std::fabs(depth_faulted(*m, 2, x, 5000) - h3));
     worst = std::max(worst, std::fabs(depth_faulted(*m, 1, x, 5000) - std::min(1000.0, h3)));
     worst = std::max(worst, std::fabs(depth_faulted(*m, 0, x, 5000) - std::min(900.0, h3)));
-    worst = std::max(worst, std::fabs(depth_faulted(*m, 3, x, 5000) - 1300));  // H4: S1 relief 300 at H3 only (flat base)
+    worst = std::max(worst, std::fabs(depth_faulted(*m, 3, x, 5000) - (h3 + 200)));  // H4: relief constant below the anchor
   }
   std::cout << "  worst onlap misfit " << fmt_fixed(worst, 4) << " m\n";
   CHECK(worst <= 0.01);

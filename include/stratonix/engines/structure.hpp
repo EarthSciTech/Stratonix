@@ -54,8 +54,12 @@ struct FoldPrimitive {
 };
 
 /// Unfaulted horizon functions.
-class Structure {
+class Structure final : public StratigraphyQuery {
  public:
+  bool horizon_absent(int h, double x, double y) const override { return absent(static_cast<std::size_t>(h), x, y); }
+  std::string termination_at(int unit, double x, double y, double radius) const override;
+  /// Whether series relations or thickness trends are in force (stratigraphy queries apply).
+  bool has_stratigraphy() const { return has_rel_ || has_trend_; }
   /// Build from a validated description and its input grids. Honours the reference well by
   /// construction and other control wells by a correction field (reported in the log).
   Structure(const desc::Description& d, const BuildInputs& in, BuildLog& log);
@@ -70,6 +74,21 @@ class Structure {
   const std::vector<FoldPrimitive>& primitives() const { return prims_; }
   /// Maximum |correction| at the wells' neighbourhood per horizon (reported).
   const std::vector<double>& max_correction() const { return max_corr_; }
+  /// Raw (before the series relations) and effective horizons at (x, y), with a flag per
+  /// horizon: 1 lowered by an erosional surface, 2 raised by onlap (STX-TN-07 section 1).
+  void z_detail(double x, double y, double* raw, double* eff, unsigned char* flags) const;
+  /// True when horizon h is clamped by a relation at (x, y): it has no top there.
+  bool absent(std::size_t h, double x, double y) const;
+  /// Whether series relations, tilts or clinoforms are in force.
+  bool has_relations() const { return has_rel_; }
+  /// Termination of model unit u ("" when it does not terminate in the model).
+  const std::string& unit_termination(std::size_t u) const { return term_[u]; }
+  /// Series index of horizon h (0 when no series are given).
+  int series_of(std::size_t h) const { return hseries_[h]; }
+  /// Whether a raw thickness below zero is a designed pinch-out (thickness trend clamped).
+  bool trend_clamped(std::size_t h, double x, double y) const;
+  /// Growth fraction of horizon h for a structure growing from `onset` to `end` (indices).
+  double growth_fraction(std::size_t h, int onset, int end) const;
   /// Missing (eroded) section of model unit `unit` (between horizons unit-1 and unit, both in one
   /// series) at (x, y) in the restored frame (STX-TN-07 section 1).
   double missing_section(int unit, double x, double y) const;
@@ -81,8 +100,28 @@ class Structure {
   std::shared_ptr<const FoldPrimitive::Offset> parallel_offset(const FoldPrimitive& p, std::size_t ha, double t,
                                                                const desc::Description& d);
   std::size_t offset_anchor_ = 0;
-  enum class Kind { Parametric, Surface, Isochore };
+  enum class Kind { Parametric, Surface, Isochore, Clinoform };
   double z_uncorrected(std::size_t h, double x, double y) const;
+  double z_raw(std::size_t h, double x, double y) const;
+  void z_all_raw(double x, double y, double* out) const;
+  void apply_relations(double x, double y, double* z, unsigned char* flags, bool erosion_only) const;
+  double iso_thickness(std::size_t h, double x, double y, bool clamp) const;
+  double clino_offset(std::size_t h, double x, double y) const;  ///< H P(...) above the series below
+  void report_terminations(const desc::Description& d, BuildLog& log);
+  // stage 2C (STX-TN-07)
+  struct SeriesInfo {
+    std::size_t first = 0, last = 0;  ///< youngest and oldest horizon
+    int base = 0;                     ///< 0 conformable, 1 erosional, 2 onlap
+    bool clino = false, sigmoid = true;
+    double height = 0, width = 1, ax = 0, ay = 1, bx = 0, by = 0, rate = 0;
+  };
+  std::vector<SeriesInfo> series_;
+  std::vector<int> hseries_;
+  std::vector<double> tilt_gx_, tilt_gy_;
+  bool has_tilt_ = false, has_rel_ = false, has_trend_ = false;
+  std::vector<int> trend_;              ///< 0 none, 1 linear, 2 radial
+  std::vector<double> trend_a_, trend_b_, trend_cx_, trend_cy_;
+  std::vector<std::string> term_;
   double regional(double x, double y) const;
 
   std::vector<Kind> kind_;

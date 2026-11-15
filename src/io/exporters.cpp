@@ -1,5 +1,6 @@
 // Export context and the Petrel export set (exporter plugins).
 #include <algorithm>
+#include <map>
 #include <cmath>
 #include <set>
 
@@ -176,6 +177,27 @@ class IrapGridExporter final : public Exporter {
         put(folder, pb, write_irap_ascii(c.block_surface(static_cast<int>(h), b), c.decimals));
         out.push_back({rel(pb), "IRAP classic ASCII grid", "IRAP classic grid (ASCII)",
                        inf.horizons[h].name + " in block " + std::to_string(b) + " (" + c.block_label(b) + "), extended 2 nodes across the gap"});
+      }
+    }
+    // Stage 2C: isopachs and stratal termination lines of units that terminate (STX-TN-07 section 2).
+    for (std::size_t u = 1; u + 1 < inf.units.size(); ++u) {
+      if (inf.units[u].termination.empty()) continue;
+      std::string un = petrel_name(inf.units[u].name);
+      fs::path p = fs::path("isopachs") / (un + "_isopach.irap");
+      put(folder, p, write_irap_ascii(repr::unit_thickness_grid(c.model(), static_cast<int>(u), c.grid()), c.decimals));
+      out.push_back({rel(p), "IRAP classic ASCII grid", "IRAP classic grid (ASCII)",
+                     inf.units[u].name + " isopach (vertical thickness, m); fault gaps undefined"});
+      std::map<std::string, std::vector<Polyline>> by_kind;
+      for (auto& t : repr::termination_lines(c.model(), static_cast<int>(u), c.grid())) {
+        Polyline l = t.line;
+        for (auto& q : l) q.z = 0;
+        by_kind[t.kind].push_back(l);
+      }
+      for (auto& [kind, lines] : by_kind) {
+        fs::path pl = fs::path("lines") / (un + "_" + kind + "_line.irap");
+        put(folder, pl, write_irap_lines(lines, c.decimals));
+        out.push_back({rel(pl), "IRAP classic lines", "IRAP classic lines (ASCII)",
+                       inf.units[u].name + " " + kind + " line (zero thickness), map position, z = 0"});
       }
     }
     return out;

@@ -309,6 +309,27 @@
                       "zmap",
                       "xyz"
                     ]
+                  },
+                  "trend": {
+                    "type": "object",
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "linear",
+                          "radial"
+                        ]
+                      },
+                      "gradient": {
+                        "$ref": "#/$defs/param"
+                      },
+                      "centre": {
+                        "$ref": "#/$defs/param"
+                      }
+                    }
                   }
                 }
               },
@@ -359,6 +380,90 @@
         },
         "below_base_name": {
           "type": "string"
+        },
+        "series": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "horizons",
+              "base"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+$"
+              },
+              "horizons": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "base": {
+                "enum": [
+                  "conformable",
+                  "erosional",
+                  "onlap"
+                ]
+              },
+              "tilt": {
+                "type": "object",
+                "required": [
+                  "dip",
+                  "azimuth"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "dip": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "azimuth": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              },
+              "clinoforms": {
+                "type": "object",
+                "required": [
+                  "profile",
+                  "height",
+                  "width",
+                  "direction",
+                  "first_break",
+                  "progradation"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "profile": {
+                    "enum": [
+                      "sigmoidal",
+                      "oblique"
+                    ]
+                  },
+                  "height": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "width": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "direction": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "first_break": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "progradation": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -498,6 +603,25 @@
                   },
                   "step_across": {
                     "$ref": "#/$defs/param"
+                  }
+                }
+              },
+              "series": {
+                "type": "string"
+              },
+              "growth": {
+                "type": "object",
+                "required": [
+                  "onset",
+                  "end"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "onset": {
+                    "type": "string"
+                  },
+                  "end": {
+                    "type": "string"
                   }
                 }
               }
@@ -761,6 +885,22 @@
               },
               "propagation_slip_ratio": {
                 "$ref": "#/$defs/param"
+              }
+            }
+          },
+          "growth": {
+            "type": "object",
+            "required": [
+              "onset",
+              "end"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "onset": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
               }
             }
           }
@@ -1233,6 +1373,7 @@
                         "fault_cutoff_depths",
                         "fault_overlap",
                         "throw_ratio",
+                        "growth_index",
                         "fault_gap"
                       ]
                     },
@@ -1315,6 +1456,12 @@
                 "type": "string"
               }
             }
+          }
+        },
+        "isopachs": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       }

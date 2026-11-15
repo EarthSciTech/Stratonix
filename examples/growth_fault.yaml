@@ -1,0 +1,74 @@
+# Worked example 15: a growth fault. A normal fault with 300 m of throw moved while H1 to H3 were
+# deposited: H4 and H5 carry the full throw, H1 none, and the growth package thickens into the hanging
+# wall (stage 2C). DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_growth_fault, version: "1.0.0", status: DESIGN,
+        title: "Growth fault"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 2500] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, footwall"
+    tops:
+      H1: "800 m | user_instruction | worked example"
+      H2: "1000 m | user_instruction | worked example"
+      H3: "1200 m | user_instruction | worked example"
+      H4: "1400 m | user_instruction | worked example"
+      H5: "1600 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}, {name: H4}, {name: H5, intended_offset: true}]
+  units:
+    - {name: Growth_1, top: H1, base: H2}
+    - {name: Growth_2, top: H2, base: H3}
+    - {name: Growth_3, top: H3, base: H4}
+    - {name: Pre_growth, top: H4, base: H5}
+structure:
+  regional: {type: flat}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry:
+      type: planar
+      reference_point: "[5000, 5000] m | user_instruction | worked example"
+      reference_depth: "1200 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: dips east"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "100000 m | user_instruction | worked example: longer than the model"
+    throw:
+      max: "300 m | user_instruction | worked example: pre-growth throw"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.01 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: layer_rigid}
+    growth: {onset: H4, end: H1}
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[500, 5000], [9500, 5000]] m | user_instruction | worked example: across the fault"
+  section_sheets:
+    - name: XS_sheet
+      section: XS_EW
+      title: "Growth fault, Y = 5,000 m (W-E)"
+      main:
+        vertical_exaggeration: "2 ratio | user_instruction | worked example"
+      key_numbers:
+        - {kind: fault_throw, fault: F1, horizon: H1, label: "F1: throw at H1 (m)"}
+        - {kind: fault_throw, fault: F1, horizon: H2, label: "F1: throw at H2 (m)"}
+        - {kind: fault_throw, fault: F1, horizon: H3, label: "F1: throw at H3 (m)"}
+        - {kind: fault_throw, fault: F1, horizon: H4, label: "F1: throw at H4 (m)"}
+        - {kind: growth_index, fault: F1, unit: Growth_1, label: "F1: growth index, Growth_1"}
+        - {kind: growth_index, fault: F1, unit: Growth_2, label: "F1: growth index, Growth_2"}
+        - {kind: growth_index, fault: F1, unit: Growth_3, label: "F1: growth index, Growth_3"}
+        - {kind: growth_index, fault: F1, unit: Pre_growth, label: "F1: growth index, Pre_growth"}
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

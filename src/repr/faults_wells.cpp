@@ -385,6 +385,17 @@ std::vector<WellTop> well_intersections(const Model& m, const WellPath& w, doubl
     }
   }
   std::sort(tops.begin(), tops.end(), [](const WellTop& a, const WellTop& b) { return a.p.z > b.p.z; });
+  // Stage 2C: a horizon clamped by a series relation at the well (eroded, or lapping out) has no
+  // top there (STX-TN-07 section 2).
+  if (auto* st = static_cast<const StratigraphyQuery*>(m.capability("stratigraphy")); st && !tops.empty()) {
+    std::vector<Vec3> at, rs(tops.size());
+    for (auto& t : tops) at.push_back(t.p);
+    m.restore(at, rs);
+    std::vector<WellTop> kept;
+    for (std::size_t q = 0; q < tops.size(); ++q)
+      if (!st->horizon_absent(tops[q].horizon_index, rs[q].x, rs[q].y)) kept.push_back(tops[q]);
+    tops.swap(kept);
+  }
   return tops;
 }
 

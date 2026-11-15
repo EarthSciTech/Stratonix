@@ -77,7 +77,36 @@ has its own version (`stratonix_schema`).
   strata, clinoforms; checks C13 and C14; rules F20 to F23. New interfaces, additive:
   `Structure::missing_section`, `repr::unit_thickness_grid`, `repr::termination_lines`.
 
+- Stratigraphic series (Prompt 23): `stratigraphy.series` lists the horizons in series, youngest
+  first, each with `base: conformable | erosional | onlap`. Relations are applied in age order to
+  the horizon functions of the restored frame: an erosional base truncates every older horizon,
+  an onlap base raises the series onto the top of the series below. A point keeps one unit.
+  `tilt: {dip, azimuth}` on a series tilts it and every older series (angular unconformities);
+  a fold primitive with `series:` folds only that series and older ones. Rule F20.
+- Thickness trends (Prompt 23): `isochore.trend: {type: linear, gradient}` or `{type: radial,
+  centre, gradient}`, clamped at zero (pinch-outs and wedges). Rule F21.
+- Stratal terminations (Prompt 23): units that terminate are labelled (truncation, onlap,
+  pinch-out, clinoform) in `UnitInfo.termination`. Their termination lines, each part labelled
+  with its own kind, are drawn on the maps of the adjacent horizons and exported as IRAP lines.
+  Isopach maps are a new figure kind (every terminating unit, and `outputs.isopachs`); isopach
+  grids are exported. The missing (eroded) section is reported per unit and per well. Wells omit
+  the tops of horizons that are absent at them (eroded or lapping out).
+- Growth strata (Prompt 24): `growth: {onset, end}` on layer-rigid faults and on fold primitives.
+  Horizons carry the fraction of the displacement that followed their deposition, linear in
+  reference depth between onset (full) and end (none). The growth index per unit per fault is
+  reported and available as the section-sheet key number `growth_index`. Rule F22.
+- Clinoforms (Prompt 24): a series with `clinoforms: {profile: sigmoidal | oblique, height,
+  width, direction, first_break, progradation}` makes its horizons prograding clinoform
+  surfaces that downlap onto the series below; the maximum foreset dip is reported. Rule F23.
+- Checks C13 (no negative thickness in the restored frame, before and after the relations) and
+  C14 (truncation consistent with age order). `StratigraphyQuery` (capability
+  "stratigraphy") lets other layers ask whether a horizon is absent at a point.
+- Worked examples `unconformity_onlap_pinchout.yaml`, `growth_fault.yaml` and
+  `prograding_wedge.yaml`.
+
 ### Changed
+- Check C1 measures a unit that terminates by design only where it is present, and passes when
+  it is positive there; C13 checks it for negative thickness.
 - Check C4 skips trishear and fault-parallel-flow faults, whose throw is not a profile; C12
   checks them instead.
 - Check C4 measures faults whose slip has a strike component against the footwall horizon where
@@ -89,7 +118,7 @@ has its own version (`stratonix_schema`).
   unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
   and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
-  integrations); stage 2C (`test_v2_strat`), expected to fail until its features are built.
+  integrations); stage 2C (`test_v2_strat`).
 
 ## [2026.1] - 2026-11-14 - First public release
 

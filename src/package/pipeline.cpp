@@ -123,6 +123,9 @@ fig::FigureContext figure_context(const desc::Description& d, const Model& m, co
     c.unit_colors.push_back(color);
     c.unit_labels.push_back(label);
   }
+  for (auto& n : d.isopachs)
+    for (std::size_t u = 0; u < m.info().units.size(); ++u)
+      if (m.info().units[u].name == n) c.isopach_units.push_back(static_cast<int>(u));
   return c;
 }
 
