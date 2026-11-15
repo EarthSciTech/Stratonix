@@ -1642,8 +1642,17 @@ void prop_legend(Figure& f, const FigureContext& c, const repr::CornerPointGrid&
   f.text({rx + 18, ry + 166}, fmt_shortest(std::round(s.lo * 1000) / 1000), 6.5, Anchor::Start, false, kInk);
   f.rect(rx, ry + 176, 14, 8, rgb(200, 200, 200), kInk, 0.4);
   f.text({rx + 18, ry + 183}, "missing (" + std::to_string(p->missing) + " cells)", 6.5, Anchor::Start, false, kInk);
-  f.text({rx, ry + 198}, "Evidence: " + p->evidence, 6.5, Anchor::Start, false, kInk);
-  double ly = ry + 214;
+  // the evidence class, wrapped at about 40 characters
+  double ly = ry + 198;
+  std::string rest = "Evidence: " + p->evidence;
+  while (!rest.empty()) {
+    std::size_t cut = rest.size() <= 40 ? rest.size() : rest.rfind(' ', 40);
+    if (cut == std::string::npos || cut == 0) cut = std::min<std::size_t>(40, rest.size());
+    f.text({rx, ly}, rest.substr(0, cut), 6.5, Anchor::Start, false, kInk);
+    rest = cut < rest.size() ? rest.substr(cut + (rest[cut] == ' ' ? 1 : 0)) : "";
+    ly += 9;
+  }
+  ly += 7;
   key_box(f, c, rx, ly, 180);
 }
 }  // namespace

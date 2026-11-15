@@ -11,7 +11,7 @@
 namespace stratonix::registry {
 
 /// Plugin kinds known to the registry.
-enum class Kind { StructureBuilder, Kinematics, HangingWall, Exporter, Importer, Extractor, Check };
+enum class Kind { StructureBuilder, Kinematics, HangingWall, Exporter, Importer, Extractor, Check, Upscaler };
 const char* kind_name(Kind k);
 
 /// Base class of every plugin object.

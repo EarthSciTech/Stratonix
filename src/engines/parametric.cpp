@@ -14,6 +14,7 @@ namespace stratonix {
 ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& in, BuildLog& log)
     : info_(model_info_from(d)) {
   info_.engine = "parametric";
+  porosity_.m = this;
   structure_ = std::make_shared<Structure>(d, in, log);
   for (std::size_t u = 1; u < info_.units.size() && u < info_.horizons.size(); ++u) info_.units[u].termination = structure_->unit_termination(u);
   faults_ = std::make_shared<FaultNetwork>(d, *structure_, log);
@@ -80,7 +81,19 @@ const void* ParametricModel::capability(std::string_view name) const {
   if (name == "column") return static_cast<const ColumnQuery*>(structure_.get());
   if (name == "stratigraphy") return structure_->has_stratigraphy() ? static_cast<const StratigraphyQuery*>(structure_.get()) : nullptr;
   if (name == "faults") return faults_.get();
+  if (name == "porosity") {
+    if (structure_->compaction_mode() == 0) return nullptr;
+    return static_cast<const PorosityQuery*>(&porosity_);
+  }
   return nullptr;
+}
+
+bool ParametricModel::Porosity::has_law(int unit) const { return m->structure_->compaction_law(unit) != 0; }
+double ParametricModel::Porosity::mean_porosity(int unit, const Vec3& top, const Vec3& base) const {
+  Vec3 p[2] = {top, base}, r[2];
+  m->restore(p, r);
+  const double sd = m->structure_->surface_depth();
+  return m->structure_->mean_porosity(unit, -r[0].z - sd, -r[1].z - sd);
 }
 
 void ParametricModel::eval_point(const Vec3& p, BlockCode* block, Vec3* restored, double* scalars) const {

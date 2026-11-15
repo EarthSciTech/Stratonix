@@ -27,9 +27,9 @@ stx_test(test_v2_faultrock stratonix_package)
 stx_test(test_v3_data stratonix_package)
 set_tests_properties(test_v3_data PROPERTIES TIMEOUT 5400)
 # Stage 3B analytical tests (STX-TN-12), written before the features (Prompt 37) and made to pass
-# by Prompts 38 and 39.
+# by Prompts 38 and 39 (all passing since Prompt 39).
 stx_test(test_v3_grids stratonix_package)
-set_tests_properties(test_v3_grids PROPERTIES WILL_FAIL TRUE TIMEOUT 3600)
+set_tests_properties(test_v3_grids PROPERTIES TIMEOUT 3600)
 if(STRATONIX_WITH_FESAPI)
   target_compile_definitions(test_v3_grids PRIVATE STRATONIX_HAVE_FESAPI=1)
 endif()

@@ -25,6 +25,7 @@ void register_all_plugins() {
   register_engine_plugins();
   io::register_io_plugins();
   register_check_plugins();
+  repr::register_grid_plugins();
 }
 
 void ensure_new_output_dir(const std::filesystem::path& out_dir) {
@@ -557,6 +558,19 @@ std::vector<std::pair<std::string, std::string>> grid_rows(const GridProducts& g
   k.push_back({"Grid bulk volume (active cells)", fmt_fixed(vol / 1e6, 3) + " million m3"});
   for (auto& p : gp.props.props)
     if (p.missing) k.push_back({"Grid property " + p.name + " missing", std::to_string(p.missing) + " cells: " + p.missing_reason});
+  if (gp.has_trans) {
+    std::size_t n = 0, missing = 0, limit = 0;
+    double lo = 1e300;
+    for (auto& f : gp.trans.faces) {
+      ++n;
+      if (!f.missing.empty()) ++missing;
+      else if (!f.note.empty()) ++limit;
+      else lo = std::min(lo, f.mult);
+    }
+    k.push_back({"Fault transmissibility (Manzocchi et al. 1999)", std::to_string(n) + " fault faces: " + std::to_string(n - missing - limit) +
+                                                                     " computed (lowest multiplier " + (lo < 1e299 ? fmt_shortest(std::round(lo * 1e4) / 1e4) : std::string("-")) + "), " +
+                                                                     std::to_string(limit) + " at 1 (no displacement), " + std::to_string(missing) + " missing"});
+  }
   return k;
 }
 
@@ -585,12 +599,12 @@ void write_grid_outputs(const desc::Description& d, const Model& m, const GridPr
   std::filesystem::create_directories(out_dir / "grid");
   write_file(out_dir / "grid" / "cells.csv", t);
   if (gp.has_trans) {
-    std::string f = "fault,i,j,k,face,x,y,z,sgr,thickness_m,displacement_m,k_fault_mD,k_i_mD,k_j_mD,L_i_m,L_j_m,multiplier,missing\n";
+    std::string f = "fault,i,j,k,face,x,y,z,sgr,thickness_m,displacement_m,k_fault_mD,k_i_mD,k_j_mD,L_i_m,L_j_m,multiplier,missing,note\n";
     for (auto& ff : gp.trans.faces)
       f += gp.fault_names[static_cast<std::size_t>(ff.fault)] + "," + std::to_string(ff.i + 1) + "," + std::to_string(ff.j + 1) + "," + std::to_string(ff.k + 1) +
            "," + ff.dir + "+," + fmt_fixed(ff.centre.x, 2) + "," + fmt_fixed(ff.centre.y, 2) + "," + fmt_fixed(ff.centre.z, 2) + "," + fmt_shortest(ff.sgr) + "," +
            fmt_shortest(ff.thickness) + "," + fmt_shortest(ff.displacement) + "," + fmt_shortest(ff.k_fault) + "," + fmt_shortest(ff.k_i) + "," +
-           fmt_shortest(ff.k_j) + "," + fmt_shortest(ff.L_i) + "," + fmt_shortest(ff.L_j) + "," + fmt_shortest(ff.mult) + ",\"" + ff.missing + "\"\n";
+           fmt_shortest(ff.k_j) + "," + fmt_shortest(ff.L_i) + "," + fmt_shortest(ff.L_j) + "," + fmt_shortest(ff.mult) + ",\"" + ff.missing + "\",\"" + ff.note + "\"\n";
     write_file(out_dir / "grid" / "fault_faces.csv", f);
   }
   if (!figures) return;
@@ -614,6 +628,9 @@ void write_grid_outputs(const desc::Description& d, const Model& m, const GridPr
     put(fig::grid_layer_figure(c, g, &p, g.nz / 2), "grid-layer", std::to_string(g.nz / 2 + 1) + "_" + nm, p.name + " on a layer",
         p.name + " (" + p.unit + ") on layer " + std::to_string(g.nz / 2 + 1) + "; grey cells are missing.");
   }
+  if (gp.has_trans)
+    put(fig::grid_layer_figure(c, g, &gp.trans.multx, g.nz / 2), "grid-layer", std::to_string(g.nz / 2 + 1) + "_MULTX", "fault transmissibility multipliers",
+        "MULTX (x+ faces) on layer " + std::to_string(g.nz / 2 + 1) + ": 1 away from faults; grey where a multiplier is missing.");
   put(fig::grid_view3d_figure(c, g, 210, 30), "grid-3d", "SW", "grid 3D view from the south-west", "Outer faces of the active cells and their faces across faults, by zone.");
   put(fig::grid_view3d_figure(c, g, 135, 30), "grid-3d", "SE", "grid 3D view from the south-east", "Outer faces of the active cells and their faces across faults, by zone.");
 }

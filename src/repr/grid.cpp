@@ -619,11 +619,6 @@ std::vector<FaultFace> grid_fault_faces(const Model& m, const CornerPointGrid& g
 
 // ---- properties (Prompt 39) ------------------------------------------------------------------
 
-namespace {
-[[noreturn]] void todo(const char* what, int prompt) {
-  throw std::runtime_error(std::string("not implemented yet: ") + what + " (STX-TN-12, Prompt " + std::to_string(prompt) + ")");
-}
-}  // namespace
 
 const CellProperty* PropertySet::find(const std::string& name) const {
   for (auto& p : props)
@@ -671,20 +666,297 @@ PropertySet grid_properties(const Model& m, const CornerPointGrid& g, const Prop
   blk.v.resize(nc);
   for (std::size_t c = 0; c < nc; ++c) blk.v[c] = static_cast<double>(g.block[c]);
   ps.props.push_back(blk);
-  if (!in.facies.empty()) todo("facies by zone", 39);
-  if (in.porosity_from_compaction) todo("porosity from compaction", 39);
-  if (!in.transforms.empty()) todo("property transforms", 39);
+  const std::size_t nunit = info.units.size();
+  auto unit_name = [&](int u) { return u >= 0 && static_cast<std::size_t>(u) < nunit ? info.units[static_cast<std::size_t>(u)].name : std::string("?"); };
+  // facies by zone: a labelled ordinal per unit; units without one are missing
+  if (!in.facies.empty()) {
+    std::map<int, const FaciesSpec*> by_unit;
+    std::string ev, src = "facies by zone:";
+    for (auto& f : in.facies) {
+      by_unit[f.unit] = &f;
+      if (ev.empty()) ev = f.evidence;
+      else if (ev.find(f.evidence) == std::string::npos) ev += " / " + f.evidence;
+      src += " " + unit_name(f.unit) + " = " + std::to_string(f.code) + (f.name.empty() ? "" : " (" + f.name + ")") + ";";
+      if (!f.source.empty() && src.find(f.source) == std::string::npos) src += " source " + f.source + ";";
+    }
+    CellProperty fac{"FACIES", "code", ev, src};
+    fac.integer = true;
+    fac.v.assign(nc, kNaN);
+    std::vector<std::string> without;
+    for (std::size_t c = 0; c < nc; ++c) {
+      auto it = by_unit.find(g.zone[c]);
+      if (it != by_unit.end()) fac.v[c] = it->second->code;
+      else {
+        ++fac.missing;
+        auto nm = unit_name(g.zone[c]);
+        if (std::find(without.begin(), without.end(), nm) == without.end()) without.push_back(nm);
+      }
+    }
+    for (std::size_t k = 0; k < without.size(); ++k) fac.missing_reason += (k ? ", " : "no facies given for unit ") + without[k];
+    ps.props.push_back(fac);
+  }
+  // porosity from the compaction trend (stage 2D), mean over each cell's depth interval
+  if (in.porosity_from_compaction) {
+    auto* pq = static_cast<const PorosityQuery*>(m.capability("porosity"));
+    CellProperty por{"PORO", "fraction", "derived", "mean porosity of the unit's compaction law (stage 2D) over the cell's restored depth interval"};
+    por.v.assign(nc, kNaN);
+    if (!pq) {
+      por.missing = nc;
+      por.missing_reason = "the model offers no compaction porosity (no compaction block, or an engine without one)";
+    } else {
+      std::vector<std::string> without;
+      for (int k = 0; k < g.nz; ++k)
+        for (int j = 0; j < g.ny; ++j)
+          for (int i = 0; i < g.nx; ++i) {
+            auto id = g.cell(i, j, k);
+            if (!pq->has_law(g.zone[id])) {
+              ++por.missing;
+              auto nm = unit_name(g.zone[id]);
+              if (std::find(without.begin(), without.end(), nm) == without.end()) without.push_back(nm);
+              continue;
+            }
+            auto cc = g.corners(i, j, k);
+            Vec3 top = (cc[0] + cc[1] + cc[2] + cc[3]) / 4.0, base = (cc[4] + cc[5] + cc[6] + cc[7]) / 4.0;
+            por.v[id] = pq->mean_porosity(g.zone[id], top, base);
+          }
+      for (std::size_t k = 0; k < without.size(); ++k) por.missing_reason += (k ? ", " : "no compaction law for unit ") + without[k];
+    }
+    por.evidence = "derived (from the compaction parameters and their evidence classes)";
+    ps.props.push_back(por);
+  }
+  // transforms, in the order given; each needs a property computed before it
+  for (auto& t : in.transforms) {
+    const CellProperty* from = ps.find(t.from);
+    if (!from) throw std::invalid_argument("grid transform " + t.name + ": no property '" + t.from + "' computed before it");
+    ps.props.push_back(apply_transform(*from, t));
+  }
   return ps;
 }
-CellProperty apply_transform(const CellProperty&, const TransformSpec&) { todo("property transforms", 39); }
-double manzocchi_fault_permeability(double, double) { todo("fault permeability (Manzocchi 1999)", 39); }
-double manzocchi_multiplier(double, double, double, double, double, double) { todo("transmissibility multiplier", 39); }
-TransmissibilityResult fault_transmissibility(const Model&, const CornerPointGrid&, const PropertySet&, const FaultRockInput&) {
-  todo("fault transmissibility", 39);
+CellProperty apply_transform(const CellProperty& from, const TransformSpec& t) {
+  CellProperty out{t.name, t.unit, t.evidence,
+                   t.law + " transform of " + from.name + " (a " + fmt_shortest(t.a) + ", b " + fmt_shortest(t.b) + ")" + (t.source.empty() ? "" : ": " + t.source)};
+  out.integer = false;
+  out.v.assign(from.v.size(), kNaN);
+  std::size_t undefined = 0;
+  for (std::size_t c = 0; c < from.v.size(); ++c) {
+    const double x = from.v[c];
+    if (std::isnan(x)) { ++out.missing; continue; }
+    double y = kNaN;
+    if (t.law == "linear") y = t.a + t.b * x;
+    else if (t.law == "exponential") y = t.a * std::exp(t.b * x);
+    else if (t.law == "power") y = x > 0 || t.b == std::floor(t.b) ? t.a * std::pow(x, t.b) : kNaN;
+    else throw std::invalid_argument("grid transform " + t.name + ": unknown law '" + t.law + "'");
+    if (!std::isfinite(y)) { y = kNaN; ++out.missing; ++undefined; }
+    out.v[c] = y;
+  }
+  if (out.missing) {
+    out.missing_reason = from.missing ? from.name + " missing (" + from.missing_reason + ")" : std::string();
+    if (undefined) out.missing_reason += (out.missing_reason.empty() ? "" : "; ") + std::to_string(undefined) + " cells where the law is undefined";
+  }
+  return out;
 }
-CellProperty upscale_volume_weighted_mean(const CornerPointGrid&, const CellProperty&, const CornerPointGrid&) {
-  todo("upscaling (volume-weighted mean)", 39);
-}
-TetGrid tetrahedral_grid(const CornerPointGrid&) { todo("tetrahedral grid", 39); }
 
+double manzocchi_fault_permeability(double sgr, double displacement_m) {
+  if (std::isnan(sgr) || !(displacement_m > 0)) return kNaN;
+  return std::pow(10.0, -4.0 * sgr - 0.25 * std::log10(displacement_m) * std::pow(1.0 - sgr, 5));
+}
+double manzocchi_multiplier(double tf, double kf, double ki, double kj, double Li, double Lj) {
+  if (!(tf >= 0) || !(kf > 0) || !(ki > 0) || !(kj > 0) || !(Li > 0) || !(Lj > 0)) return kNaN;
+  return 1.0 / (1.0 + tf * (2.0 / kf - 1.0 / ki - 1.0 / kj) / (Li / ki + Lj / kj));
+}
+
+TransmissibilityResult fault_transmissibility(const Model& m, const CornerPointGrid& g, const PropertySet& props, const FaultRockInput& rock) {
+  TransmissibilityResult r;
+  const CellProperty *kx = props.find("PERMX"), *ky = props.find("PERMY");
+  if (!kx || !ky) throw std::invalid_argument("fault transmissibility needs PERMX and PERMY");
+  const std::size_t nc = g.ncell();
+  const std::string src = "Manzocchi et al. (1999): fault permeability from SGR and displacement, thickness from the fault-rock ratio; STX-TN-12 section 3";
+  r.multx = {"MULTX", "fraction", "literature_derived calibration on the fault-rock inputs", src};
+  r.multy = {"MULTY", "fraction", r.multx.evidence, src};
+  r.multx.v.assign(nc, 1.0);
+  r.multy.v.assign(nc, 1.0);
+  r.faces = grid_fault_faces(m, g);
+  StressInput none;
+  auto length = [&](int i, int j, int k, char dir) {
+    auto cc = g.corners(i, j, k);
+    if (dir == 'X') return norm((cc[1] + cc[3] + cc[5] + cc[7]) / 4.0 - (cc[0] + cc[2] + cc[4] + cc[6]) / 4.0);
+    return norm((cc[2] + cc[3] + cc[6] + cc[7]) / 4.0 - (cc[0] + cc[1] + cc[4] + cc[5]) / 4.0);
+  };
+  std::map<std::string, std::size_t> reasons;
+  for (auto& f : r.faces) {
+    const int i2 = f.dir == 'X' ? f.i + 1 : f.i, j2 = f.dir == 'X' ? f.j : f.j + 1;
+    const auto a = g.cell(f.i, f.j, f.k), b = g.cell(i2, j2, f.k);
+    const CellProperty& kp = f.dir == 'X' ? *kx : *ky;
+    // fault rock where the face meets its fault: the centre moved onto the fault along the normal
+    // (a stair-step face lies up to a cell away from it)
+    Vec3 on = f.centre;
+    for (int it = 0; it < 4; ++it) {
+      const double e = 0.5;
+      std::vector<Vec3> q{on, on + Vec3{e, 0, 0}, on - Vec3{e, 0, 0}, on + Vec3{0, e, 0}, on - Vec3{0, e, 0}, on + Vec3{0, 0, e}, on - Vec3{0, 0, e}};
+      FaultEval fe;
+      m.evaluate_fault(f.fault, q, fe);
+      Vec3 gr{(fe.distance[1] - fe.distance[2]) / (2 * e), (fe.distance[3] - fe.distance[4]) / (2 * e), (fe.distance[5] - fe.distance[6]) / (2 * e)};
+      const double gn = norm(gr);
+      if (gn < 1e-9 || std::isnan(fe.distance[0])) break;
+      on = on - gr * (fe.distance[0] / (gn * gn));
+      if (std::fabs(fe.distance[0]) < 1e-3) break;
+    }
+    auto pt = fault_rock_at(m, f.fault, on, rock, none);
+    f.sgr = pt.sgr;
+    f.thickness = pt.thickness;
+    f.k_fault = manzocchi_fault_permeability(f.sgr, f.displacement);
+    f.k_i = kp.v[a];
+    f.k_j = kp.v[b];
+    f.L_i = length(f.i, f.j, f.k, f.dir);
+    f.L_j = length(i2, j2, f.k, f.dir);
+    if (!g.actnum[a] || !g.actnum[b]) f.missing = "an inactive cell on one side";
+    else if (!(f.displacement >= 1.0)) {
+      // below 1 m of displacement there is no gouge (stage 2F) and the fault-zone thickness
+      // (ratio x displacement) tends to zero: the formula's limit, T = 1
+      f.mult = 1.0;
+      f.note = "displacement below 1 m: no fault rock, multiplier 1 (the formula's limit as the thickness goes to zero)";
+    } else if (std::isnan(f.sgr)) f.missing = "no shale gouge ratio (" + (pt.missing.empty() ? std::string("clay fractions not given") : pt.missing) + ")";
+    else if (std::isnan(f.thickness)) f.missing = "no fault-zone thickness (no thickness / displacement ratio)";
+    else if (!(f.displacement > 0)) f.missing = "no displacement at the face";
+    else if (std::isnan(f.k_i) || std::isnan(f.k_j)) f.missing = "cell permeability missing";
+    if (f.missing.empty() && f.note.empty()) f.mult = manzocchi_multiplier(f.thickness, f.k_fault, f.k_i, f.k_j, f.L_i, f.L_j);
+    if (std::isnan(f.mult) && f.missing.empty()) f.missing = "multiplier undefined for these inputs";
+    if (!g.actnum[a] || !g.actnum[b]) continue;  // inactive neighbours: no flow across, nothing to report in MULT
+    CellProperty& mp = f.dir == 'X' ? r.multx : r.multy;
+    mp.v[a] = f.mult;
+    if (!f.missing.empty()) reasons[f.missing]++;
+  }
+  for (auto* mp : {&r.multx, &r.multy}) {
+    for (double v : mp->v) mp->missing += std::isnan(v);
+  }
+  std::string why;
+  for (auto& [k, n] : reasons) why += (why.empty() ? "" : "; ") + std::to_string(n) + " fault faces: " + k;
+  r.multx.missing_reason = r.multx.missing ? why : "";
+  r.multy.missing_reason = r.multy.missing ? why : "";
+  return r;
+}
+
+namespace {
+/// Inverse bilinear map of (x, y) in the quad a (0,0), b (1,0), c (0,1), d (1,1); false if outside.
+bool inverse_bilinear(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d, double x, double y, double& u, double& v) {
+  u = 0.5;
+  v = 0.5;
+  for (int it = 0; it < 30; ++it) {
+    double px = (1 - u) * (1 - v) * a.x + u * (1 - v) * b.x + (1 - u) * v * c.x + u * v * d.x - x;
+    double py = (1 - u) * (1 - v) * a.y + u * (1 - v) * b.y + (1 - u) * v * c.y + u * v * d.y - y;
+    double xu = (1 - v) * (b.x - a.x) + v * (d.x - c.x), xv = (1 - u) * (c.x - a.x) + u * (d.x - b.x);
+    double yu = (1 - v) * (b.y - a.y) + v * (d.y - c.y), yv = (1 - u) * (c.y - a.y) + u * (d.y - b.y);
+    double det = xu * yv - xv * yu;
+    if (std::fabs(det) < 1e-12) return false;
+    double du = (px * yv - py * xv) / det, dv = (py * xu - px * yu) / det;
+    u -= du;
+    v -= dv;
+    if (std::fabs(du) + std::fabs(dv) < 1e-12) break;
+  }
+  return u >= -1e-9 && u <= 1 + 1e-9 && v >= -1e-9 && v <= 1 + 1e-9;
+}
+}  // namespace
+
+CellProperty upscale_volume_weighted_mean(const CornerPointGrid& fine, const CellProperty& p, const CornerPointGrid& coarse) {
+  CellProperty out{p.name, p.unit, "upscaled",
+                   "volume_weighted_mean of " + p.name + " (" + p.evidence + ") from a " + std::to_string(fine.nx) + " x " + std::to_string(fine.ny) +
+                       " x " + std::to_string(fine.nz) + " grid"};
+  const std::size_t nc = coarse.ncell();
+  std::vector<double> sum(nc, 0.0), vol(nc, 0.0);
+  for (int k = 0; k < fine.nz; ++k)
+    for (int j = 0; j < fine.ny; ++j)
+      for (int i = 0; i < fine.nx; ++i) {
+        auto id = fine.cell(i, j, k);
+        if (!fine.actnum[id] || std::isnan(p.v[id])) continue;
+        auto cc = fine.corners(i, j, k);
+        const Vec3 c = cell_centre(cc);
+        const double v = cell_volume(cc);
+        const int ci0 = static_cast<int>(std::floor((c.x - coarse.x0) / coarse.dx)), cj0 = static_cast<int>(std::floor((c.y - coarse.y0) / coarse.dy));
+        bool done = false;
+        for (int dj = -1; dj <= 1 && !done; ++dj)
+          for (int di = -1; di <= 1 && !done; ++di) {
+            const int ci = ci0 + di, cj = cj0 + dj;
+            if (ci < 0 || cj < 0 || ci >= coarse.nx || cj >= coarse.ny) continue;
+            Vec3 q[4];
+            for (int n = 0; n < 4; ++n) q[n] = on_pillar(coarse.coord, coarse.pillar(ci + (n & 1), cj + (n >> 1)), c.z);
+            double u, w;
+            if (!inverse_bilinear(q[0], q[1], q[2], q[3], c.x, c.y, u, w)) continue;
+            for (int ck = 0; ck < coarse.nz; ++ck) {
+              auto cid = coarse.cell(ci, cj, ck);
+              auto z = [&](int corner) { return coarse.zcorn[coarse.zcorn_index(ci, cj, ck, corner)]; };
+              const double zt = (1 - u) * (1 - w) * z(0) + u * (1 - w) * z(1) + (1 - u) * w * z(2) + u * w * z(3);
+              const double zb = (1 - u) * (1 - w) * z(4) + u * (1 - w) * z(5) + (1 - u) * w * z(6) + u * w * z(7);
+              if (c.z <= zt + 1e-9 && c.z >= zb - 1e-9) {
+                sum[cid] += p.v[id] * v;
+                vol[cid] += v;
+                done = true;
+                break;
+              }
+            }
+          }
+      }
+  out.v.assign(nc, kNaN);
+  for (std::size_t c = 0; c < nc; ++c) {
+    if (vol[c] > 0) out.v[c] = sum[c] / vol[c];
+    else ++out.missing;
+  }
+  if (out.missing) out.missing_reason = "no fine cell centre with a value in the coarse cell";
+  return out;
+}
+
+TetGrid tetrahedral_grid(const CornerPointGrid& g) {
+  TetGrid t;
+  std::map<std::pair<std::size_t, long long>, std::int32_t> node;
+  auto id = [&](int i, int j, int k, int c) {
+    std::size_t p = g.pillar(i + (c & 1), j + ((c >> 1) & 1));
+    auto key = std::make_pair(p, std::llround(g.zcorn[g.zcorn_index(i, j, k, c)] * 1000.0));
+    auto it = node.find(key);
+    if (it != node.end()) return it->second;
+    t.nodes.push_back(g.corner(i, j, k, c));
+    return node[key] = static_cast<std::int32_t>(t.nodes.size() - 1);
+  };
+  const auto split = hex_tets_fixed();
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        auto c = g.cell(i, j, k);
+        if (!g.actnum[c]) continue;
+        std::int32_t n[8];
+        for (int q = 0; q < 8; ++q) n[q] = id(i, j, k, q);
+        for (auto& tt : split) {
+          t.tets.push_back({n[tt[0]], n[tt[1]], n[tt[2]], n[tt[3]]});
+          t.cell.push_back(static_cast<std::int32_t>(c));
+        }
+      }
+  return t;
+}
+
+// ---- plugins -----------------------------------------------------------------------------------
+namespace {
+class CornerPointBuiltin final : public CornerPointExtractor {
+  CornerPointGrid extract(const Model& m, const GridOptions& o) const override { return corner_point_grid(m, o); }
+};
+class TetrahedralBuiltin final : public TetrahedralExtractor {
+  TetGrid extract(const CornerPointGrid& g) const override { return tetrahedral_grid(g); }
+};
+class VolumeWeightedMean final : public UpscalerPlugin {
+  CellProperty upscale(const CornerPointGrid& fine, const CellProperty& p, const CornerPointGrid& coarse) const override {
+    return upscale_volume_weighted_mean(fine, p, coarse);
+  }
+};
+}  // namespace
 }  // namespace stratonix::repr
+
+STRATONIX_REGISTER(ext_corner_point, ::stratonix::registry::Kind::Extractor, "corner_point", "1.0.0",
+                   "Corner-point grid conforming to faults and horizons (STX-TN-12)", [] { return std::make_unique<stratonix::repr::CornerPointBuiltin>(); })
+STRATONIX_REGISTER(ext_tetrahedral, ::stratonix::registry::Kind::Extractor, "tetrahedral", "1.0.0",
+                   "Tetrahedral grid from a corner-point grid (six tetrahedra per cell)", [] { return std::make_unique<stratonix::repr::TetrahedralBuiltin>(); })
+STRATONIX_REGISTER(ups_vwm, ::stratonix::registry::Kind::Upscaler, "volume_weighted_mean", "1.0.0",
+                   "Volume-weighted mean of the fine cells whose centres fall in each coarse cell",
+                   [] { return std::make_unique<stratonix::repr::VolumeWeightedMean>(); })
+
+void stratonix::repr::register_grid_plugins() {
+  STRATONIX_PLUGIN_ANCHOR(ext_corner_point);
+  STRATONIX_PLUGIN_ANCHOR(ext_tetrahedral);
+  STRATONIX_PLUGIN_ANCHOR(ups_vwm);
+}

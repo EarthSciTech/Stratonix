@@ -23,9 +23,19 @@ stratigraphy:
   reference: {well: W1}
   horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]   # the faults cut top and base on purpose
   units:
+    - {name: Overburden, top: model_top, base: H1, clay_fraction: "0.60 fraction | assumed | worked example: shale above H1 (for the gouge window)"}
     - {name: Unit_1, top: H1, base: H2, clay_fraction: "0.15 fraction | assumed | worked example: clean sand"}
     - {name: Unit_2, top: H2, base: H3, clay_fraction: "0.70 fraction | assumed | worked example: shale"}
     - {name: Unit_3, top: H3, base: H4, clay_fraction: "0.20 fraction | assumed | worked example: sand"}
+    - {name: Underburden, top: H4, base: model_base, clay_fraction: "0.40 fraction | assumed | worked example: below H4 (for the gouge window)"}
+  # Stage 3B: porosity of the grid cells follows these compaction laws (present-day geometry as given).
+  compaction:
+    geometry: present
+    surface_depth: "0 m | user_instruction | worked example"
+    units:
+      - {unit: Unit_1, law: exponential, surface_porosity: "0.49 fraction | literature_derived | Sclater and Christie (1980), Table 2, sandstone", decay: "0.27 1/km | literature_derived | Sclater and Christie (1980), Table 2, sandstone"}
+      - {unit: Unit_2, law: exponential, surface_porosity: "0.63 fraction | literature_derived | Sclater and Christie (1980), Table 2, shale", decay: "0.51 1/km | literature_derived | Sclater and Christie (1980), Table 2, shale"}
+      - {unit: Unit_3, law: exponential, surface_porosity: "0.49 fraction | literature_derived | Sclater and Christie (1980), Table 2, sandstone", decay: "0.27 1/km | literature_derived | Sclater and Christie (1980), Table 2, sandstone"}
 structure:
   regional: {type: flat}
 faults:
@@ -101,6 +111,18 @@ grid:
     - {unit: Unit_2, layers: "3 ordinal | user_instruction | worked example", layering: follow_top,
        layer_thickness: "70 m | user_instruction | worked example: shale in 70 m layers from its top"}
     - {unit: Unit_3, layers: "4 ordinal | user_instruction | worked example", layering: proportional}
+  facies:
+    - {unit: Unit_1, code: "1 ordinal | user_instruction | worked example", name: sand}
+    - {unit: Unit_2, code: "2 ordinal | user_instruction | worked example", name: shale}
+    - {unit: Unit_3, code: "1 ordinal | user_instruction | worked example", name: sand}
+  porosity: compaction
+  transforms:
+    - {name: PERMX, unit: mD, from: PORO, law: exponential, a: "0.01 mD | assumed | worked example: porosity-permeability trend",
+       b: "30 ratio | assumed | worked example: porosity-permeability trend"}
+    - {name: PERMY, unit: mD, from: PORO, law: exponential, a: "0.01 mD | assumed | worked example: porosity-permeability trend",
+       b: "30 ratio | assumed | worked example: porosity-permeability trend"}
+  fault_transmissibility: {calibration: manzocchi_1999}
+  tetrahedral: true
 stress:
   regime:
     sv_gradient: "23 MPa/km | assumed | worked example: overburden of mean density 2.35 g/cm3"

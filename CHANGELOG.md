@@ -70,7 +70,6 @@ has its own version (`stratonix_schema`).
   interface, GRDECL and RESQML (FESAPI) exporters, and grid checks C23 to C25. Interfaces,
   additive and not yet built: `repr/grid.hpp`, the model capability `PorosityQuery` and
   `io::write_grdecl`.
-- Tests: `test_v3_grids` (thirteen cases), expected to fail until Prompts 38 and 39.
 - Corner-point grids (Prompt 38, STX-TN-12 section 1). A top-level `grid` block (spacing,
   margin, minimum thickness, zones with layers and proportional / follow_top / follow_base
   layering) grids any model by evaluation:
@@ -91,6 +90,20 @@ has its own version (`stratonix_schema`).
 - Test tools: `tests/tools/read_grdecl.py` (independent GRDECL reader: volumes, active cells,
   blocks and FAULTS against `grid/cells.csv`) and `tests/tools/resqml_roundtrip.py`.
 - Unit `mD` (and `D`) for permeability.
+- Grid properties (Prompt 39, STX-TN-12 section 2): ZONE, SERIES and BLOCK; `grid.facies` by
+  zone; `grid.porosity: compaction` (mean porosity of the unit's stage 2D law over each cell's
+  restored depth interval, through the new model capability `porosity`); `grid.transforms`
+  (linear, exponential, power) with labelled parameters. Every property carries a unit, an
+  evidence class and a source; a value that cannot be computed is left missing, counted and
+  explained, never defaulted.
+- Fault transmissibility multipliers (STX-TN-12 section 3): `grid.fault_transmissibility:
+  {calibration: manzocchi_1999}` gives MULTX and MULTY from the stage 2F shale gouge ratio,
+  fault-zone thickness and displacement, written to GRDECL and `grid/fault_faces.csv`.
+- Tetrahedral grids (`grid.tetrahedral: true`): six tetrahedra per active cell (Kuhn split),
+  conforming to the same horizons and faults, exported by `grid_vtk`.
+- Upscaling interface: registry kind `Upscaler` with `volume_weighted_mean`; the grid extractors
+  `corner_point` and `tetrahedral` are registry plugins of kind `Extractor`.
+- Tests: `test_v3_grids` (thirteen cases, all passing since Prompt 39).
 
 ### Changed
 - GemPy and LoopStructural input sets: no pick where a series relation removes a horizon
@@ -100,7 +113,10 @@ has its own version (`stratonix_schema`).
   omit them (rule F10 states the requirement).
 - The implicit builder accepts curved faults from sticks (F14).
 - Examples `fault_system_relay_splay` (1.2.0) and `rift_inversion_history` (1.1.0) carry a grid
-  block and export GRDECL and VTK grids.
+  block and export GRDECL and VTK grids. The fault-system example also gains compaction laws
+  (present geometry, so its surfaces are unchanged), units above H1 and below H4 with clay
+  fractions (for the gouge window), facies, porosity, permeability, fault transmissibility and a
+  tetrahedral grid.
 
 ## [2026.2] - 2026-11-15 - Version 2: structural geology in depth
 

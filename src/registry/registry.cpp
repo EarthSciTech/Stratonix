@@ -14,6 +14,7 @@ const char* kind_name(Kind k) {
     case Kind::Exporter: return "exporter";
     case Kind::Importer: return "importer";
     case Kind::Extractor: return "extractor";
+    case Kind::Upscaler: return "upscaler";
     default: return "check";
   }
 }

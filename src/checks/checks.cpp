@@ -1370,14 +1370,15 @@ repr::PropertyInputs property_inputs(const desc::Description& d, const Model& m)
 GridProducts make_grid_products(const desc::Description& d, const Model& m) {
   GridProducts gp;
   gp.options = grid_options(d, m);
-  gp.grid = repr::corner_point_grid(m, gp.options);
+  auto& reg = registry::Registry::global();
+  gp.grid = reg.create<repr::CornerPointExtractor>(registry::Kind::Extractor, "corner_point")->extract(m, gp.options);
   gp.props = repr::grid_properties(m, gp.grid, property_inputs(d, m));
   if (!d.grid.transmissibility.empty()) {
     gp.trans = repr::fault_transmissibility(m, gp.grid, gp.props, fault_rock_input(d, m));
     gp.has_trans = true;
   }
   if (d.grid.tetrahedral) {
-    gp.tets = repr::tetrahedral_grid(gp.grid);
+    gp.tets = reg.create<repr::TetrahedralExtractor>(registry::Kind::Extractor, "tetrahedral")->extract(gp.grid);
     gp.has_tets = true;
   }
   gp.fault_tolerance = 0.01 * std::min(gp.grid.dx, gp.grid.dy);  // Stratonix default

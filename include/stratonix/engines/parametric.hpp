@@ -29,6 +29,13 @@ class ParametricModel final : public Model {
  private:
   /// Evaluate one point: restored position, block code and scalars (reference kernel).
   void eval_point(const Vec3& p, BlockCode* block, Vec3* restored, double* scalars) const;
+  /// capability("porosity") (stage 3B): the compaction law of each unit over restored depths.
+  struct Porosity final : PorosityQuery {
+    const ParametricModel* m = nullptr;
+    bool has_law(int unit) const override;
+    double mean_porosity(int unit, const Vec3& top, const Vec3& base) const override;
+  };
+  Porosity porosity_;
   ModelInfo info_;
   std::shared_ptr<Structure> structure_;
   std::shared_ptr<FaultNetwork> faults_;

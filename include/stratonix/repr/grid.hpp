@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "stratonix/model/model.hpp"
+#include "stratonix/registry/registry.hpp"
 #include "stratonix/repr/faultrock.hpp"
 
 namespace stratonix::repr {
@@ -126,6 +127,7 @@ struct FaultFace {
   double sgr = kNaN, thickness = kNaN, displacement = kNaN, k_fault = kNaN;
   double k_i = kNaN, k_j = kNaN, L_i = kNaN, L_j = kNaN, mult = kNaN;
   std::string missing;      ///< why mult is missing ("" when computed)
+  std::string note;         ///< how mult was obtained when not by the formula (e.g. no displacement)
 };
 /// Fault faces of a grid: faces between neighbouring cells of different fault blocks, inside the
 /// tip line of the fault that separates them (the lowest differing block bit).
@@ -170,5 +172,21 @@ struct GridDefects {
 };
 /// Defects of C23 (volume), C24 (inversion) and C25 (fault faces within `fault_tol` m).
 GridDefects grid_defects(const Model& m, const CornerPointGrid& g, double fault_tol);
+
+// ---- plugins (STX-TN-12 section 8) ------------------------------------------------------------
+
+/// Extractor plugin returning a corner-point grid (built-in: "corner_point").
+class CornerPointExtractor : public registry::PluginBase {
+ public:
+  virtual CornerPointGrid extract(const Model& m, const GridOptions& o) const = 0;
+};
+/// Extractor plugin returning a tetrahedral grid from a corner-point grid (built-in: "tetrahedral").
+class TetrahedralExtractor : public registry::PluginBase {
+ public:
+  virtual TetGrid extract(const CornerPointGrid& g) const = 0;
+};
+/// Upscaler plugin (built-in: "volume_weighted_mean").
+class UpscalerPlugin : public registry::PluginBase, public Upscaler {};
+void register_grid_plugins();
 
 }  // namespace stratonix::repr

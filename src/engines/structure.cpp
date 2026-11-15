@@ -880,6 +880,13 @@ double Structure::compaction_round_trip(int u, double x, double y) const {
   return base_for(u, z1, solid(u, 0.0, t0)) - z1;
 }
 
+double Structure::mean_porosity(int u, double d1, double d2) const {
+  if (compaction_law(u) == 0) return kNaN;
+  if (d2 < d1) std::swap(d1, d2);
+  if (d2 - d1 < 1e-9) return phi(u, 0.5 * (d1 + d2));
+  return 1.0 - solid(u, d1, d2) / (d2 - d1);
+}
+
 double Structure::porosity(int u, double x, double y) const {
   const std::size_t nh = kind_.size();
   if (u < 1 || static_cast<std::size_t>(u) >= nh) return kNaN;

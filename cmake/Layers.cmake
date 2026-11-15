@@ -21,7 +21,7 @@ add_library(stratonix_repr STATIC
   src/repr/faults_wells.cpp
   src/repr/closure.cpp
   src/repr/grid.cpp)
-target_link_libraries(stratonix_repr PUBLIC stratonix_model)
+target_link_libraries(stratonix_repr PUBLIC stratonix_model stratonix_registry)
 stx_layer(stratonix_repr 4)
 
 # ---- Layer 5: checks and provenance --------------------------------------------------------

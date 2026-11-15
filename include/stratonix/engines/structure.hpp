@@ -193,6 +193,10 @@ class Structure final : public StratigraphyQuery, public ColumnQuery {
   bool salt_parametric() const { return !salt_.empty(); }
   /// Compaction mode: 0 off, 1 present, 2 depositional; the law of model unit u (0 rigid).
   int compaction_mode() const { return comp_mode_; }
+  /// Mean porosity of unit u between burial depths d1 < d2 below the surface (stage 3B): 1 minus
+  /// the grain thickness of its compaction law over the interval; NaN without a law.
+  double mean_porosity(int u, double d1, double d2) const;
+  double surface_depth() const { return surface_depth_; }
   int compaction_law(int u) const { return u >= 0 && static_cast<std::size_t>(u) < law_.size() ? law_[static_cast<std::size_t>(u)] : 0; }
   /// Depositional solid thickness of unit u at (x, y) (depositional mode), for C16.
   double depositional_solid(int u, double x, double y) const;
