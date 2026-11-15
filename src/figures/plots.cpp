@@ -1814,4 +1814,175 @@ Figure grid_view3d_figure(const FigureContext& c, const repr::CornerPointGrid& g
   return f;
 }
 
+// =========================================================================================
+// Ensembles (stage 3C, STX-TN-13)
+// =========================================================================================
+namespace {
+std::string ensemble_note(const EnsembleLabel& l) {
+  return std::to_string(l.members_ok) + " members ok" + (l.members_failed ? ", " + std::to_string(l.members_failed) + " failed (listed in members.csv)" : std::string()) +
+         "; seed " + std::to_string(l.seed);
+}
+std::string short_num(double v) {
+  const double a = std::fabs(v);
+  if (a < 1e-12) return "0";
+  return fmt_fixed(v, a >= 100 ? 1 : a >= 1 ? 2 : 4);
+}
+}  // namespace
+
+Figure tornado_figure(const FigureContext& c, const std::string& key, double base, const std::vector<TornadoBar>& bars_in, const EnsembleLabel& l) {
+  Figure f(842, 520);
+  auto bars = bars_in;
+  std::stable_sort(bars.begin(), bars.end(), [](auto& a, auto& b) { return std::fabs(a.high - a.low) > std::fabs(b.high - b.low); });
+  double lo = base, hi = base;
+  for (auto& b : bars) { lo = std::min({lo, b.low, b.high}); hi = std::max({hi, b.low, b.high}); }
+  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  const double pad = 0.08 * (hi - lo);
+  lo -= pad;
+  hi += pad;
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - sensitivity of " + key,
+        "One at a time: each parameter at its P10 (light) and P90 (dark), the others at their base values; base case line; " + ensemble_note(l));
+  const double px = 230, py = 70, pw = 842 - 230 - 230, rowh = std::min(34.0, (520.0 - 150) / std::max<std::size_t>(1, bars.size()));
+  const double ph = rowh * static_cast<double>(bars.size());
+  auto X = [&](double v) { return px + (v - lo) / (hi - lo) * pw; };
+  for (double t : nice_ticks(lo, hi, 6)) {
+    f.line({X(t), py}, {X(t), py + ph}, kGrid, 0.4);
+    f.text({X(t), py + ph + 11}, short_num(t), 7, Anchor::Middle, false, kInk);
+  }
+  for (std::size_t k = 0; k < bars.size(); ++k) {
+    const double y = py + rowh * static_cast<double>(k) + 0.15 * rowh, h = 0.7 * rowh;
+    const auto& b = bars[k];
+    auto seg = [&](double v, Color col) {
+      double a = X(std::min(base, v)), e = X(std::max(base, v));
+      if (e - a < 0.8) { a -= 0.4; e += 0.4; }
+      f.rect(a, y, e - a, h, col, kInk, 0.3);
+    };
+    seg(b.low, rgb(170, 200, 230));
+    seg(b.high, rgb(40, 90, 160));
+    f.text({px - 6, y + h / 2 + 2.5}, b.parameter, 7, Anchor::End, false, kInk);
+    f.text({X(std::max({b.low, b.high, base})) + 4, y + h / 2 + 2.5}, "swing " + short_num(std::fabs(b.high - b.low)), 6.5, Anchor::Start, false, kInk);
+  }
+  f.line({X(base), py - 4}, {X(base), py + ph + 4}, kFault, 1.0);
+  f.text({X(base), py - 7}, "base " + short_num(base), 7, Anchor::Middle, true, kFault);
+  f.text({px + pw / 2, py + ph + 26}, key, 8, Anchor::Middle, false, kInk);
+  std::vector<LegendEntry> es{{"Parameter at", "P10", rgb(170, 200, 230)}, {"Parameter at", "P90", rgb(40, 90, 160)}};
+  double ly = legend(f, 842 - 214, 56, 196, es, 520.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 214, ly, 196);
+  footer(f, c);
+  return f;
+}
+
+Figure histogram_figure(const FigureContext& c, const std::string& key, const std::vector<double>& values, double p10, double p50, double p90,
+                        const EnsembleLabel& l) {
+  Figure f(842, 520);
+  std::vector<double> v;
+  for (double x : values)
+    if (std::isfinite(x)) v.push_back(x);
+  double lo = v.empty() ? 0 : *std::min_element(v.begin(), v.end()), hi = v.empty() ? 1 : *std::max_element(v.begin(), v.end());
+  if (!(hi > lo)) { lo -= 0.5; hi += 0.5; }
+  const int nb = std::clamp(static_cast<int>(std::lround(std::sqrt(static_cast<double>(v.size())))), 5, 40);
+  std::vector<int> cnt(static_cast<std::size_t>(nb), 0);
+  for (double x : v) cnt[static_cast<std::size_t>(std::clamp(static_cast<int>((x - lo) / (hi - lo) * nb), 0, nb - 1))]++;
+  const int cmax = std::max(1, *std::max_element(cnt.begin(), cnt.end()));
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - distribution of " + key,
+        "Histogram over the ok members; P10, P50 and P90 marked; " + ensemble_note(l));
+  const double px = 70, py = 60, pw = 842 - 70 - 250, ph = 520 - 60 - 80;
+  auto X = [&](double t) { return px + (t - lo) / (hi - lo) * pw; };
+  auto Y = [&](double n) { return py + ph - n / (cmax * 1.1) * ph; };
+  for (double t : nice_ticks(lo, hi, 7)) {
+    f.line({X(t), py + ph}, {X(t), py + ph + 3}, kInk, 0.5);
+    f.text({X(t), py + ph + 12}, short_num(t), 7, Anchor::Middle, false, kInk);
+  }
+  for (double n : nice_ticks(0, cmax * 1.1, 5)) {
+    f.line({px, Y(n)}, {px + pw, Y(n)}, kGrid, 0.4);
+    f.text({px - 4, Y(n) + 2.5}, fmt_fixed(n, 0), 7, Anchor::End, false, kInk);
+  }
+  for (int b = 0; b < nb; ++b) {
+    const double a = lo + (hi - lo) * b / nb, e = lo + (hi - lo) * (b + 1) / nb;
+    f.rect(X(a), Y(cnt[static_cast<std::size_t>(b)]), X(e) - X(a), py + ph - Y(cnt[static_cast<std::size_t>(b)]), rgb(120, 160, 200), rgb(60, 90, 130), 0.4);
+  }
+  for (auto [val, lab] : {std::pair{p10, "P10"}, {p50, "P50"}, {p90, "P90"}}) {
+    if (!std::isfinite(val)) continue;
+    f.line({X(val), py}, {X(val), py + ph}, kFault, 1.0, {4, 2});
+    f.text({X(val), py - 4}, std::string(lab) + " " + short_num(val), 7, Anchor::Middle, true, kFault);
+  }
+  f.rect(px, py, pw, ph, none(), kInk, 0.6);
+  f.text({px + pw / 2, py + ph + 26}, key, 8, Anchor::Middle, false, kInk);
+  f.text({px - 40, py + ph / 2}, "Members", 8, Anchor::Middle, false, kInk, -90);
+  std::vector<LegendEntry> es{{"Ensemble", "Members per bin", rgb(120, 160, 200)}, {"Percentiles", "P10, P50, P90", none(), true, kFault, 1.0}};
+  double ly = legend(f, 842 - 214, 56, 196, es, 520.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 214, ly, 196);
+  footer(f, c);
+  return f;
+}
+
+Figure sobol_figure(const FigureContext& c, const std::string& key, const std::vector<std::pair<std::string, double>>& idx_in, double threshold,
+                    const EnsembleLabel& l) {
+  Figure f(842, 520);
+  auto idx = idx_in;
+  std::stable_sort(idx.begin(), idx.end(), [](auto& a, auto& b) { return a.second > b.second; });
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - first-order indices of " + key,
+        "Share of the variance of " + key + " explained by each parameter alone (given-data estimate); below the dashed line not distinguishable from 0; " +
+            ensemble_note(l));
+  const double px = 230, py = 70, pw = 842 - 230 - 230, rowh = std::min(30.0, (520.0 - 150) / std::max<std::size_t>(1, idx.size()));
+  const double ph = rowh * static_cast<double>(idx.size());
+  auto X = [&](double v) { return px + std::clamp(v, 0.0, 1.0) * pw; };
+  for (double t : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+    f.line({X(t), py}, {X(t), py + ph}, kGrid, 0.4);
+    f.text({X(t), py + ph + 11}, fmt_fixed(t, 2), 7, Anchor::Middle, false, kInk);
+  }
+  for (std::size_t k = 0; k < idx.size(); ++k) {
+    const double y = py + rowh * static_cast<double>(k) + 0.15 * rowh, h = 0.7 * rowh;
+    f.rect(px, y, std::max(0.5, X(idx[k].second) - px), h, idx[k].second >= threshold ? rgb(40, 90, 160) : rgb(190, 190, 190), kInk, 0.3);
+    f.text({px - 6, y + h / 2 + 2.5}, idx[k].first, 7, Anchor::End, false, kInk);
+    f.text({X(idx[k].second) + 4, y + h / 2 + 2.5}, fmt_fixed(idx[k].second, 3), 6.5, Anchor::Start, false, kInk);
+  }
+  f.line({X(threshold), py - 4}, {X(threshold), py + ph + 4}, kInk, 0.8, {3, 2});
+  f.text({px + pw / 2, py + ph + 26}, "First-order index S_i", 8, Anchor::Middle, false, kInk);
+  std::vector<LegendEntry> es{{"Index", "Distinguishable from 0", rgb(40, 90, 160)}, {"Index", "Not distinguishable (< 2/sqrt(N))", rgb(190, 190, 190)}};
+  double ly = legend(f, 842 - 214, 56, 196, es, 520.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 214, ly, 196);
+  footer(f, c);
+  return f;
+}
+
+Figure probability_map_figure(const FigureContext& c, const std::string& what, const Grid2D& p, const EnsembleLabel& l) {
+  Figure f(842, 595);
+  const auto& d = c.model->info().domain;
+  double side = std::min(595.0 - 110, 842.0 - 280);
+  double sc = side / std::max(d.sx, d.sy);
+  double mx0 = 60, my0 = 60, mw = d.sx * sc, mh = d.sy * sc;
+  auto P = [&](double x, double y) { return Pt{mx0 + (x - d.x0) * sc, my0 + mh - (y - d.y0) * sc}; };
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - probability: " + what, "Fraction of the ok members; " + ensemble_note(l));
+  const auto& g = p.spec;
+  f.clip(mx0, my0, mw, mh);
+  for (std::size_t j = 0; j < g.ny; ++j)
+    for (std::size_t i = 0; i < g.nx; ++i) {
+      const double v = p.v[g.index(i, j)];
+      Pt a = P(g.x(i) - g.dx / 2, g.y(j) + g.dy / 2), b = P(g.x(i) + g.dx / 2, g.y(j) - g.dy / 2);
+      Color col = std::isfinite(v) ? viridis_like(v) : rgb(220, 220, 220);
+      f.rect(a.x, a.y, b.x - a.x, b.y - a.y, col, col, 0.2);
+    }
+  for (auto& w : c.wells) {
+    Pt q = P(w.x(), w.y());
+    f.path({{q.x - 2.5, q.y}, {q.x, q.y - 2.5}, {q.x + 2.5, q.y}, {q.x, q.y + 2.5}}, true, rgb(255, 255, 255), kWell, 0.9);
+    f.text({q.x + 4, q.y - 3}, w.name(), 7, Anchor::Start, true, kWell);
+  }
+  f.unclip();
+  f.rect(mx0, my0, mw, mh, none(), kInk, 0.6);
+  for (double t : nice_ticks(d.x0, d.x0 + d.sx, 6)) f.text({P(t, d.y0).x, my0 + mh + 11}, km_or_m(t), 6.5, Anchor::Middle, false, kInk);
+  for (double t : nice_ticks(d.y0, d.y0 + d.sy, 6)) f.text({mx0 - 5, P(d.x0, t).y + 2.5}, km_or_m(t), 6.5, Anchor::End, false, kInk);
+  f.text({mx0 + mw / 2, my0 + mh + 24}, "Easting (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({mx0 - 40, my0 + mh / 2}, "Northing (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  double rx = 842 - 200, ry = 60;
+  f.text({rx, ry}, "Probability", 7.5, Anchor::Start, true, kInk);
+  for (int k = 0; k < 100; ++k) f.rect(rx, ry + 6 + k * 1.6, 14, 1.7, viridis_like(1 - k / 99.0), none());
+  f.rect(rx, ry + 6, 14, 160, none(), kInk, 0.4);
+  f.text({rx + 18, ry + 12}, "1", 6.5, Anchor::Start, false, kInk);
+  f.text({rx + 18, ry + 88}, "0.5", 6.5, Anchor::Start, false, kInk);
+  f.text({rx + 18, ry + 166}, "0", 6.5, Anchor::Start, false, kInk);
+  key_box(f, c, rx, ry + 186, 180);
+  footer(f, c);
+  return f;
+}
+
 }  // namespace stratonix::fig

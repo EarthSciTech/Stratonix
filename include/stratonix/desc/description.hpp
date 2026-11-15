@@ -247,6 +247,23 @@ struct GridDesc {
   bool tetrahedral = false;
 };
 
+/// Uncertainty (stage 3C, STX-TN-13 section 6).
+struct UncertainParamDesc { std::string path, distribution; Param mean, sd, min, max, mode, values, weights; };
+struct ScenarioOptionDesc { std::string name; Param weight; std::vector<std::pair<std::string, Node>> set; std::vector<std::string> remove; };
+struct ScenarioDesc { std::string name; std::vector<ScenarioOptionDesc> options; };
+struct ProbabilityMapDesc { std::string kind, unit, horizon; Param depth, spacing; };
+struct CorrelationDesc { std::string a, b; Param rho; };
+struct UncertaintyDesc {
+  bool present = false;
+  Param members, seed;
+  std::vector<UncertainParamDesc> parameters;
+  std::vector<CorrelationDesc> correlations;
+  std::vector<ScenarioDesc> scenarios;
+  bool one_at_a_time = false;
+  std::vector<ProbabilityMapDesc> maps;
+  std::vector<std::string> key_numbers;
+};
+
 /// A complete, validated model description.
 struct Description {
   std::filesystem::path file;
@@ -269,6 +286,7 @@ struct Description {
   ConditioningDesc conditioning;   ///< stage 3A
   FaultRockDesc fault_rock;        ///< stage 2F
   GridDesc grid;                   ///< stage 3B
+  UncertaintyDesc uncertainty;     ///< stage 3C
   StressDesc stress;               ///< stage 2F
   std::vector<std::string> curvature_horizons;  ///< stage 2F: outputs.curvature.horizons
   Param fracture_threshold;        ///< stage 2F: outputs.curvature.fracture_threshold (1/m)

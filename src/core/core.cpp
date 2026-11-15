@@ -354,6 +354,7 @@ std::atomic<int> g_level{static_cast<int>(LogLevel::Info)};
 std::mutex g_log_m;
 }  // namespace
 void set_log_level(LogLevel l) { g_level = static_cast<int>(l); }
+LogLevel log_level() { return static_cast<LogLevel>(g_level.load()); }
 void log(LogLevel l, std::string_view msg) {
   if (static_cast<int>(l) < g_level.load()) return;
   static const char* tag[] = {"debug", "info", "warning", "error"};

@@ -57,6 +57,7 @@ const BuildInfo& build_info();
 // ---- Logging -------------------------------------------------------------------------------
 enum class LogLevel { Debug, Info, Warn, Error };
 void set_log_level(LogLevel l);
+LogLevel log_level();
 void log(LogLevel l, std::string_view msg);
 
 // ---- Strings -------------------------------------------------------------------------------

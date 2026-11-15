@@ -54,7 +54,8 @@ has its own version (`stratonix_schema`).
   throws against the STX-TN-11 tolerances. CI job `crosscheck` installs LoopStructural and runs it.
 - LoopStructural input set: with stage 2C series, one feature per series and
   `series_youngest_first` in `model_setup.json`. Models without series are unchanged. A fault
-  that abuts another (or is its splay) lists it as `abuts` in `faults_oldest_first`.
+  that abuts another (or is its splay) lists it as `abuts` in `faults_oldest_first`; the
+  implicit builder's isochore horizons are listed as `isochore_horizons`.
 - Rules F29 (solver, uncertainties, isochore horizons) and F30 (throw estimates). Coincident data
   of different horizons are refused with their positions, not left to a singular system.
 - Examples `implicit_unconformity_from_samples`, `implicit_relay_splay_from_samples`,
@@ -112,7 +113,26 @@ has its own version (`stratonix_schema`).
   sensitivity, probability maps, and C API 1.2 functions to set a parameter before building.
   Interfaces, additive and not yet built: `package/uncertainty.hpp`, the C API 1.2 functions
   (returning STX_E_NOT_IMPLEMENTED).
-- Tests: `test_v3_uncertainty` (ten cases), expected to fail until Prompt 41.
+- Uncertainty (Prompt 41, STX-TN-13). A top-level `uncertainty` block (members, seed,
+  parameters with uniform / normal / triangular / discrete distributions, correlations,
+  scenarios that set or remove description nodes, one-at-a-time runs, probability maps) and the
+  command `stratonix ensemble <description> -o <folder>`:
+  - members drawn from xoshiro256** seeded per member by SplitMix64, identical on every platform
+    and for any number of threads; built in parallel through the usual pipeline;
+  - `ensemble/members.csv` (every member: seed, values, options, status and reason, failed
+    checks, key numbers), `statistics.csv` (n, mean, sd, P10, P50, P90, min, max, with N and the
+    seed), `sensitivity_sobol.csv` (first-order indices from the ensemble, scenarios included),
+    `sensitivity_oat.csv`, probability maps as IRAP grids, and figures (histograms, first-order
+    indices, tornado charts, probability maps) in four formats; the base case's full build in
+    `base/`;
+  - rule F33 for the block; sampled values are written into each member's description labelled
+    assumed, with the distribution, member and seed as source.
+- C API 1.2: `stx_description_load`, `stx_description_get_parameter`,
+  `stx_description_set_parameter` (with unit conversion), `stx_model_build_from`,
+  `stx_ensemble_run`.
+- Example `fault_system_uncertainty` (200 members): ctest runs its ensemble and checks that the
+  first-order indices rank the parameters as the analytical case predicts.
+- Tests: `test_v3_uncertainty` (ten cases, all passing since Prompt 41).
 
 ### Changed
 - GemPy and LoopStructural input sets: no pick where a series relation removes a horizon

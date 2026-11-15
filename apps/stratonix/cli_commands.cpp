@@ -1,4 +1,5 @@
 #include "cli_commands.hpp"
+#include "stratonix/package/uncertainty.hpp"
 
 #include <cctype>
 #include <iostream>
@@ -120,6 +121,25 @@ int cmd_package(Args& a) {
   return 0;
 }
 
+int cmd_ensemble(Args& a) {
+  if (a.positional().empty() || !a.has("o"))
+    throw Error(ErrorCode::InvalidArgument, "usage: stratonix ensemble <description.yaml> -o <new folder> [--members N] [--seed S] [--threads N] [--no-figures]");
+  ensure_new_output_dir(a.get("o"));
+  unc::EnsembleOptions o;
+  if (a.has("members")) o.members = std::stoi(a.get("members"));
+  if (a.has("seed")) o.seed = std::stoll(a.get("seed"));
+  if (a.has("threads")) o.threads = static_cast<unsigned>(std::stoul(a.get("threads")));
+  o.figures = !a.flag("no-figures");
+  o.base_build = true;
+  auto r = unc::run_ensemble(a.positional()[0], a.get("o"), o);
+  std::size_t failed = 0;
+  for (auto& m : r.members) failed += m.sample.index > 0 && m.status != "ok";
+  std::cout << "ensemble of " << r.spec.members << " members (seed " << r.spec.seed << "): " << r.ok() << " ok, " << failed << " failed -> " << a.get("o") << "\n";
+  for (auto& k : r.stats)
+    std::cout << "  " << k.key << ": P10 " << fmt_fixed(k.stats.p10, 2) << ", P50 " << fmt_fixed(k.stats.p50, 2) << ", P90 " << fmt_fixed(k.stats.p90, 2) << " (n "
+              << k.stats.n << ")\n";
+  return 0;
+}
 int cmd_plugins(Args&) {
   for (auto* e : registry::Registry::global().all())
     std::cout << registry::kind_name(e->kind) << "  " << e->name << "  " << e->version << "  " << e->description << "\n";

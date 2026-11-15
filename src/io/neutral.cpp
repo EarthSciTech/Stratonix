@@ -699,6 +699,11 @@ class LoopExporter final : public Exporter {
       }
       js += "]";
     }
+    if (!c.isochore_horizons.empty()) {
+      js += ",\n  \"isochore_horizons\": [";
+      for (std::size_t k = 0; k < c.isochore_horizons.size(); ++k) js += std::string(k ? ", " : "") + "\"" + petrel_name(c.isochore_horizons[k]) + "\"";
+      js += "]";
+    }
     js += ",\n  \"provenance\": \"" + c.comments()[0] + "; " + c.comments()[1] + "; " +
           c.comments()[3] + "\",\n  \"note\": \"columns X, Y, Z, feature_name, val, gx, gy, gz, coord as in the LoopStructural input-data guide; stx_horizon and stx_block are Stratonix extras for checks\"\n}\n";
     put(folder, "loopstructural/model_setup.json", js);

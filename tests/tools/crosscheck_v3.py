@@ -83,8 +83,14 @@ def first_crossing(values, zs, target):
 #          unconformity right after its series; "old_first" creates the older series first and
 #          adds the unconformity after the younger one; "none" adds no unconformity.
 #   abut:  apply the exported fault abutting relations (add_abutting_fault).
-VARIANTS = [dict(order="young_first", abut=True), dict(order="old_first", abut=True), dict(order="none", abut=True),
-            dict(order="young_first", abut=False)]
+#   iso:   "exclude" builds a series' foliation without the data of its isochore horizons (a
+#          horizon that pinches out within its series, which one conformable field cannot
+#          represent) and derives each such horizon from the horizon above it minus a thin-plate
+#          interpolation of the thicknesses at its picks, as STX-TN-11 section 3 states;
+#          "none" puts every horizon in its series' field.
+#   nel:   FDI elements of each foliation.
+VARIANTS = [dict(order="young_first", abut=True, iso="exclude", nel=100000), dict(order="young_first", abut=True, iso="none", nel=100000),
+            dict(order="young_first", abut=True, iso="exclude", nel=400000), dict(order="young_first", abut=True, iso="none", nel=400000)]
 
 
 def loopstructural_surfaces(root, setup, rows, horizons, grids, variant=None):  # pragma: no cover - needs LoopStructural
@@ -93,6 +99,9 @@ def loopstructural_surfaces(root, setup, rows, horizons, grids, variant=None):  
     variant = variant or VARIANTS[0]
     df = pd.read_csv(root / "loopstructural/data.csv")
     df = df.rename(columns={"gx": "nx", "gy": "ny", "gz": "nz"})
+    iso = setup.get("isochore_horizons", []) if variant.get("iso", "exclude") == "exclude" else []
+    if iso:
+        df = df[~df["stx_horizon"].isin(iso)]
     df = df.drop(columns=[c for c in df.columns if c.startswith("stx_")])
     model = GeologicalModel(setup["origin"], setup["maximum"])
     model.data = df
@@ -108,12 +117,12 @@ def loopstructural_surfaces(root, setup, rows, horizons, grids, variant=None):  
     if variant["order"] == "old_first":
         feats = {}
         for s in reversed(series):
-            feats[s["name"]] = model.create_and_add_foliation(s["name"], interpolatortype="FDI", nelements=100000)
+            feats[s["name"]] = model.create_and_add_foliation(s["name"], interpolatortype="FDI", nelements=variant.get("nel", 100000))
             if s["base"] == "erosional":
                 model.add_unconformity(feats[s["name"]], setup["strati_values"][s["horizons"][-1]])
     else:
         for s in series:
-            feat = model.create_and_add_foliation(s["name"], interpolatortype="FDI", nelements=100000)
+            feat = model.create_and_add_foliation(s["name"], interpolatortype="FDI", nelements=variant.get("nel", 100000))
             if s["base"] == "erosional" and variant["order"] == "young_first":
                 base = s["horizons"][-1]
                 model.add_unconformity(feat, setup["strati_values"][base])
@@ -124,8 +133,26 @@ def loopstructural_surfaces(root, setup, rows, horizons, grids, variant=None):  
         X, Y, z, dx = grids[h]
         zs = np.linspace(setup["maximum"][2], setup["origin"][2], 251)
         pts = np.c_[np.repeat(X.ravel(), len(zs)), np.repeat(Y.ravel(), len(zs)), np.tile(zs, X.size)]
+        if h in iso:
+            continue
         v = model.evaluate_feature_value(feature_of[h], pts).reshape(X.size, len(zs))
         out[h] = first_crossing(v, zs, setup["strati_values"][h]).reshape(X.shape)
+    # isochore horizons: the horizon above minus the thicknesses at the picks (thin-plate spline, >= 0)
+    from scipy.interpolate import RBFInterpolator
+    order_ = [h for h in horizons]
+    for h in iso:
+        above = order_[order_.index(h) - 1]
+        X, Y, z, dx = grids[h]
+        picks = np.array([[float(r["X"]), float(r["Y"]), float(r["Z"])] for r in rows if r["stx_horizon"] == h and r["val"]])
+        za = out[above]
+        xa, ya = X[0, 0], Y[0, 0]
+        def at(px, py):
+            i, j = int(round((px - xa) / dx)), int(round((py - ya) / dx))
+            return za[j, i] if 0 <= i < za.shape[1] and 0 <= j < za.shape[0] else np.nan
+        t = np.array([at(p[0], p[1]) - p[2] for p in picks])
+        ok = np.isfinite(t)
+        f = RBFInterpolator(picks[ok, :2], t[ok], kernel="thin_plate_spline", neighbors=None if ok.sum() <= 5000 else 400)
+        out[h] = za - np.maximum(0.0, f(np.c_[X.ravel(), Y.ravel()]).reshape(X.shape))
     return out
 
 
@@ -158,7 +185,10 @@ def substitute_surfaces(rows, horizons, grids, root):
     return out
 
 
-def fault_throws(rows, horizons, surfaces, fault, feet):
+BRANCH = 500.0  # m: a fault that abuts another is measured where that fault is beyond the 400 m sampling either side
+
+
+def fault_throws(rows, horizons, surfaces, fault, feet, abuts=None):
     """Median throw at stations along a fault, measured on the given horizon surfaces where the
     horizon has data (feet): the vertical separation of each horizon 400 m either side of the
     fault trace at that horizon's level."""
@@ -172,6 +202,7 @@ def fault_throws(rows, horizons, surfaces, fault, feet):
     sdir = np.array([-dipdir[1], dipdir[0]])
     tan_dip = np.hypot(n[0], n[1]) / max(1e-9, n[2])
     s_lo, s_hi = np.percentile((fp[:, :2] - c[:2]) @ sdir, [10, 90])
+    other = np.array([[float(r["X"]), float(r["Y"]), float(r["Z"])] for r in rows if r["stx_horizon"] == "" and r.get("feature_name") == abuts]) if abuts else None
     throws = []
     for h in horizons:
         X, Y, z = surfaces[h]
@@ -189,6 +220,10 @@ def fault_throws(rows, horizons, surfaces, fault, feet):
             if not np.isfinite(zl):
                 continue
             q = p + dipdir * (c[2] - zl) / max(tan_dip, 1e-9)  # the trace at the horizon's level
+            if other is not None and len(other):
+                lvl = other[np.abs(other[:, 2] - zl) < 150.0]  # the abutted fault's trace near that level
+                if len(lvl) and np.min(np.hypot(lvl[:, 0] - q[0], lvl[:, 1] - q[1])) < BRANCH:
+                    continue  # near the branch line the offset is shared with the fault it abuts
             fw, hw = at(*(q - dipdir * 400)), at(*(q + dipdir * 400))
             if np.isfinite(fw) and np.isfinite(hw):
                 throws.append(fw - hw)
@@ -215,9 +250,7 @@ def diagnose(exe, exdir):  # pragma: no cover - needs LoopStructural
                 py = [float(r["Y"]) for r in rows if r["stx_horizon"] == h and r["val"]]
                 feet[h] = near_data(grids[h][0], grids[h][1], px, py, FOOTPRINT)
             for v in VARIANTS:
-                if not setup.get("series_youngest_first") and v["order"] != "young_first":
-                    continue
-                if not any(f.get("abuts") for f in setup["faults_oldest_first"]) and not v["abut"]:
+                if not setup.get("isochore_horizons") and v["iso"] != "exclude":
                     continue
                 try:
                     other = loopstructural_surfaces(root, setup, rows, horizons, grids, v)
@@ -232,10 +265,10 @@ def diagnose(exe, exdir):  # pragma: no cover - needs LoopStructural
                     parts.append("%s %.1f/%.1f" % (h, stats(d[m])["mean"], stats(d[m])["p95"]))
                 th = []
                 for f in setup["faults_oldest_first"]:
-                    t_s = fault_throws(rows, horizons, {h: grids[h][:3] for h in horizons}, f["name"], feet)
-                    t_o = fault_throws(rows, horizons, {h: (grids[h][0], grids[h][1], other[h]) for h in horizons}, f["name"], feet)
+                    t_s = fault_throws(rows, horizons, {h: grids[h][:3] for h in horizons}, f["name"], feet, f.get("abuts"))
+                    t_o = fault_throws(rows, horizons, {h: (grids[h][0], grids[h][1], other[h]) for h in horizons}, f["name"], feet, f.get("abuts"))
                     th.append("%s %.1f/%.1f" % (f["name"], t_s, t_o))
-                print("DIAG %s order=%s abut=%s: away mean/p95 %s; throws stx/ls %s" % (ex, v["order"], v["abut"], ", ".join(parts), ", ".join(th)))
+                print("DIAG %s iso=%s nel=%d: away mean/p95 %s; throws stx/ls %s" % (ex, v["iso"], v["nel"], ", ".join(parts), ", ".join(th)))
     return 0
 
 
@@ -287,8 +320,8 @@ def main(argv):
                 table.append([ex, h, sa["n"], sa["mean"], sa["p95"], sa["max"], sn["n"], sn["mean"], sn["p95"], sn["max"], "pass" if passed else "FAIL"])
             for f in setup["faults_oldest_first"]:
                 fn = f["name"]
-                t_stx = fault_throws(rows, horizons, {h: grids[h][:3] for h in horizons}, fn, feet)
-                t_oth = fault_throws(rows, horizons, {h: (grids[h][0], grids[h][1], other[h]) for h in horizons}, fn, feet)
+                t_stx = fault_throws(rows, horizons, {h: grids[h][:3] for h in horizons}, fn, feet, f.get("abuts"))
+                t_oth = fault_throws(rows, horizons, {h: (grids[h][0], grids[h][1], other[h]) for h in horizons}, fn, feet, f.get("abuts"))
                 rel = abs(t_oth - t_stx) / max(abs(t_stx), 1e-9) if np.isfinite(t_stx) and np.isfinite(t_oth) else float("nan")
                 passed = bool(np.isfinite(rel) and rel <= TOL["throw_rel"])
                 ok &= passed

@@ -5,6 +5,7 @@
 /// with title, caption and notes), named by the figure naming rule, with a footer stating the
 /// coordinate system, vertical datum and evidence basis.
 #pragma once
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -103,6 +104,19 @@ Figure curvature_figure(const FigureContext& c, int horizon, const repr::Curvatu
 Figure grid_section_figure(const FigureContext& c, const repr::CornerPointGrid& g, const repr::CellProperty* prop, bool along_x, int line);
 /// A property (or the zone) on layer k, in map view.
 Figure grid_layer_figure(const FigureContext& c, const repr::CornerPointGrid& g, const repr::CellProperty* prop, int k);
+/// Stage 3C (STX-TN-13): ensemble figures. Each states the members it rests on and the seed.
+struct EnsembleLabel { std::size_t members_ok = 0, members_failed = 0; std::uint64_t seed = 0; };
+/// Tornado chart of one key number: per parameter, its value at the parameter's P10 and P90.
+struct TornadoBar { std::string parameter; double low = 0, high = 0; };
+Figure tornado_figure(const FigureContext& c, const std::string& key, double base, const std::vector<TornadoBar>& bars, const EnsembleLabel& l);
+/// Histogram of a key number over the ok members, with P10, P50 and P90 marked.
+Figure histogram_figure(const FigureContext& c, const std::string& key, const std::vector<double>& values, double p10, double p50, double p90,
+                        const EnsembleLabel& l);
+/// First-order variance-based indices of one key number, per parameter.
+Figure sobol_figure(const FigureContext& c, const std::string& key, const std::vector<std::pair<std::string, double>>& indices, double threshold,
+                    const EnsembleLabel& l);
+/// Probability map (fraction of the ok members) on a regular lattice.
+Figure probability_map_figure(const FigureContext& c, const std::string& what, const Grid2D& p, const EnsembleLabel& l);
 /// 3D view of the grid's outer faces coloured by zone.
 Figure grid_view3d_figure(const FigureContext& c, const repr::CornerPointGrid& g, double azimuth_deg, double elevation_deg);
 Figure fault_plane_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<double>& displacement,

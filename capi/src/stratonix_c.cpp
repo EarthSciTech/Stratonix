@@ -10,6 +10,9 @@
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/util.hpp"
 #include "stratonix/package/pipeline.hpp"
+#include "stratonix/package/uncertainty.hpp"
+#include "stratonix/core/units.hpp"
+#include <filesystem>
 #include "capi_extensions.hpp"
 
 using namespace stratonix;
@@ -17,6 +20,11 @@ using namespace stratonix;
 struct stx_model {
   ModelPtr model;
   desc::Description description;
+};
+struct stx_description {
+  desc::Description d;
+  desc::Node doc;  ///< the document, edited by stx_description_set_parameter
+  std::filesystem::path base_dir;
 };
 
 namespace {
@@ -151,24 +159,73 @@ stx_status stx_package(const char* path, const char* out_dir, const char* option
   });
 }
 
-// ---- C API 1.2: parameters set before building (STX-TN-13 section 7); implemented by Prompt 41 ----
-stx_status stx_description_load(const char*, stx_description** out) {
-  if (out) *out = nullptr;
-  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_description_load: not implemented yet (STX-TN-13, Prompt 41)"); });
+// ---- C API 1.2: parameters set before building (STX-TN-13 section 7) ----
+stx_status stx_description_load(const char* path, stx_description** out) {
+  return guard([&] {
+    if (!path || !out) throw Error(ErrorCode::InvalidArgument, "NULL argument");
+    *out = nullptr;
+    auto h = std::make_unique<stx_description>();
+    h->d = desc::load_description(path);
+    h->doc = h->d.resolved;
+    h->base_dir = std::filesystem::path(path).parent_path();
+    *out = h.release();
+  });
 }
-void stx_description_free(stx_description*) {}
-stx_status stx_description_get_parameter(const stx_description*, const char*, double*, char*, size_t) {
-  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_description_get_parameter: not implemented yet (STX-TN-13, Prompt 41)"); });
+void stx_description_free(stx_description* d) { delete d; }
+stx_status stx_description_get_parameter(const stx_description* d, const char* path, double* value, char* unit, size_t unit_len) {
+  return guard([&] {
+    if (!d || !path || !value) throw Error(ErrorCode::InvalidArgument, "NULL argument");
+    std::string u;
+    if (!unc::get_parameter(d->doc, path, value, &u)) throw Error(ErrorCode::InvalidArgument, std::string("no scalar parameter at '") + path + "'", path);
+    if (unit && unit_len) {
+      std::strncpy(unit, u.c_str(), unit_len - 1);
+      unit[unit_len - 1] = 0;
+    }
+  });
 }
-stx_status stx_description_set_parameter(stx_description*, const char*, double, const char*) {
-  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_description_set_parameter: not implemented yet (STX-TN-13, Prompt 41)"); });
+stx_status stx_description_set_parameter(stx_description* d, const char* path, double value, const char* unit) {
+  return guard([&] {
+    if (!d || !path) throw Error(ErrorCode::InvalidArgument, "NULL argument");
+    double old = 0;
+    std::string own;
+    if (!unc::get_parameter(d->doc, path, &old, &own)) throw Error(ErrorCode::InvalidArgument, std::string("no scalar parameter at '") + path + "'", path);
+    double v = value;
+    if (unit && own != unit) {
+      auto from = find_unit(unit), to = find_unit(own);
+      if (!from || !to || from->dim != to->dim)
+        throw Error(ErrorCode::InvalidArgument, std::string("unit '") + unit + "' cannot be converted to the parameter's unit '" + own + "'", path);
+      v = value * from->to_si / to->to_si;
+    }
+    unc::set_parameter(d->doc, path, v, own, "user_instruction", "set through the C API");
+  });
 }
-stx_status stx_model_build_from(const stx_description*, stx_model** out) {
-  if (out) *out = nullptr;
-  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_model_build_from: not implemented yet (STX-TN-13, Prompt 41)"); });
+stx_status stx_model_build_from(const stx_description* d, stx_model** out) {
+  return guard([&] {
+    if (!d || !out) throw Error(ErrorCode::InvalidArgument, "NULL argument");
+    *out = nullptr;
+    auto h = std::make_unique<stx_model>();
+    auto rep = desc::validate_description_text(desc::to_json(d->doc), d->base_dir, &h->description);
+    if (!rep.ok()) throw Error(ErrorCode::Validation, rep.text());
+    BuildOptions o;
+    h->model = build_only(h->description, o).model;
+    *out = h.release();
+  });
 }
-stx_status stx_ensemble_run(const char*, const char*, const char*) {
-  return guard([&] { throw Error(ErrorCode::NotImplemented, "stx_ensemble_run: not implemented yet (STX-TN-13, Prompt 41)"); });
+stx_status stx_ensemble_run(const char* path, const char* out_dir, const char* options_json) {
+  return guard([&] {
+    if (!path || !out_dir) throw Error(ErrorCode::InvalidArgument, "NULL argument");
+    ensure_new_output_dir(out_dir);
+    unc::EnsembleOptions o;
+    o.base_build = true;
+    if (options_json && *options_json) {
+      auto n = desc::parse_document(options_json, "options_json");
+      if (auto* x = n.get("members")) o.members = static_cast<int>(x->number);
+      if (auto* x = n.get("seed")) o.seed = static_cast<std::int64_t>(x->number);
+      if (auto* x = n.get("threads")) o.threads = static_cast<unsigned>(x->number);
+      if (auto* x = n.get("figures")) o.figures = x->boolean;
+    }
+    unc::run_ensemble(path, out_dir, o);
+  });
 }
 
 }  // extern "C"

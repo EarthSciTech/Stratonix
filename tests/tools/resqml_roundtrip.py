@@ -60,17 +60,13 @@ def main(folder):
                     worst = max(worst, d)
                     if d > 0.002 and len(bad) < 20:
                         bad.append("corner %d of cell %d %d %d differs by %.4f m" % (c, i + 1, j + 1, k + 1, d))
-    inactive = grid.extract_inactive_mask() if hasattr(grid, "extract_inactive_mask") else grid.inactive
-    act = np.asarray(kw["ACTNUM"]).reshape(nz, ny, nx).astype(bool)
-    if inactive is not None and np.any(np.asarray(inactive) == act):
-        bad.append("active cells differ: %d cells" % int(np.sum(np.asarray(inactive) == act)))
     pc = grid.property_collection
-    for name in ("ZONE", "BLOCK"):
+    for name in ("ACTIVE", "ZONE", "BLOCK"):
         a = pc.single_array_ref(citation_title=name)
         if a is None:
             bad.append("property %s missing from the EPC" % name)
             continue
-        ref = np.asarray(kw[name]).reshape(nz, ny, nx)
+        ref = np.asarray(kw["ACTNUM" if name == "ACTIVE" else name]).reshape(nz, ny, nx)
         if not np.array_equal(np.asarray(a).astype(np.int64), ref.astype(np.int64)):
             bad.append("property %s differs" % name)
     print("RESQML %s read by resqpy: %d x %d x %d cells, worst corner difference %.2e m, %d properties"

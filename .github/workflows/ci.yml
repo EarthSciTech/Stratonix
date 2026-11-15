@@ -5,6 +5,10 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   # On a version tag only the release configurations run (the full matrix already ran on main);
   # the slow Debug and sanitiser legs skip their steps there so the release is not held up.

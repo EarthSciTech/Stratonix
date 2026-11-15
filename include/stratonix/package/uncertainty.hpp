@@ -143,6 +143,7 @@ struct EnsembleOptions {
   std::int64_t seed = -1;   ///< < 0: from the description
   unsigned threads = 0;     ///< 0: default
   bool figures = true;
+  bool base_build = false;  ///< also write the base case's full build into out_dir/base
 };
 /// Run the ensemble of a description; writes into out_dir when it is not empty.
 EnsembleResult run_ensemble(const std::filesystem::path& description, const std::filesystem::path& out_dir, const EnsembleOptions& o);

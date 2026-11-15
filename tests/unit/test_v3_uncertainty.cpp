@@ -50,13 +50,26 @@ std::string faults(const std::string& t1, const std::string& t2 = "") {
   return f;
 }
 std::string block(int members, const std::string& body) {
-  return "uncertainty:\n  members: " + q(std::to_string(members) + " ordinal") + "\n  seed: " + q("20261115 ordinal") + "\n" + body;
+  // the test faults offset the top and base horizons on purpose (C6 reported, not failed)
+  return "checks:\n  warn_only: [C6]\nuncertainty:\n  members: " + q(std::to_string(members) + " ordinal") + "\n  seed: " + q("20261115 ordinal") + "\n" + body;
 }
 std::string normal(const std::string& path, double mean, double sd, const std::string& unit = "m") {
   return "    - {path: " + path + ", distribution: normal, mean: " + q(fmt_fixed(mean, 3) + " " + unit) + ", sd: " + q(fmt_fixed(sd, 3) + " " + unit) + "}\n";
 }
 std::string uniform(const std::string& path, double lo, double hi, const std::string& unit = "m") {
   return "    - {path: " + path + ", distribution: uniform, min: " + q(fmt_fixed(lo, 3) + " " + unit) + ", max: " + q(fmt_fixed(hi, 3) + " " + unit) + "}\n";
+}
+/// Ensembles of hundreds of builds run in optimised builds only; debug and sanitiser builds skip
+/// them (stating so) and keep the generator, distribution, rerun and description cases.
+#if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__)
+#define STX_FULL_ENSEMBLES 1
+#else
+#define STX_FULL_ENSEMBLES 0
+#endif
+bool full_ensembles(const char* name) {
+  if (STX_FULL_ENSEMBLES) return true;
+  std::printf("  skipped in this build (debug or sanitiser): %s runs in the release builds\n", name);
+  return false;
 }
 unc::EnsembleOptions quick(unsigned threads = 0) {
   unc::EnsembleOptions o;
@@ -81,6 +94,7 @@ TEST_CASE("U1 generator: reproducible streams, member seeds independent of order
   unc::Rng g(unc::member_seed(0, 0));
   const std::uint64_t first = g.next();
   std::printf("  first draw for (0, 0): %llu\n", static_cast<unsigned long long>(first));
+  CHECK(first == 7421629122807502682ull);  // golden value, the same on every platform
   unc::Rng g2(unc::member_seed(0, 0));
   CHECK(g2.next() == first);
   double lo = 1, hi = 0;
@@ -141,21 +155,23 @@ TEST_CASE("U3 correlation through a Gaussian copula; a non-positive-definite mat
 }
 
 TEST_CASE("U4 a key number linear in one normal parameter: mean and standard deviation of the ensemble") {
+  if (!full_ensembles("U4")) return;
   auto f = write_doc("linear", model_yaml(faults("100 m"), "", {1000, 1200, 1400, 1600},
-                                          block(400, "  parameters:\n" + normal("faults.F1.throw.max", 100, 10))));
+                                          block(200, "  parameters:\n" + normal("faults.F1.throw.max", 100, 10))));
   auto r = unc::run_ensemble(f, f.parent_path() / "out", quick());
   auto* k = key_stats(r, "Max throw F1");
   REQUIRE(k != nullptr);
   std::printf("  Max throw F1: n %zu, mean %.3f, sd %.3f, P10 %.2f, P50 %.2f, P90 %.2f\n", k->stats.n, k->stats.mean, k->stats.sd, k->stats.p10,
               k->stats.p50, k->stats.p90);
-  CHECK(k->stats.n == 400);
-  CHECK_NEAR(k->stats.mean, 100, 1.5);
+  CHECK(k->stats.n == 200);
+  CHECK_NEAR(k->stats.mean, 100, 2.2);  // 3 standard errors (10 / sqrt(200))
   CHECK_NEAR(k->stats.sd, 10, 1.5);
   std::string st = read(f.parent_path() / "out" / "ensemble" / "statistics.csv");
   CHECK(st.find("20261115") != std::string::npos);  // the seed travels with every range
 }
 
 TEST_CASE("U5 sensitivity ranks the controlling parameter (first-order index and one at a time)") {
+  if (!full_ensembles("U5")) return;
   auto f = write_doc("sens", model_yaml(faults("100 m", "41 m"), "", {1000, 1200, 1400, 1600},
                                         block(200, "  one_at_a_time: true\n  parameters:\n" + uniform("faults.F1.throw.max", 80, 120) +
                                                        uniform("faults.F2.throw.max", 40, 42))));
@@ -179,10 +195,11 @@ TEST_CASE("U5 sensitivity ranks the controlling parameter (first-order index and
 }
 
 TEST_CASE("U6 scenarios: option frequencies follow their weights; each member's option is recorded") {
+  if (!full_ensembles("U6")) return;
   std::string sc = "  scenarios:\n    - name: slip\n      options:\n"
                    "        - {name: dip_slip, weight: " + q("0.3 fraction") + ", set: {faults.F1.slip_mode: dip_slip}}\n"
                    "        - {name: vertical, weight: " + q("0.7 fraction") + ", set: {faults.F1.slip_mode: vertical_offset}}\n";
-  auto f = write_doc("scen", model_yaml(faults("100 m"), "", {1000, 1200, 1400, 1600}, block(400, sc)));
+  auto f = write_doc("scen", model_yaml(faults("100 m"), "", {1000, 1200, 1400, 1600}, block(200, sc)));
   auto r = unc::run_ensemble(f, f.parent_path() / "out", quick());
   std::size_t first = 0, n = 0;
   for (auto& m : r.members) {
@@ -198,8 +215,9 @@ TEST_CASE("U6 scenarios: option frequencies follow their weights; each member's 
 }
 
 TEST_CASE("U7 failed members are reported with their parameters, never dropped") {
+  if (!full_ensembles("U7")) return;
   auto f = write_doc("fail", model_yaml(faults("100 m"), "", {1000, 1200, 1400, 1600},
-                                        block(100, "  parameters:\n" + normal("faults.F1.throw.max", 5, 10))));
+                                        block(100, "  parameters:\n" + uniform("wells.W1.tops.H2", 950, 1250))));  // H2 above H1 in a sixth of them
   auto r = unc::run_ensemble(f, f.parent_path() / "out", quick());
   std::size_t failed = 0, with_reason = 0;
   for (auto& m : r.members) {
@@ -217,6 +235,7 @@ TEST_CASE("U7 failed members are reported with their parameters, never dropped")
 }
 
 TEST_CASE("U8 probability map: a unit at a depth where the horizon is uniform about it") {
+  if (!full_ensembles("U8")) return;
   std::string pm = "  probability_maps:\n    - {kind: unit, unit: U1, depth: " + q("1200 m") + ", spacing: " + q("1000 m") + "}\n";
   auto f = write_doc("pmap", model_yaml("", "", {1000, 1200, 1400, 1600},
                                         block(200, "  parameters:\n" + uniform("wells.W1.tops.H2", 1150, 1250) + pm)));

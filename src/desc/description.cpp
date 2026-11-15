@@ -139,6 +139,13 @@ std::vector<const Param*> Description::all_params() const {
   for (auto& z : grid.zones) { add(z.layers); add(z.layer_thickness); }
   for (auto& f : grid.facies) add(f.code);
   for (auto& t : grid.transforms) { add(t.a); add(t.b); }
+  add(uncertainty.members); add(uncertainty.seed);
+  for (auto& u : uncertainty.parameters)
+    for (auto* q : {&u.mean, &u.sd, &u.min, &u.max, &u.mode, &u.values, &u.weights}) add(*q);
+  for (auto& c : uncertainty.correlations) add(c.rho);
+  for (auto& sc : uncertainty.scenarios)
+    for (auto& o : sc.options) add(o.weight);
+  for (auto& m : uncertainty.maps) { add(m.depth); add(m.spacing); }
   add(salt.source_thickness);
   for (auto& b : salt.bodies)
     for (auto* q : {&b.centre, &b.radius, &b.flank_width, &b.height, &b.withdrawal_width, &b.axis_azimuth, &b.half_length}) add(*q);
@@ -853,6 +860,62 @@ struct Typer {
           cd.parameters.push_back({S(&x, "path"), P(&x, "min", b, Dimension::Any, true, 1), P(&x, "max", b, Dimension::Any, true, 1)});
         }
     }
+    if (const Node* un = root.get("uncertainty")) {
+      auto& u = d.uncertainty;
+      u.present = true;
+      u.members = P(un, "members", "uncertainty", Dimension::Ordinal, true, 1);
+      u.seed = P(un, "seed", "uncertainty", Dimension::Ordinal, true, 1);
+      if (const Node* ps = un->get("parameters"))
+        for (std::size_t k = 0; k < ps->seq.size(); ++k) {
+          const Node& x = ps->seq[k];
+          const std::string b = "uncertainty.parameters[" + std::to_string(k) + "]";
+          UncertainParamDesc q;
+          q.path = S(&x, "path");
+          q.distribution = S(&x, "distribution");
+          q.mean = P(&x, "mean", b, Dimension::Any, false, 1);
+          q.sd = P(&x, "sd", b, Dimension::Any, false, 1);
+          q.min = P(&x, "min", b, Dimension::Any, false, 1);
+          q.max = P(&x, "max", b, Dimension::Any, false, 1);
+          q.mode = P(&x, "mode", b, Dimension::Any, false, 1);
+          q.values = P(&x, "values", b, Dimension::Any, false);
+          q.weights = P(&x, "weights", b, Dimension::Dimensionless, false);
+          u.parameters.push_back(std::move(q));
+        }
+      if (const Node* cs = un->get("correlations"))
+        for (std::size_t k = 0; k < cs->seq.size(); ++k) {
+          const Node& x = cs->seq[k];
+          u.correlations.push_back({S(&x, "a"), S(&x, "b"), P(&x, "rho", "uncertainty.correlations[" + std::to_string(k) + "]", Dimension::Dimensionless, true, 1)});
+        }
+      if (const Node* ss = un->get("scenarios"))
+        for (std::size_t k = 0; k < ss->seq.size(); ++k) {
+          const Node& x = ss->seq[k];
+          ScenarioDesc sc;
+          sc.name = S(&x, "name");
+          if (const Node* os = x.get("options"))
+            for (std::size_t q = 0; q < os->seq.size(); ++q) {
+              const Node& o = os->seq[q];
+              ScenarioOptionDesc od;
+              od.name = S(&o, "name");
+              od.weight = P(&o, "weight", "uncertainty.scenarios[" + std::to_string(k) + "].options[" + std::to_string(q) + "]", Dimension::Dimensionless, true, 1);
+              if (const Node* st = o.get("set"))
+                for (auto& [key, val] : st->map) od.set.emplace_back(key, val);
+              if (const Node* rm = o.get("remove"))
+                for (auto& r : rm->seq) od.remove.push_back(r.str);
+              sc.options.push_back(std::move(od));
+            }
+          u.scenarios.push_back(std::move(sc));
+        }
+      if (const Node* oa = un->get("one_at_a_time")) u.one_at_a_time = oa->boolean || oa->str == "true";
+      if (const Node* ms = un->get("probability_maps"))
+        for (std::size_t k = 0; k < ms->seq.size(); ++k) {
+          const Node& x = ms->seq[k];
+          const std::string b = "uncertainty.probability_maps[" + std::to_string(k) + "]";
+          u.maps.push_back({S(&x, "kind"), S(&x, "unit"), S(&x, "horizon"), P(&x, "depth", b, Dimension::Length, false, 1),
+                            P(&x, "spacing", b, Dimension::Length, false, 1)});
+        }
+      if (const Node* kn = un->get("key_numbers"))
+        for (auto& x : kn->seq) u.key_numbers.push_back(x.str);
+    }
     if (const Node* gn = root.get("grid")) {
       auto& g = d.grid;
       g.present = true;
@@ -1126,6 +1189,75 @@ struct Typer {
       if (fr.seal_a.present && !(fr.seal_a.si() > 0)) c.err("fault_rock.seal_calibration.a", "F27", "a must be positive");
       if (!fr.seal_type.empty() && std::none_of(d.units.begin(), d.units.end(), [](const UnitDesc& u) { return u.clay_fraction.present; }))
         c.err("fault_rock.seal_calibration", "F27", "a seal calibration needs clay fractions on the units");
+    }
+    // STX-TN-13 (F33): the uncertainty block
+    if (d.uncertainty.present) {
+      const auto& u = d.uncertainty;
+      if (u.members.present && !(u.members.si() >= 2)) c.err("uncertainty.members", "F33", "an ensemble needs at least 2 members");
+      if (u.seed.present && !(u.seed.si() >= 0 && u.seed.si() == std::floor(u.seed.si()))) c.err("uncertainty.seed", "F33", "the seed is a whole number, 0 or more");
+      std::set<std::string> seen;
+      auto scalar = [&](const std::string& path) {
+        const Param* p = d.param_by_name(path);
+        return p && p->present && p->values.size() == 1 ? p : nullptr;
+      };
+      for (std::size_t k = 0; k < u.parameters.size(); ++k) {
+        const auto& q = u.parameters[k];
+        const std::string b = "uncertainty.parameters[" + std::to_string(k) + "]";
+        const Param* base = scalar(q.path);
+        if (!base) { c.err(b + ".path", "F33", "'" + q.path + "' is not a scalar parameter of this description"); continue; }
+        if (!seen.insert(q.path).second) c.err(b + ".path", "F33", "'" + q.path + "' has two distributions");
+        auto same_dim = [&](const Param& p, const char* nm) {
+          if (p.present && base->dim != Dimension::Any && p.dim != base->dim && p.dim != Dimension::Any)
+            c.err(b + "." + nm, "F33", std::string(nm) + " must be in a unit of the parameter's dimension (" + dimension_name(base->dim) + ")");
+        };
+        for (auto [p, nm] : {std::pair{&q.mean, "mean"}, {&q.sd, "sd"}, {&q.min, "min"}, {&q.max, "max"}, {&q.mode, "mode"}, {&q.values, "values"}})
+          same_dim(*p, nm);
+        if (q.distribution == "uniform") {
+          if (!q.min.present || !q.max.present || !(q.min.si() < q.max.si())) c.err(b, "F33", "uniform needs min < max");
+        } else if (q.distribution == "normal") {
+          if (!q.mean.present || !q.sd.present || !(q.sd.si() > 0)) c.err(b, "F33", "normal needs a mean and sd > 0");
+          if (q.min.present && q.max.present && !(q.min.si() < q.max.si())) c.err(b, "F33", "truncation needs min < max");
+        } else if (q.distribution == "triangular") {
+          if (!q.min.present || !q.mode.present || !q.max.present || !(q.min.si() <= q.mode.si() && q.mode.si() <= q.max.si() && q.min.si() < q.max.si()))
+            c.err(b, "F33", "triangular needs min <= mode <= max, min < max");
+        } else if (q.distribution == "discrete") {
+          double sw = 0;
+          bool pos = true;
+          for (std::size_t i = 0; i < q.weights.values.size(); ++i) { sw += q.weights.si(i); pos = pos && q.weights.si(i) > 0; }
+          if (!q.values.present || !q.weights.present || q.values.values.size() != q.weights.values.size() || q.values.values.empty())
+            c.err(b, "F33", "discrete needs values and as many weights");
+          else if (!pos || std::fabs(sw - 1) > 1e-6) c.err(b + ".weights", "F33", "weights must be positive and sum to 1");
+        } else {
+          c.err(b + ".distribution", "F33", "distribution is uniform, normal, triangular or discrete");
+        }
+      }
+      for (std::size_t k = 0; k < u.correlations.size(); ++k) {
+        const auto& cr = u.correlations[k];
+        const std::string b = "uncertainty.correlations[" + std::to_string(k) + "]";
+        if (!seen.count(cr.a) || !seen.count(cr.b) || cr.a == cr.b) c.err(b, "F33", "a correlation joins two different parameters that have distributions");
+        if (cr.rho.present && !(std::fabs(cr.rho.si()) < 1)) c.err(b + ".rho", "F33", "|rho| must be below 1");
+      }
+      for (std::size_t k = 0; k < u.scenarios.size(); ++k) {
+        const auto& sc = u.scenarios[k];
+        double sw = 0;
+        bool pos = true;
+        for (auto& o : sc.options) { sw += o.weight.present ? o.weight.si() : 0; pos = pos && o.weight.present && o.weight.si() > 0; }
+        if (sc.options.size() < 2) c.err("uncertainty.scenarios[" + std::to_string(k) + "]", "F33", "a scenario needs at least two options");
+        else if (!pos || std::fabs(sw - 1) > 1e-6) c.err("uncertainty.scenarios[" + std::to_string(k) + "]", "F33", "option weights must be positive and sum to 1");
+      }
+      for (std::size_t k = 0; k < u.maps.size(); ++k) {
+        const auto& m = u.maps[k];
+        const std::string b = "uncertainty.probability_maps[" + std::to_string(k) + "]";
+        if (m.kind == "unit") {
+          if (d.unit_index(m.unit) < 0) c.err(b + ".unit", "F33", "unknown unit '" + m.unit + "'");
+          if (!m.depth.present) c.err(b + ".depth", "F33", "a unit map needs a depth");
+        } else if (m.kind == "closure") {
+          if (d.horizon_index(m.horizon) < 0) c.err(b + ".horizon", "F33", "unknown horizon '" + m.horizon + "'");
+        } else {
+          c.err(b + ".kind", "F33", "kind is unit or closure");
+        }
+        if (m.spacing.present && !(m.spacing.si() > 0)) c.err(b + ".spacing", "F33", "spacing must be positive");
+      }
     }
     // STX-TN-12 (F32): the grid block
     if (d.grid.present) {

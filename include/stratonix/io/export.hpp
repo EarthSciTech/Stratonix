@@ -128,6 +128,8 @@ class ExportContext {
   /// modellers (one feature per series); empty without series.
   struct SeriesExport { std::string name, base; std::vector<std::string> horizons; };
   std::vector<SeriesExport> series;
+  /// Stage 3A: horizons built from the horizon above minus a thickness (implicit.isochore_horizons).
+  std::vector<std::string> isochore_horizons;
   /// Stage 2F (STX-TN-10): fault-surface attributes and curvature grids, written only when given.
   bool fault_rock = false;
   repr::FaultRockInput rock;

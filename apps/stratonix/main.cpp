@@ -41,6 +41,8 @@ std::map<std::string, Command>& commands() {
       {"package", {"Write a self-contained, checksummed delivery package",
                    "stratonix package <description.yaml> -o <new folder> [--config package.yaml] [--zip] "
                    "[--formats petrel,vtk,...] [--no-figures]", cli::cmd_package}},
+      {"ensemble", {"Run the seeded ensemble of a description's uncertainty block (stage 3C)",
+                    "stratonix ensemble <description.yaml> -o <new folder> [--members N] [--seed S] [--threads N] [--no-figures]", cli::cmd_ensemble}},
       {"plugins", {"List the registered plugins", "stratonix plugins", cli::cmd_plugins}},
       {"bench", {"Run timing benchmarks (reference and optimised kernels)",
                  "stratonix bench [description.yaml] [--spacing 50,25] [--mode both|reference|optimised] "

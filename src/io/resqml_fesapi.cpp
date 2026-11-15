@@ -13,6 +13,8 @@
 #include <fesapi/resqml2/ContinuousProperty.h>
 #include <fesapi/resqml2/DiscreteProperty.h>
 #include <fesapi/resqml2/IjkGridExplicitRepresentation.h>
+#include <fesapi/resqml2_0_1/ContinuousProperty.h>
+#include <fesapi/resqml2_0_1/DiscreteProperty.h>
 #if __has_include(<fesapi/eml2/AbstractLocal3dCrs.h>)
 #include <fesapi/eml2/AbstractLocal3dCrs.h>
 #endif
@@ -43,7 +45,7 @@ using ColumnIndex = ElemOf<8>;   // splitCoordinateLineColumns
 namespace {
 auto* repr_active(COMMON_NS::DataObjectRepository& repo, RESQML2_NS::IjkGridExplicitRepresentation* ijk) {
   return repo.createDiscreteProperty(ijk, "", "ACTIVE", 1, gsoap_eml2_3::eml23__IndexableElement::cells,
-                                     gsoap_resqml2_0_1::resqml20__ResqmlPropertyKind::active);
+                                     gsoap_resqml2_0_1::resqml20__ResqmlPropertyKind::discrete);
 }
 }  // namespace
 
@@ -128,7 +130,7 @@ std::vector<ExportedFile> write_resqml_grid(ExportContext& c, const fs::path& fo
                                                        static_cast<unsigned int>(nz));
   ijk->setGeometryAsCoordinateLineNodes(gsoap_resqml2_0_1::resqml20__PillarShape::straight, gsoap_resqml2_0_1::resqml20__KDirection::down, false,
                                         pts.data(), hdf, splits.size(), pillar_of.data(), cum.data(), cols.data(), nullptr, crs);
-  // active cells: a discrete property of the RESQML kind "active" (read as such by resqpy)
+  // active cells: a discrete property titled ACTIVE (1 active, 0 inactive)
   {
     std::vector<std::int8_t> act(g.ncell());
     for (std::size_t n = 0; n < act.size(); ++n) act[n] = static_cast<std::int8_t>(g.actnum[n] != 0);

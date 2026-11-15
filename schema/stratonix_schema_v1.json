@@ -1912,6 +1912,173 @@
         }
       }
     },
+    "uncertainty": {
+      "type": "object",
+      "required": [
+        "members",
+        "seed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "members": {
+          "$ref": "#/$defs/param"
+        },
+        "seed": {
+          "$ref": "#/$defs/param"
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "distribution"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "distribution": {
+                "enum": [
+                  "uniform",
+                  "normal",
+                  "triangular",
+                  "discrete"
+                ]
+              },
+              "mean": {
+                "$ref": "#/$defs/param"
+              },
+              "sd": {
+                "$ref": "#/$defs/param"
+              },
+              "min": {
+                "$ref": "#/$defs/param"
+              },
+              "max": {
+                "$ref": "#/$defs/param"
+              },
+              "mode": {
+                "$ref": "#/$defs/param"
+              },
+              "values": {
+                "$ref": "#/$defs/param"
+              },
+              "weights": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "correlations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "a",
+              "b",
+              "rho"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "a": {
+                "type": "string"
+              },
+              "b": {
+                "type": "string"
+              },
+              "rho": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "options"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "weight"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "weight": {
+                      "$ref": "#/$defs/param"
+                    },
+                    "set": {
+                      "type": "object"
+                    },
+                    "remove": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "one_at_a_time": {
+          "type": "boolean"
+        },
+        "probability_maps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "unit",
+                  "closure"
+                ]
+              },
+              "unit": {
+                "type": "string"
+              },
+              "horizon": {
+                "type": "string"
+              },
+              "depth": {
+                "$ref": "#/$defs/param"
+              },
+              "spacing": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "key_numbers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "stress": {
       "type": "object",
       "additionalProperties": false,

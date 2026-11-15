@@ -34,9 +34,9 @@ if(STRATONIX_WITH_FESAPI)
   target_compile_definitions(test_v3_grids PRIVATE STRATONIX_HAVE_FESAPI=1)
 endif()
 # Stage 3C analytical tests (STX-TN-13), written before the features (Prompt 40) and made to pass
-# by Prompt 41.
+# by Prompt 41 (all passing since Prompt 41).
 stx_test(test_v3_uncertainty stratonix_package)
-set_tests_properties(test_v3_uncertainty PROPERTIES WILL_FAIL TRUE TIMEOUT 3600)
+set_tests_properties(test_v3_uncertainty PROPERTIES TIMEOUT 3600)
 # Stage 3A benchmark: 100 000 points within 300 s (release builds; others skip with code 77).
 stx_test(bench_implicit_100k stratonix_package)
 set_tests_properties(bench_implicit_100k PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
@@ -68,12 +68,22 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(grdecl_independent_${ex} PROPERTIES DEPENDS cli_build_${ex} SKIP_RETURN_CODE 77)
   endforeach()
 endif()
+# Stage 3C: the 200-member ensemble of the fault-system example, every member's checks recorded,
+# and the sensitivity ranking of the analytical case (optimised builds only: 208 model builds).
+if(Python3_Interpreter_FOUND AND NOT STRATONIX_SANITIZE AND (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
+  add_test(NAME cli_ensemble_fault_system COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_ensemble_fault_system
+           "-DARGS=ensemble;${PROJECT_SOURCE_DIR}/examples/fault_system_uncertainty.yaml;--no-figures" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
+  set_tests_properties(cli_ensemble_fault_system PROPERTIES TIMEOUT 3600)
+  add_test(NAME ensemble_ranking_fault_system
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ensemble.py ${STX_TEST_TMP}/cli_ensemble_fault_system 200 20261115)
+  set_tests_properties(ensemble_ranking_fault_system PROPERTIES DEPENDS cli_ensemble_fault_system)
+endif()
 # The example builds with every check passing (exit code 0).
 add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
          -DDESC=${PROJECT_SOURCE_DIR}/examples/synthetic_fold_two_faults.yaml -DOUT=${STX_TEST_TMP}/cli_build_example
          -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
 # The worked examples of the user guide build with every check passing.
-foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data hybrid_fault_fold_conditioning)
+foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data hybrid_fault_fold_conditioning fault_system_uncertainty)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)

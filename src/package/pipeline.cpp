@@ -320,6 +320,7 @@ std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Mo
     c.stress = stress_input(d);
   }
   for (auto& sr : d.series) c.series.push_back({sr.name, sr.base, sr.horizons});
+  if (d.implicit.present) c.isochore_horizons = d.implicit.isochore_horizons;
   for (auto& hn : d.curvature_horizons) {
     const int h = d.horizon_index(hn);
     if (h >= 0) c.curvature_horizons.push_back(h);
