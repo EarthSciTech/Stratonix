@@ -110,7 +110,28 @@ has its own version (`stratonix_schema`).
   `Structure::salt_thickness`, `solid_thickness`, `decompacted_thickness`, `porosity`,
   `burial_history`; units `1/m`, `1/km` and `Ma`.
 
+- Salt (Prompt 26): `structure.salt: {top, base, source_thickness, bodies}` makes the unit between
+  top and base salt a salt layer. Pillows, diapirs and walls rise from it, withdrawing their volume
+  from a ring around them (welds where the ring is exhausted; rule F24 refuses a ring that cannot
+  supply the body). Top salt may instead be imported. The overburden responds by the stated rule:
+  each horizon moves with the salt thickness change after its deposition (`growth: {onset, end}`
+  per body), so pre-kinematic units drape, syn-kinematic units thin over highs and thicken in
+  withdrawal basins, and the overburden is clipped at top salt where the salt pierces it
+  (termination kind `salt`). Salt volumes, withdrawal amplitudes, net volume change and weld area
+  are reported.
+- Compaction (Prompt 27): `stratigraphy.compaction: {geometry: present | depositional,
+  surface_depth, units}` with an exponential or table porosity law per unit (rule F25). In
+  depositional mode the units are compacted column by column from the rigid base, giving
+  differential compaction over rigid highs; well tops stay present depths. Decompaction to any
+  burial depth, burial history per column (a new figure kind, one per well, with ages when the
+  horizons have `age`), and present-day porosity per unit (exported as grids for stage 3B).
+- Checks C15 (salt volume conserved) and C16 (solid thickness conserved through compaction).
+- Worked examples `salt_pillow_withdrawal.yaml`, `salt_diapir_crestal_faults.yaml` and
+  `compaction_drape.yaml`.
+
 ### Changed
+- The well-correction field measures control-well residuals against the effective horizons
+  (after series relations, the salt response and compaction) when these are in force.
 - Check C1 measures a unit that terminates by design only where it is present, and passes when
   it is positive there; C13 checks it for negative thickness.
 - Check C4 skips trishear and fault-parallel-flow faults, whose throw is not a profile; C12
@@ -124,7 +145,7 @@ has its own version (`stratonix_schema`).
   unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
   and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
-  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`), expected to fail until its features are built.
+  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`).
 
 ## [2026.1] - 2026-11-14 - First public release
 

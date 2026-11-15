@@ -126,6 +126,26 @@ fig::FigureContext figure_context(const desc::Description& d, const Model& m, co
   for (auto& n : d.isopachs)
     for (std::size_t u = 0; u < m.info().units.size(); ++u)
       if (m.info().units[u].name == n) c.isopach_units.push_back(static_cast<int>(u));
+  // Burial history at every well head (stage 2D), when the description has compaction.
+  if (auto* st = static_cast<const Structure*>(m.capability("structure")); st && st->compaction_mode() != 0) {
+    for (auto& w : c.wells) {
+      auto hist = st->burial_history(w.x(), w.y());
+      if (hist.empty()) continue;
+      fig::FigureContext::Burial b;
+      b.location = w.name();
+      bool all_ages = true;
+      for (auto& stp : hist) {
+        b.step_labels.push_back(stp.label);
+        b.depth.push_back(stp.depth);
+        all_ages = all_ages && !std::isnan(stp.age);
+      }
+      if (all_ages)
+        for (auto& stp : hist) b.ages.push_back(stp.age);
+      for (std::size_t h = 0; h < hist.back().depth.size(); ++h)
+        if (!std::isnan(hist.back().depth[h])) b.horizons.push_back(static_cast<int>(h));
+      c.burial.push_back(std::move(b));
+    }
+  }
   return c;
 }
 

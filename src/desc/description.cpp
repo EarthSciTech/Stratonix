@@ -106,7 +106,7 @@ std::vector<const Param*> Description::all_params() const {
   auto add = [&](const Param& p) { if (p.present) r.push_back(&p); };
   for (auto* p : {&origin, &size, &depth_range, &grid_spacing, &ref_point, &regional_dip, &correction_range,
                   &regional_dip_azimuth, &frame_point, &tol_thickness_min, &tol_crossing,
-                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &tol_area, &scaling_min_ratio, &scaling_max_ratio,
+                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &tol_area, &tol_salt_volume, &tol_solid_thickness, &scaling_min_ratio, &scaling_max_ratio,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
                   &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
                   &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch})
@@ -117,6 +117,13 @@ std::vector<const Param*> Description::all_params() const {
     for (auto& c : w.completions) { add(c.top); add(c.base); }
   }
   for (auto& h : horizons) { add(h.depth); add(h.thickness_above); add(h.iso_thickness); add(h.iso_gradient); add(h.iso_centre); }
+  for (auto& h : horizons) add(h.age);
+  add(salt.source_thickness);
+  for (auto& b : salt.bodies)
+    for (auto* q : {&b.centre, &b.radius, &b.flank_width, &b.height, &b.withdrawal_width, &b.axis_azimuth, &b.half_length}) add(*q);
+  add(compaction.surface_depth);
+  for (auto& u : compaction.units)
+    for (auto* q : {&u.surface_porosity, &u.decay, &u.table_depths, &u.table_porosity}) add(*q);
   for (auto& sr : series)
     for (auto* q : {&sr.tilt_dip, &sr.tilt_azimuth, &sr.clino_height, &sr.clino_width, &sr.clino_direction, &sr.clino_first_break,
                     &sr.clino_progradation})
@@ -343,6 +350,7 @@ struct Typer {
         hd.name = S(&h, "name");
         hd.depth = P(&h, "depth", b, Dimension::Length, false, 1);
         hd.thickness_above = P(&h, "thickness_above", b, Dimension::Length, false, 1);
+        hd.age = P(&h, "age", b, Dimension::Time, false, 1);
         if (const Node* s = h.get("surface")) {
           hd.surface_input = S(s, "input");
           hd.surface_format = S(s, "format");
@@ -390,6 +398,25 @@ struct Typer {
         }
         d.series.push_back(std::move(sd));
       }
+    if (const Node* cp = st ? st->get("compaction") : nullptr) {
+      const std::string cb = "stratigraphy.compaction";
+      d.compaction.geometry = S(cp, "geometry");
+      d.compaction.surface_depth = P(cp, "surface_depth", cb, Dimension::Length, true, 1);
+      if (const Node* us = cp->get("units"))
+        for (std::size_t k = 0; k < us->seq.size(); ++k) {
+          const Node& un = us->seq[k];
+          const std::string ub = cb + ".units[" + std::to_string(k) + "]";
+          CompactionUnitDesc cu;
+          cu.unit = S(&un, "unit");
+          cu.law = S(&un, "law");
+          const bool ex = cu.law == "exponential";
+          cu.surface_porosity = P(&un, "surface_porosity", ub, Dimension::Dimensionless, ex, 1);
+          cu.decay = P(&un, "decay", ub, Dimension::InverseLength, ex, 1);
+          cu.table_depths = P(&un, "table_depths", ub, Dimension::Length, !ex, 0);
+          cu.table_porosity = P(&un, "table_porosity", ub, Dimension::Dimensionless, !ex, 0);
+          d.compaction.units.push_back(std::move(cu));
+        }
+    }
     d.above_top_name = S(st, "above_top_name");
     d.below_base_name = S(st, "below_base_name");
     for (auto& u : d.units) {
@@ -404,6 +431,30 @@ struct Typer {
         d.regional_dip_azimuth = P(r, "dip_azimuth", "structure.regional", Dimension::Angle, d.regional_type == "planar", 1);
       }
       if (const Node* bs = s->get("base")) d.base_type = S(bs, "type", "conformable");
+      if (const Node* sl = s->get("salt")) {
+        const std::string sb = "structure.salt";
+        d.salt.top = S(sl, "top");
+        d.salt.base = S(sl, "base");
+        d.salt.source_thickness = P(sl, "source_thickness", sb, Dimension::Length, true, 1);
+        if (const Node* bd = sl->get("bodies"))
+          for (std::size_t k = 0; k < bd->seq.size(); ++k) {
+            const Node& bn = bd->seq[k];
+            const std::string bb = sb + ".bodies[" + std::to_string(k) + "]";
+            SaltBodyDesc b;
+            b.type = S(&bn, "type");
+            b.name = S(&bn, "name");
+            const bool steep = b.type == "diapir" || b.type == "wall", wall = b.type == "wall";
+            b.centre = P(&bn, "centre", bb, Dimension::Length, true, 2);
+            b.radius = P(&bn, "radius", bb, Dimension::Length, true, 1);
+            b.flank_width = P(&bn, "flank_width", bb, Dimension::Length, steep, 1);
+            b.height = P(&bn, "height", bb, Dimension::Length, true, 1);
+            b.withdrawal_width = P(&bn, "withdrawal_width", bb, Dimension::Length, true, 1);
+            b.axis_azimuth = P(&bn, "axis_azimuth", bb, Dimension::Angle, wall, 1);
+            b.half_length = P(&bn, "half_length", bb, Dimension::Length, wall, 1);
+            if (const Node* g = bn.get("growth")) b.growth = {S(g, "onset"), S(g, "end")};
+            d.salt.bodies.push_back(std::move(b));
+          }
+      }
       d.correction_range = P(s, "correction_range", "structure", Dimension::Length, false, 1);
       if (const Node* ps = s->get("primitives"))
         for (std::size_t k = 0; k < ps->seq.size(); ++k) {
@@ -579,6 +630,8 @@ struct Typer {
         d.tol_unoffset = P(t, "unoffset", b, Dimension::Length, false, 1);
         d.tol_rollover = P(t, "rollover", b, Dimension::Length, false, 1);
         d.tol_area = P(t, "area", b, Dimension::Dimensionless, false, 1);
+        d.tol_salt_volume = P(t, "salt_volume", b, Dimension::Dimensionless, false, 1);
+        d.tol_solid_thickness = P(t, "solid_thickness", b, Dimension::Dimensionless, false, 1);
       }
       if (const Node* fsc = ch->get("fault_scaling")) {
         d.scaling_min_ratio = P(fsc, "min_ratio", "checks.fault_scaling", Dimension::Dimensionless, false, 1);
@@ -797,6 +850,65 @@ struct Typer {
       if (pd.growth.present() && pd.mechanics == "parallel")
         c.err(b + ".growth", "F22", "growth is not combined with parallel mechanics (offsets keep the anchor's thickness)");
     }
+    // STX-TN-08 (F24, F25)
+    if (d.salt.present()) {
+      const std::string sb = "structure.salt";
+      int ti = d.horizon_index(d.salt.top), bi = d.horizon_index(d.salt.base);
+      if (ti < 0) c.err(sb + ".top", "F24", "unknown horizon '" + d.salt.top + "'");
+      if (bi < 0) c.err(sb + ".base", "F24", "unknown horizon '" + d.salt.base + "'");
+      if (ti >= 0 && bi >= 0 && ti != bi - 1)
+        c.err(sb + ".top", "F24", "top salt must be the horizon directly above base salt (the salt is the unit between them)");
+      if (d.salt.source_thickness.present && !(d.salt.source_thickness.si() > 0))
+        c.err(sb + ".source_thickness", "F24", "the source-layer thickness must be positive");
+      if (ti >= 0 && !d.horizons[static_cast<std::size_t>(ti)].surface_input.empty() && !d.salt.bodies.empty())
+        c.err(sb + ".bodies", "F24", "top salt is an imported surface: give no parametric bodies");
+      std::set<std::string> names;
+      for (std::size_t k = 0; k < d.salt.bodies.size(); ++k) {
+        const auto& b = d.salt.bodies[k];
+        const std::string bb = sb + ".bodies[" + std::to_string(k) + "]";
+        if (!names.insert(b.name).second) c.err(bb + ".name", "F24", "duplicate salt body '" + b.name + "'");
+        for (auto [p, nm] : {std::pair{&b.radius, "radius"}, {&b.flank_width, "flank_width"}, {&b.height, "height"},
+                             {&b.withdrawal_width, "withdrawal_width"}, {&b.half_length, "half_length"}})
+          if (p->present && !(p->si() > 0)) c.err(bb + "." + nm, "F24", std::string(nm) + " must be positive");
+        growth(b.growth, bb);
+        if (b.centre.present && d.size.present && d.origin.present) {
+          double x = b.centre.si(0), y = b.centre.si(1);
+          if (x < d.origin.si(0) || y < d.origin.si(1) || x > d.origin.si(0) + d.size.si(0) || y > d.origin.si(1) + d.size.si(1))
+            c.err(bb + ".centre", "F24", "a salt body lies inside the domain so its volume is counted");
+        }
+      }
+    }
+    if (d.compaction.present()) {
+      const std::string cb = "stratigraphy.compaction";
+      if (d.compaction.geometry != "present" && d.compaction.geometry != "depositional")
+        c.err(cb + ".geometry", "F25", "geometry must be present or depositional");
+      std::set<std::string> seen;
+      for (std::size_t k = 0; k < d.compaction.units.size(); ++k) {
+        const auto& u = d.compaction.units[k];
+        const std::string ub = cb + ".units[" + std::to_string(k) + "]";
+        int ui = d.unit_index(u.unit);
+        if (ui < 0) c.err(ub + ".unit", "F25", "unknown unit '" + u.unit + "'");
+        else if (d.horizon_index(d.units[static_cast<std::size_t>(ui)].top) < 0 || d.horizon_index(d.units[static_cast<std::size_t>(ui)].base) < 0)
+          c.err(ub + ".unit", "F25", "a compacting unit lies between two horizons");
+        if (!seen.insert(u.unit).second) c.err(ub + ".unit", "F25", "unit '" + u.unit + "' has two compaction laws");
+        if (u.law == "exponential") {
+          if (u.surface_porosity.present && !(u.surface_porosity.si() >= 0 && u.surface_porosity.si() < 1))
+            c.err(ub + ".surface_porosity", "F25", "surface porosity must be in [0, 1)");
+          if (u.decay.present && !(u.decay.si() > 0)) c.err(ub + ".decay", "F25", "the decay coefficient must be positive");
+        } else if (u.law == "table") {
+          const auto& zd = u.table_depths;
+          const auto& ph = u.table_porosity;
+          if (zd.present && ph.present && zd.values.size() != ph.values.size())
+            c.err(ub + ".table_porosity", "F25", "table_depths and table_porosity need the same number of values");
+          for (std::size_t q = 1; zd.present && q < zd.values.size(); ++q)
+            if (!(zd.si(q) > zd.si(q - 1))) c.err(ub + ".table_depths", "F25", "table depths must increase");
+          for (std::size_t q = 0; ph.present && q < ph.values.size(); ++q)
+            if (!(ph.si(q) >= 0 && ph.si(q) < 1)) c.err(ub + ".table_porosity", "F25", "porosities must be in [0, 1)");
+        } else {
+          c.err(ub + ".law", "F25", "law must be exponential or table");
+        }
+      }
+    }
     for (std::size_t k = 0; k < d.faults.size(); ++k) {
       const auto& fd = d.faults[k];
       const std::string b = "faults[" + std::to_string(k) + "]";
@@ -833,10 +945,12 @@ struct Typer {
       if (from_well && (h.depth.present || h.thickness_above.present))
         c.err(b, "S3", "horizon '" + h.name + "' is defined twice: by the reference well top and by depth/thickness");
       const int si = d.series_of(static_cast<int>(i));
-      const bool clino = si >= 0 && !d.series[static_cast<std::size_t>(si)].clino_profile.empty();
+      const bool clino = (si >= 0 && !d.series[static_cast<std::size_t>(si)].clino_profile.empty()) ||
+                         (d.salt.present() && h.name == d.salt.top && h.surface_input.empty());
       if (clino && (defs > 0 || from_well))
-        c.err(b, "F23", "horizon '" + h.name + "' is a clinoform surface: its depth follows from the clinoform formula; give no depth, "
-                                                "thickness, surface, isochore or reference-well top");
+        c.err(b, h.name == d.salt.top ? "F24" : "F23",
+              "horizon '" + h.name + "' follows from " + (h.name == d.salt.top ? "the salt thickness above base salt" : "the clinoform formula") +
+                  ": give no depth, thickness, isochore or reference-well top");
       else if (clino) {
       } else if (!from_well && defs == 0)
         c.err(b, "S3", "horizon '" + h.name + "' has no definition (reference-well top, depth, thickness_above, surface or isochore)");

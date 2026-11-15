@@ -1,0 +1,61 @@
+# Worked example 19: differential compaction over a rigid high. Shale and sandstone were deposited
+# flat-topped over a rigid basement high and compacted with burial (Sclater and Christie 1980 laws):
+# the units drape over the high, and burial-history curves are drawn at each well (stage 2D).
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_compaction_drape, version: "1.0.0", status: DESIGN,
+        title: "Differential compaction over a rigid high"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[800, 800] m | user_instruction | worked example: control well, off the high"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1400 m | user_instruction | worked example"
+      H3: "1800 m | user_instruction | worked example"
+      B:  "2200 m | user_instruction | worked example"
+      B2: "2600 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[5000, 5000] m | user_instruction | worked example: planned well on the crest of the high"
+    total_depth: "2800 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons:
+    - {name: H1, age: "5 Ma | user_instruction | worked example"}
+    - {name: H2, age: "20 Ma | user_instruction | worked example"}
+    - {name: H3, age: "40 Ma | user_instruction | worked example"}
+    - {name: B,  age: "60 Ma | user_instruction | worked example"}
+    - {name: B2, age: "80 Ma | user_instruction | worked example"}
+  units:
+    - {name: Shale_upper, top: H1, base: H2}
+    - {name: Sand, top: H2, base: H3}
+    - {name: Shale_lower, top: H3, base: B}
+    - {name: Basement, top: B, base: B2}
+  series:
+    - {name: Basin_fill, horizons: [H1, H2, H3], base: onlap}
+    - {name: Basement_series, horizons: [B, B2], base: conformable}
+  compaction:
+    geometry: depositional
+    surface_depth: "100 m | user_instruction | worked example: water depth"
+    units:
+      - {unit: Shale_upper, law: exponential, surface_porosity: "0.63 fraction | literature_derived | Sclater and Christie (1980), Table 2, shale", decay: "0.51 1/km | literature_derived | Sclater and Christie (1980), Table 2, shale"}
+      - {unit: Sand, law: exponential, surface_porosity: "0.49 fraction | literature_derived | Sclater and Christie (1980), Table 2, sandstone", decay: "0.27 1/km | literature_derived | Sclater and Christie (1980), Table 2, sandstone"}
+      - {unit: Shale_lower, law: exponential, surface_porosity: "0.63 fraction | literature_derived | Sclater and Christie (1980), Table 2, shale", decay: "0.51 1/km | literature_derived | Sclater and Christie (1980), Table 2, shale"}
+structure:
+  regional: {type: flat}
+  primitives:
+    - {type: dome, name: High, series: Basement_series, crest: "[5000, 5000] m | user_instruction | worked example", radius_major: "3000 m | user_instruction | worked example", relief: {B: "600 m | user_instruction | worked example"}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[200, 5000], [9800, 5000]] m | user_instruction | worked example: across the high"
+  isopachs: [Shale_upper, Sand]
+  vertical_exaggeration: "3 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

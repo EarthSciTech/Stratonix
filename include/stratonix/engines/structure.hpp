@@ -3,6 +3,7 @@
 /// isochore stacking, and the well-correction field. z_h(x, y) is the elevation of horizon h in
 /// the restored (unfaulted) frame.
 #pragma once
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -117,7 +118,7 @@ class Structure final : public StratigraphyQuery {
   std::shared_ptr<const FoldPrimitive::Offset> parallel_offset(const FoldPrimitive& p, std::size_t ha, double t,
                                                                const desc::Description& d);
   std::size_t offset_anchor_ = 0;
-  enum class Kind { Parametric, Surface, Isochore, Clinoform };
+  enum class Kind { Parametric, Surface, Isochore, Clinoform, Salt };
   double z_uncorrected(std::size_t h, double x, double y) const;
   double z_raw(std::size_t h, double x, double y) const;
   void z_all_raw(double x, double y, double* out) const;
@@ -139,6 +140,52 @@ class Structure final : public StratigraphyQuery {
   std::vector<int> trend_;              ///< 0 none, 1 linear, 2 radial
   std::vector<double> trend_a_, trend_b_, trend_cx_, trend_cy_;
   std::vector<std::string> term_;
+  // stage 2D (STX-TN-08)
+  struct SaltBody {
+    std::string name;
+    int type = 0;                     ///< 0 pillow, 1 diapir, 2 wall
+    double cx = 0, cy = 0, ax = 0, ay = 1, L = 0, R = 0, f = 1, A = 0, W = 0, a = 0;
+    std::vector<double> fh;           ///< growth fraction of the overburden per horizon
+    double dist(double x, double y) const;
+    double shape(double d) const;
+    double ring(double d) const;
+    double contribution(double x, double y, double t0) const { double d = dist(x, y); return A * shape(d) - std::min(t0, a * ring(d)); }
+  };
+  std::vector<SaltBody> salt_;
+  int salt_top_ = -1, salt_base_ = -1;
+  bool salt_imported_ = false;
+  double salt_t0_ = 0;
+  double salt_t(double x, double y, double* contrib) const;  ///< thickness; per-body contributions
+  double salt_net_ = 0, salt_vol_ = 0, weld_area_ = 0;
+  int comp_mode_ = 0;                 ///< 0 off, 1 present, 2 depositional
+  double surface_depth_ = 0;
+  std::vector<int> law_;              ///< per model unit: 0 rigid, 1 exponential, 2 table
+  std::vector<double> phi0_, decay_;
+  std::vector<std::vector<double>> tz_, tp_;
+  int comp_base_ = -1;                ///< deepest base horizon of a compacting unit
+  std::vector<std::string> hname_;
+  std::vector<double> hage_;
+  bool column_ = false;               ///< a column pass is needed (relations, salt or compaction)
+  double phi(int u, double z) const;
+  double solid(int u, double z1, double z2) const;
+  double base_for(int u, double z1, double S) const;
+  double top_for(int u, double z2, double S) const;
+  void column_pass(double x, double y, double* z, unsigned char* flags) const;
+  void report_salt_and_compaction(const desc::Description& d, BuildLog& log);
+ public:
+  /// Salt balance from the build (C15): net volume change and the bodies' volume (m3); weld area (m2).
+  double salt_net_volume() const { return salt_net_; }
+  double salt_bodies_volume() const { return salt_vol_; }
+  bool salt_parametric() const { return !salt_.empty(); }
+  /// Compaction mode: 0 off, 1 present, 2 depositional; the law of model unit u (0 rigid).
+  int compaction_mode() const { return comp_mode_; }
+  int compaction_law(int u) const { return u >= 0 && static_cast<std::size_t>(u) < law_.size() ? law_[static_cast<std::size_t>(u)] : 0; }
+  /// Depositional solid thickness of unit u at (x, y) (depositional mode), for C16.
+  double depositional_solid(int u, double x, double y) const;
+  /// Present thickness after decompaction to the surface and compaction back (C16 round trip).
+  double compaction_round_trip(int u, double x, double y) const;
+  const std::vector<std::string>& horizon_names() const { return hname_; }
+ private:
   double regional(double x, double y) const;
 
   std::vector<Kind> kind_;

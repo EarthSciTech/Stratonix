@@ -7,6 +7,7 @@
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/util.hpp"
 #include "stratonix/io/export.hpp"
+#include "stratonix/engines/structure.hpp"
 #include "stratonix/io/io.hpp"
 
 // Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
@@ -179,6 +180,18 @@ class IrapGridExporter final : public Exporter {
                        inf.horizons[h].name + " in block " + std::to_string(b) + " (" + c.block_label(b) + "), extended 2 nodes across the gap"});
       }
     }
+    // Stage 2D: present-day mean porosity of each compacting unit (for stage 3B), restored-frame
+    // map positions.
+    if (auto* st = static_cast<const Structure*>(c.model().capability("structure")); st && st->compaction_mode() != 0)
+      for (std::size_t u = 1; u + 1 < inf.units.size(); ++u) {
+        if (!st->compaction_law(static_cast<int>(u))) continue;
+        Grid2D g(c.grid(), std::nan(""));
+        for (std::size_t k = 0; k < g.v.size(); ++k) g.v[k] = st->porosity(static_cast<int>(u), c.grid().x(k % c.grid().nx), c.grid().y(k / c.grid().nx));
+        fs::path p = fs::path("porosity") / (petrel_name(inf.units[u].name) + "_porosity.irap");
+        put(folder, p, write_irap_ascii(g, c.decimals));
+        out.push_back({rel(p), "IRAP classic ASCII grid", "IRAP classic grid (ASCII)",
+                       inf.units[u].name + " present-day mean porosity (fraction) from its compaction law; restored-frame positions"});
+      }
     // Stage 2C: isopachs and stratal termination lines of units that terminate (STX-TN-07 section 2).
     for (std::size_t u = 1; u + 1 < inf.units.size(); ++u) {
       if (inf.units[u].termination.empty()) continue;

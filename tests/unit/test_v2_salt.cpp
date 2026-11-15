@@ -110,15 +110,17 @@ TEST_CASE("P26 withdrawal basin around a pillow") {
 
 TEST_CASE("P26 weld: a thin source layer welds in the ring, volume still conserved") {
   BuildLog log;
-  auto m = build_text(salt_doc(20, pillow()), nullptr, &log);
-  const double a = balance(1500, 300, 2000, 20);
-  CHECK(a > 20);
+  // a 30 m source: the unwelded amplitude would be 40 m, so the ring welds (20 m could not supply the
+  // pillow at all: rule F24 refuses it)
+  auto m = build_text(salt_doc(30, pillow()), nullptr, &log);
+  const double a = balance(1500, 300, 2000, 30);
+  CHECK(a > 30);
   CHECK_NEAR(depth_faulted(*m, 3, 7500, 5000), depth_faulted(*m, 4, 7500, 5000), 0.01);  // welded at the ring middle
   CHECK(log_value(log, "salt.weld_area") > 0);
   double dv = 0, vol = 0;
   for (double x = 12.5; x < 10000; x += 25)
     for (double y = 12.5; y < 10000; y += 25) {
-      dv += (depth_faulted(*m, 4, x, y) - depth_faulted(*m, 3, x, y) - 20) * 625;
+      dv += (depth_faulted(*m, 4, x, y) - depth_faulted(*m, 3, x, y) - 30) * 625;
       vol += 300 * raised(std::hypot(x - 5000, y - 5000), 1500) * 625;
     }
   CHECK(std::fabs(dv) <= 0.01 * vol);
@@ -170,17 +172,18 @@ std::string drape() {
 
 TEST_CASE("P27 differential compaction: drape over a rigid high") {
   auto m = build_text(drape());
-  // the test's own stacking from the rigid base B upwards
-  auto present_h1 = [&](double dB, double dH2, double dH1) {
-    double S2 = dB - dH2 > 0 ? solid(0, dB - dH2, 0.5, 0.0005) : 0, S1 = solid(0, dH2 - dH1, 0.5, 0.0005);
-    double z2 = S2 > 0 ? top_for(dB, S2, 0.5, 0.0005) : dB;
-    return top_for(z2, S1, 0.5, 0.0005);
-  };
-  const double off = present_h1(1600, 1300, 1000), crest = present_h1(1200, 1200, 1000);
-  std::cout << "  H1 present: off the high " << fmt_fixed(off, 2) << " m, over the crest " << fmt_fixed(crest, 2) << " m\n";
-  CHECK_NEAR(depth_faulted(*m, 0, 500, 500), off, 0.1);
+  // W1's tops are present depths off the high; the depositional geometry follows by decompaction
+  // (the test's own), flat-topped, lapping onto the rigid high, then compacted again column by column.
+  const double S1 = solid(1000, 1300, 0.5, 0.0005), S2 = solid(1300, 1600, 0.5, 0.0005);
+  const double h2dep = 1600 - base_for(0, S2, 0.5, 0.0005), h1dep = h2dep - base_for(0, S1, 0.5, 0.0005);
+  const double h2c = std::min(h2dep, 1200.0), t2c = 1200 - h2c, t1c = h2c - h1dep;
+  const double z2 = t2c > 0 ? top_for(1200, solid(0, t2c, 0.5, 0.0005), 0.5, 0.0005) : 1200.0;
+  const double crest = top_for(z2, solid(0, t1c, 0.5, 0.0005), 0.5, 0.0005);
+  std::cout << "  H1 present: off the high 1000 m (W1), over the crest " << fmt_fixed(crest, 2) << " m\n";
+  CHECK_NEAR(depth_faulted(*m, 0, 500, 500), 1000, 0.1);
+  CHECK_NEAR(depth_faulted(*m, 1, 500, 500), 1300, 0.1);
   CHECK_NEAR(depth_faulted(*m, 0, 5000, 5000), crest, 0.1);
-  CHECK(off > crest + 10);                                 // drape: the top subsides more off the high
+  CHECK(crest < 1000 - 10);
   CHECK_NEAR(depth_faulted(*m, 2, 5000, 5000), 1200, 0.01);  // the rigid high stays where it is
 }
 
@@ -188,14 +191,14 @@ TEST_CASE("P27 burial history against an independent backstripping") {
   auto m = build_text(drape());
   auto hist = structure_of(*m).burial_history(500, 500);
   REQUIRE(hist.size() == 4);  // B, H2 and H1 at the surface, then the present
-  const double S2 = solid(0, 300, 0.5, 0.0005), S1 = solid(0, 300, 0.5, 0.0005);
+  const double S2 = solid(1300, 1600, 0.5, 0.0005), S1 = solid(1000, 1300, 0.5, 0.0005);
   CHECK_NEAR(hist[0].depth[2], 0, 1e-9);
   CHECK_NEAR(hist[1].depth[2], base_for(0, S2, 0.5, 0.0005), 0.1);
   double z2 = base_for(0, S1, 0.5, 0.0005);
   CHECK_NEAR(hist[2].depth[1], z2, 0.1);
   CHECK_NEAR(hist[2].depth[2], base_for(z2, S2, 0.5, 0.0005), 0.1);
   CHECK(std::isnan(hist[0].depth[0]));
-  CHECK_NEAR(hist[3].depth[0], depth_faulted(*m, 0, 500, 500), 0.1);
+  CHECK_NEAR(hist[3].depth[0], 1000, 0.1);
 }
 
 TEST_CASE("P26/P27 refusals (F24, F25)") {

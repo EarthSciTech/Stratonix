@@ -27,6 +27,8 @@ STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c11);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c12);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c13);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c14);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c15);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c16);
 
 namespace stratonix {
 
@@ -114,7 +116,8 @@ double CheckContext::tolerance(const std::string& key, std::string* source) cons
   const T table[] = {{"thickness_min", &d_.tol_thickness_min, 0.5}, {"crossing", &d_.tol_crossing, 0.01},
                      {"offset_outside_tips", &d_.tol_offset_outside_tips, 0.05}, {"throw", &d_.tol_throw, 0.5},
                      {"wells", &d_.tol_wells, 0.01}, {"unoffset", &d_.tol_unoffset, 0.05},
-                     {"area", &d_.tol_area, 0.01}};
+                     {"area", &d_.tol_area, 0.01}, {"salt_volume", &d_.tol_salt_volume, 0.01},
+                     {"solid_thickness", &d_.tol_solid_thickness, 0.001}};
   for (auto& t : table)
     if (key == t.key) {
       if (t.p->present) {
@@ -646,6 +649,73 @@ class C14 final : public Check {
   }
 };
 
+/// C15: salt volume conserved (STX-TN-08 section 5).
+class C15 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* st = static_cast<const Structure*>(c.model().capability("structure"));
+    if (!st || (!st->salt_parametric() && st->salt_bodies_volume() == 0 && st->salt_net_volume() == 0)) return out;
+    std::string src;
+    const double tol = c.tolerance("salt_volume", &src);
+    auto r = base(c, "C15", "salt volume conserved", "salt");
+    r.unit = "fraction";
+    if (st->salt_parametric()) {
+      r.value = std::fabs(st->salt_net_volume()) / std::max(1.0, st->salt_bodies_volume());
+      r.tolerance = tol;
+      r.tolerance_source = src;
+      r.passed = r.value <= tol;
+      r.detail = "net change " + fmt_fixed(st->salt_net_volume(), 0) + " m3 against the bodies' " + fmt_fixed(st->salt_bodies_volume(), 0) + " m3";
+    } else {
+      r.info = true;
+      r.value = st->salt_net_volume();
+      r.unit = "m3";
+      r.detail = "imported top salt: volume relative to the source layer, reported only";
+    }
+    out.push_back(r);
+    return out;
+  }
+};
+
+/// C16: solid (grain) thickness conserved through compaction and decompaction (STX-TN-08 section 5).
+class C16 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* st = static_cast<const Structure*>(c.model().capability("structure"));
+    if (!st || st->compaction_mode() == 0) return out;
+    std::string src;
+    const double tol = c.tolerance("solid_thickness", &src);
+    const auto& inf = c.model().info();
+    const auto& g = c.grid();
+    const std::size_t step = std::max<std::size_t>(1, g.size() / 2500);  // about 2,500 columns
+    for (std::size_t u = 1; u + 1 < inf.units.size(); ++u) {
+      if (!st->compaction_law(static_cast<int>(u))) continue;
+      double worst = 0;
+      std::size_t n = 0;
+      for (std::size_t k = 0; k < g.size(); k += step) {
+        const double x = g.x(k % g.nx), y = g.y(k / g.nx);
+        const double s = st->solid_thickness(static_cast<int>(u), x, y);
+        if (!(s > 1e-6)) continue;
+        if (st->compaction_mode() == 2) worst = std::max(worst, std::fabs(s - st->depositional_solid(static_cast<int>(u), x, y)) / s);
+        std::vector<double> col(st->horizons());
+        st->z_all(x, y, col.data());
+        const double t = col[u - 1] - col[u];
+        worst = std::max(worst, std::fabs(st->compaction_round_trip(static_cast<int>(u), x, y) - t) / std::max(t, 1e-9));
+        ++n;
+      }
+      auto r = base(c, "C16", "solid thickness conserved through compaction", inf.units[u].name);
+      r.unit = "fraction";
+      r.value = worst;
+      r.tolerance = tol;
+      r.tolerance_source = src;
+      r.passed = worst <= tol;
+      r.detail = std::to_string(n) + " columns; " + (st->compaction_mode() == 2 ? "present against depositional solid thickness, and " : "") +
+                 "decompaction to the surface and back";
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 /// C5: control wells honoured (check wells reported as warnings).
 class C5 final : public Check {
   std::vector<CheckResult> run(CheckContext& c) const override {
@@ -854,6 +924,10 @@ STRATONIX_REGISTER(check_c13, registry::Kind::Check, "C13_thickness_restored", "
                    [] { return std::make_unique<C13>(); })
 STRATONIX_REGISTER(check_c14, registry::Kind::Check, "C14_truncation_order", "1.0.0", "Truncation consistent with age order",
                    [] { return std::make_unique<C14>(); })
+STRATONIX_REGISTER(check_c15, registry::Kind::Check, "C15_salt_volume", "1.0.0", "Salt volume conserved",
+                   [] { return std::make_unique<C15>(); })
+STRATONIX_REGISTER(check_c16, registry::Kind::Check, "C16_solid_thickness", "1.0.0", "Solid thickness conserved through compaction",
+                   [] { return std::make_unique<C16>(); })
 STRATONIX_REGISTER(check_c11, registry::Kind::Check, "C11_fault_system", "1.0.0",
                    "Throw continuous across branch lines and relays", [] { return std::make_unique<C11>(); })
 
@@ -886,6 +960,8 @@ void register_check_plugins() {
   STRATONIX_PLUGIN_ANCHOR(check_c12);
   STRATONIX_PLUGIN_ANCHOR(check_c13);
   STRATONIX_PLUGIN_ANCHOR(check_c14);
+  STRATONIX_PLUGIN_ANCHOR(check_c15);
+  STRATONIX_PLUGIN_ANCHOR(check_c16);
 }
 
 }  // namespace stratonix

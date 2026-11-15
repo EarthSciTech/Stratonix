@@ -342,12 +342,14 @@ Color termination_color(const std::string& kind) {
   if (kind == "onlap") return rgb(0, 90, 200);
   if (kind == "truncation") return rgb(205, 105, 0);
   if (kind == "pinch-out") return rgb(130, 40, 160);
+  if (kind == "salt") return rgb(200, 30, 120);
   return rgb(0, 130, 130);  // clinoform
 }
 std::string termination_label(const std::string& kind) {
   if (kind == "truncation") return "Subcrop (erosional truncation) line";
   if (kind == "onlap") return "Onlap line";
   if (kind == "pinch-out") return "Pinch-out line";
+  if (kind == "salt") return "Salt piercement line";
   return "Clinoform termination line";
 }
 
@@ -572,6 +574,57 @@ Figure map_figure(const FigureContext& c, int h, const repr::FaultedSurface& sur
   if (!c.wells.empty()) es.push_back({"Symbols", "Well", rgb(255, 255, 255), false, none(), 1, 1});
   double ly = legend(f, rx, ry + 190, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
   key_box(f, c, rx, ly, 190);
+  footer(f, c);
+  return f;
+}
+
+Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b) {
+  Figure f(842, 595);
+  const auto& inf = c.model->info();
+  const bool ages = !b.ages.empty();
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - burial history at " + b.location,
+        std::string("Burial depth of each horizon below the depositional surface, from compaction of every unit by its law; ") +
+            (ages ? "time in Ma" : "deposition steps (no horizon ages given)"));
+  const double px = 70, py = 70, pw = 842 - 300, ph = 595 - 140;
+  double tmin = 0, tmax = static_cast<double>(b.depth.size() - 1), dmax = 1;
+  if (ages) { tmin = 1e300; tmax = -1e300; for (double a : b.ages) { tmin = std::min(tmin, a); tmax = std::max(tmax, a); } }
+  for (auto& row : b.depth)
+    for (int h : b.horizons)
+      if (!std::isnan(row[static_cast<std::size_t>(h)])) dmax = std::max(dmax, row[static_cast<std::size_t>(h)]);
+  auto ticks_d = nice_ticks(0, dmax, 6);
+  dmax = std::max(dmax, ticks_d.back());
+  auto X = [&](std::size_t k) {
+    double t = ages ? b.ages[k] : static_cast<double>(k);
+    double u = ages ? (tmax - t) / std::max(1e-9, tmax - tmin) : (t - tmin) / std::max(1e-9, tmax - tmin);  // old on the left
+    return px + u * pw;
+  };
+  auto Y = [&](double dd) { return py + dd / dmax * ph; };
+  f.rect(px, py, pw, ph, none(), kInk, 0.6);
+  for (double t : ticks_d) {
+    f.line({px, Y(t)}, {px + pw, Y(t)}, kGrid, 0.4);
+    f.text({px - 5, Y(t) + 2.5}, fmt_fixed(t, 0), 6.5, Anchor::End, false, kInk);
+  }
+  for (std::size_t k = 0; k < b.depth.size(); ++k) {
+    f.line({X(k), py + ph}, {X(k), py + ph + 3}, kInk, 0.5);
+    f.text({X(k), py + ph + 12}, ages ? fmt_shortest(b.ages[k]) : b.step_labels[k], 6.5, Anchor::Middle, false, kInk);
+  }
+  f.text({px + pw / 2, py + ph + 28}, ages ? "Age (Ma)" : "Horizon at the surface (deposition step)", 7.5, Anchor::Middle, false, kInk);
+  f.text({px - 45, py + ph / 2}, "Burial depth (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  std::vector<LegendEntry> es;
+  for (int h : b.horizons) {
+    std::vector<Pt> pl;
+    for (std::size_t k = 0; k < b.depth.size(); ++k) {
+      double v = b.depth[k][static_cast<std::size_t>(h)];
+      if (!std::isnan(v)) pl.push_back({X(k), Y(v)});
+    }
+    Color col = unit_color(c, static_cast<std::size_t>(h) + 1);
+    Color dark = rgb(static_cast<std::uint8_t>(col.r * 0.6), static_cast<std::uint8_t>(col.g * 0.6), static_cast<std::uint8_t>(col.b * 0.6));
+    if (pl.size() >= 2) f.path(pl, false, none(), dark, 1.3);
+    for (auto& p : pl) f.rect(p.x - 1.5, p.y - 1.5, 3, 3, dark, none());
+    es.push_back({"Horizons", inf.horizons[static_cast<std::size_t>(h)].name, none(), true, dark, 1.3});
+  }
+  double ly = legend(f, 842 - 200, py, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 200, ly, 190);
   footer(f, c);
   return f;
 }
@@ -1030,6 +1083,13 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
     auto fgr = isopach_figure(c, static_cast<int>(u), t, terms[u]);
     out.push_back(write_figure(fgr, folder, figure_basename(c, "isopach", inf.units[u].name), c.model_name + " - " + inf.units[u].name + " isopach",
                                "Isopach (vertical thickness) of " + inf.units[u].name + " per fault block, with its stratal termination lines.",
+                               notes_common));
+  }
+  // Burial history (stage 2D)
+  for (auto& b : c.burial) {
+    auto fgr = burial_figure(c, b);
+    out.push_back(write_figure(fgr, folder, figure_basename(c, "burial", b.location), c.model_name + " - burial history at " + b.location,
+                               "Burial-history curves at " + b.location + ": burial depth of each horizon through the deposition steps.",
                                notes_common));
   }
   // 3D views

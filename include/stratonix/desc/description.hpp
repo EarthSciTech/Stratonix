@@ -56,6 +56,7 @@ struct HorizonDesc {
   std::string surface_input, surface_format, surface_z_is = "depth";
   std::string iso_from, iso_input, iso_format;
   Param iso_thickness;
+  Param age;                       ///< stage 2D: optional age (Ma) for burial-history axes
   std::string iso_trend;           ///< "" (constant), "linear" or "radial" (STX-TN-07 section 3)
   Param iso_gradient, iso_centre;
   bool intended_offset = false;
@@ -71,6 +72,29 @@ struct SeriesDesc {
 };
 /// Growth strata (STX-TN-07 section 4): movement between onset and end.
 struct GrowthDesc { std::string onset, end; bool present() const { return !onset.empty(); } };
+/// Salt (STX-TN-08 section 1).
+struct SaltBodyDesc {
+  std::string type, name;          ///< pillow, diapir or wall
+  Param centre, radius, flank_width, height, withdrawal_width, axis_azimuth, half_length;
+  GrowthDesc growth;
+};
+struct SaltDesc {
+  std::string top, base;
+  Param source_thickness;
+  std::vector<SaltBodyDesc> bodies;
+  bool present() const { return !top.empty(); }
+};
+/// Compaction (STX-TN-08 section 3).
+struct CompactionUnitDesc {
+  std::string unit, law;           ///< exponential or table
+  Param surface_porosity, decay, table_depths, table_porosity;
+};
+struct CompactionDesc {
+  std::string geometry;            ///< present or depositional ("" = no compaction)
+  Param surface_depth;
+  std::vector<CompactionUnitDesc> units;
+  bool present() const { return !geometry.empty(); }
+};
 /// A unit between consecutive horizons; top "model_top" / base "model_base" name the units above
 /// the first and below the last horizon.
 struct UnitDesc { std::string name, top, base, role, color, label; };
@@ -183,6 +207,8 @@ struct Description {
   std::vector<HorizonDesc> horizons;
   std::vector<UnitDesc> units;
   std::vector<SeriesDesc> series;  ///< empty: one conformable series
+  CompactionDesc compaction;       ///< stage 2D
+  SaltDesc salt;                   ///< stage 2D
   std::string above_top_name, below_base_name;
   std::string regional_type = "flat";
   Param regional_dip, regional_dip_azimuth;
@@ -193,7 +219,8 @@ struct Description {
   std::string frame_well;
   Param frame_point;
   // checks
-  Param tol_thickness_min, tol_crossing, tol_offset_outside_tips, tol_throw, tol_wells, tol_unoffset, tol_rollover, tol_area;
+  Param tol_thickness_min, tol_crossing, tol_offset_outside_tips, tol_throw, tol_wells, tol_unoffset, tol_rollover, tol_area,
+      tol_salt_volume, tol_solid_thickness;
   Param scaling_min_ratio, scaling_max_ratio;  ///< checks.fault_scaling (C10)
   std::string closure_horizon;
   Param closure_faults_seal, target_closure, target_area, target_spill_depth, target_tolerance;

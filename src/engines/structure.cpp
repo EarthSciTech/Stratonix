@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "stratonix/core/error.hpp"
+#include "stratonix/core/roots.hpp"
 #include "stratonix/core/util.hpp"
 #include "stratonix/engines/wells.hpp"
 
@@ -128,6 +129,15 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
   trend_cx_.assign(nh, 0.0);
   trend_cy_.assign(nh, 0.0);
   term_.assign(nh + 1, std::string());
+  for (auto& hd : d.horizons) {
+    hname_.push_back(hd.name);
+    hage_.push_back(hd.age.present ? hd.age.si() : kNaN);
+  }
+  law_.assign(nh + 1, 0);
+  phi0_.assign(nh + 1, 0.0);
+  decay_.assign(nh + 1, 0.0);
+  tz_.assign(nh + 1, {});
+  tp_.assign(nh + 1, {});
 
   // Reference location.
   const desc::WellDesc* rw = d.ref_well.empty() ? nullptr : d.well(d.ref_well);
@@ -171,6 +181,84 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
       trend_a_[h] = hd.iso_gradient.si();
       trend_cx_[h] = hd.iso_centre.si(0);
       trend_cy_[h] = hd.iso_centre.si(1);
+    }
+  }
+  // Salt (STX-TN-08 section 1).
+  if (d.salt.present()) {
+    salt_top_ = d.horizon_index(d.salt.top);
+    salt_base_ = d.horizon_index(d.salt.base);
+    salt_t0_ = d.salt.source_thickness.si();
+    salt_imported_ = kind_[static_cast<std::size_t>(salt_top_)] == Kind::Surface;
+    if (!salt_imported_) kind_[static_cast<std::size_t>(salt_top_)] = Kind::Salt;
+    for (auto& bd : d.salt.bodies) {
+      SaltBody b;
+      b.name = bd.name;
+      b.type = bd.type == "pillow" ? 0 : bd.type == "diapir" ? 1 : 2;
+      b.cx = bd.centre.si(0);
+      b.cy = bd.centre.si(1);
+      if (b.type == 2) {
+        b.ax = std::sin(bd.axis_azimuth.si());
+        b.ay = std::cos(bd.axis_azimuth.si());
+        b.L = bd.half_length.si();
+      }
+      b.R = bd.radius.si();
+      b.f = bd.flank_width.present ? bd.flank_width.si() : 1.0;
+      b.A = bd.height.si();
+      b.W = bd.withdrawal_width.si();
+      // Volume of a distance-to-segment field: 2L * 2 int f(d) dd + 2 pi int f(d) d dd.
+      auto volume = [&](const std::function<double(double)>& fn) {
+        const double dmax = b.R + b.W + 20 * b.f;
+        const int n = 40000;
+        const double h = dmax / n;
+        double s1 = 0, s2 = 0;
+        for (int i = 0; i < n; ++i) {
+          double dd = (i + 0.5) * h, v = fn(dd);
+          s1 += v * h;
+          s2 += v * dd * h;
+        }
+        return 4 * b.L * s1 + 2 * kPi * s2;
+      };
+      const double need = b.A * volume([&](double dd) { return b.shape(dd); });
+      auto withdrawn = [&](double a) { return volume([&](double dd) { return std::min(salt_t0_, a * b.ring(dd)); }); };
+      const double full = withdrawn(1e12);
+      if (full < need * (1 - 1e-9))
+        throw Error(ErrorCode::Build, "salt body " + b.name + " (rule F24): its withdrawal ring can supply at most " + fmt_fixed(full, 0) +
+                                          " m3 of salt, less than the body's " + fmt_fixed(need, 0) +
+                                          " m3; widen withdrawal_width or lower the height", "structure.salt.bodies");
+      double lo = 0, hi = 1;
+      while (withdrawn(hi) < need) hi *= 2;
+      for (int it = 0; it < 100; ++it) {
+        double m = 0.5 * (lo + hi);
+        (withdrawn(m) < need ? lo : hi) = m;
+      }
+      b.a = 0.5 * (lo + hi);
+      salt_vol_ += need;
+      log.value("salt." + b.name + ".volume_m3", fmt_fixed(need, 0));
+      log.value("salt." + b.name + ".withdrawal_amplitude", fmt_fixed(b.a, 3));
+      if (b.a > salt_t0_) log.note("salt body " + b.name + ": its withdrawal ring welds (amplitude " + fmt_fixed(b.a, 1) + " m > source " +
+                                   fmt_fixed(salt_t0_, 1) + " m)");
+      salt_.push_back(std::move(b));
+    }
+  }
+  // Compaction (STX-TN-08 section 3).
+  if (d.compaction.present()) {
+    comp_mode_ = d.compaction.geometry == "depositional" ? 2 : 1;
+    surface_depth_ = d.compaction.surface_depth.si();
+    for (auto& cu : d.compaction.units) {
+      const auto& ud = d.units[static_cast<std::size_t>(d.unit_index(cu.unit))];
+      const std::size_t u = static_cast<std::size_t>(d.horizon_index(ud.base));
+      if (cu.law == "exponential") {
+        law_[u] = 1;
+        phi0_[u] = cu.surface_porosity.si();
+        decay_[u] = cu.decay.si();
+      } else {
+        law_[u] = 2;
+        for (std::size_t q = 0; q < cu.table_depths.values.size(); ++q) {
+          tz_[u].push_back(cu.table_depths.si(q));
+          tp_[u].push_back(cu.table_porosity.si(q));
+        }
+      }
+      comp_base_ = std::max(comp_base_, static_cast<int>(u));
     }
   }
   // Stratigraphic series (STX-TN-07 section 1), youngest first.
@@ -218,6 +306,10 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
   for (std::size_t h = 0; h < nh; ++h) {
     if (!std::isnan(ref_depth_[h])) continue;
     auto& hd = d.horizons[h];
+    if (kind_[h] == Kind::Salt) {
+      if (!std::isnan(ref_depth_[static_cast<std::size_t>(salt_base_)])) ref_depth_[h] = ref_depth_[static_cast<std::size_t>(salt_base_)] - salt_t(rx, ry, nullptr);
+      continue;
+    }
     if (kind_[h] == Kind::Clinoform) {
       std::size_t b = series_[static_cast<std::size_t>(hseries_[h])].last + 1;
       if (b < nh && !std::isnan(ref_depth_[b])) ref_depth_[h] = ref_depth_[b] - clino_offset(h, rx, ry);
@@ -235,6 +327,26 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
   for (std::size_t h = 0; h < nh; ++h)
     if (std::isnan(ref_depth_[h]))
       throw Error(ErrorCode::Build, "cannot determine the reference depth of horizon " + d.horizons[h].name, "stratigraphy.horizons");
+
+  // Depositional compaction (STX-TN-08 section 3): the well tops are present depths. Convert the
+  // reference depths of the compacting column to depositional ones by decompacting each unit to
+  // the surface, stacked from the rigid base, so the compacted reference column honours the tops.
+  if (comp_mode_ == 2 && comp_base_ > 0) {
+    const std::vector<double> pres = ref_depth_;
+    for (std::size_t u = static_cast<std::size_t>(comp_base_); u >= 1; --u) {
+      double t_dep = pres[u] - pres[u - 1];
+      if (law_[u] && t_dep > 0)
+        t_dep = base_for(static_cast<int>(u), 0.0, solid(static_cast<int>(u), pres[u - 1] - surface_depth_, pres[u] - surface_depth_));
+      ref_depth_[u - 1] = ref_depth_[u] - std::max(0.0, t_dep);
+      log.value(d.horizons[u - 1].name + ".depositional_reference_depth", fmt_fixed(ref_depth_[u - 1], 3));
+    }
+  }
+  for (std::size_t k = 0; k < salt_.size(); ++k) {
+    const auto& g = d.salt.bodies[k].growth;
+    const int on = g.present() ? d.horizon_index(g.onset) : static_cast<int>(nh), en = g.present() ? d.horizon_index(g.end) : -1;
+    for (std::size_t h = 0; h < nh; ++h) salt_[k].fh.push_back(g.present() ? growth_fraction(h, on, en) : 1.0);
+  }
+  column_ = has_rel_ || salt_top_ >= 0 || comp_mode_ == 2;
 
   // Primitives with relief interpolated from anchors in reference depth.
   for (auto& pd : d.primitives) {
@@ -341,7 +453,13 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
         Vec3 at = wp.at_elevation(-p.si());
         xs.push_back(at.x);
         ys.push_back(at.y);
-        rs.push_back(-p.si() - z_uncorrected(h, at.x, at.y));
+        if (column_) {  // against the effective horizons (salt response, relations, compaction)
+          std::vector<double> col(nh);
+          z_all(at.x, at.y, col.data());
+          rs.push_back(-p.si() - col[h]);
+        } else {
+          rs.push_back(-p.si() - z_uncorrected(h, at.x, at.y));
+        }
       }
     }
     double maxr = 0;
@@ -363,7 +481,8 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
              fmt_fixed(maxr, 2) + " m at the wells, range " + fmt_fixed(corr_range_, 0) + " m)");
     log.value("correction_max_m." + d.horizons[h].name, fmt_fixed(maxr, 4));
   }
-  if (has_rel_ || std::any_of(trend_.begin(), trend_.end(), [](int t) { return t != 0; })) report_terminations(d, log);
+  if (column_ || std::any_of(trend_.begin(), trend_.end(), [](int t) { return t != 0; })) report_terminations(d, log);
+  report_salt_and_compaction(d, log);
 }
 
 void Structure::add_copies(const desc::PrimitiveDesc& pd, FoldPrimitive p, const desc::Description& d, BuildLog& log) {
@@ -490,7 +609,7 @@ double Structure::missing_section(int u, double x, double y) const {
 std::string Structure::termination_at(int u, double x0, double y0, double radius) const {
   const std::size_t nh = kind_.size();
   if (u < 1 || static_cast<std::size_t>(u) >= nh) return "";
-  static const char* names[] = {"", "clinoform", "pinch-out", "onlap", "truncation"};
+  static const char* names[] = {"", "clinoform", "pinch-out", "onlap", "truncation", "salt"};
   std::vector<double> raw(nh), eff(nh);
   std::vector<unsigned char> fl(nh);
   const std::size_t a = static_cast<std::size_t>(u) - 1, b = static_cast<std::size_t>(u);
@@ -501,7 +620,8 @@ std::string Structure::termination_at(int u, double x0, double y0, double radius
     z_detail(x, y, raw.data(), eff.data(), fl.data());
     if (eff[a] - eff[b] >= 0.01) continue;
     int k = 0;
-    if ((fl[a] | fl[b]) & 1) k = 4;
+    if ((fl[a] | fl[b]) & 4) k = 5;
+    else if ((fl[a] | fl[b]) & 1) k = 4;
     else if ((fl[a] | fl[b]) & 2) k = 3;
     else if (trend_clamped(b, x, y)) k = 2;
     else if (kind_[a] == Kind::Clinoform || kind_[b] == Kind::Clinoform) k = 1;
@@ -527,7 +647,8 @@ void Structure::report_terminations(const desc::Description& d, BuildLog& log) {
         const std::size_t a = u - 1, b = u;
         if (eff[a] - eff[b] < 0.01) {
           unsigned k = 0;
-          if ((fl[a] | fl[b]) & 1) k = 8;
+          if ((fl[a] | fl[b]) & 4) k = 16;
+          else if ((fl[a] | fl[b]) & 1) k = 8;
           else if ((fl[a] | fl[b]) & 2) k = 4;
           else if (trend_clamped(b, x, y)) k = 2;
           else if (kind_[a] == Kind::Clinoform || kind_[b] == Kind::Clinoform) k = 1;
@@ -541,7 +662,7 @@ void Structure::report_terminations(const desc::Description& d, BuildLog& log) {
     }
   for (std::size_t u = 1; u < nh; ++u) {
     term_[u].clear();
-    for (auto [bit, nm] : {std::pair<unsigned, const char*>{8, "truncation"}, {4, "onlap"}, {2, "pinch-out"}, {1, "clinoform"}})
+    for (auto [bit, nm] : {std::pair<unsigned, const char*>{16, "salt"}, {8, "truncation"}, {4, "onlap"}, {2, "pinch-out"}, {1, "clinoform"}})
       if (kind[u] & bit) term_[u] += (term_[u].empty() ? "" : ", ") + std::string(nm);
     if (kind[u]) log.value("unit." + d.horizons[u - 1].name + "_" + d.horizons[u].name + ".termination", term_[u]);
     if (miss[u] > 0.005)
@@ -571,12 +692,244 @@ void Structure::report_terminations(const desc::Description& d, BuildLog& log) {
     }
 }
 
-// Stage 2D (STX-TN-08): implemented in Prompts 26 and 27.
-double Structure::salt_thickness(double, double) const { return 0.0; }
-double Structure::solid_thickness(int, double, double) const { return kNaN; }
-double Structure::decompacted_thickness(int, double, double, double) const { return kNaN; }
-double Structure::porosity(int, double, double) const { return kNaN; }
-std::vector<Structure::BurialStep> Structure::burial_history(double, double) const { return {}; }
+// ---- stage 2D: salt (STX-TN-08 sections 1 and 2) ----------------------------------------------
+double Structure::SaltBody::dist(double x, double y) const {
+  double dx = x - cx, dy = y - cy;
+  if (L <= 0) return std::hypot(dx, dy);
+  double u = std::clamp(dx * ax + dy * ay, -L, L);
+  return std::hypot(dx - u * ax, dy - u * ay);
+}
+double Structure::SaltBody::shape(double d) const {
+  if (type == 0) return d < R ? 0.5 * (1 + std::cos(kPi * d / R)) : 0.0;
+  return (1 - std::tanh((d - R) / f)) / (1 - std::tanh(-R / f));
+}
+double Structure::SaltBody::ring(double d) const {
+  if (d <= R || d >= R + W) return 0.0;
+  double sn = std::sin(kPi * (d - R) / W);
+  return sn * sn;
+}
+
+double Structure::salt_t(double x, double y, double* contrib) const {
+  double t = salt_t0_;
+  for (std::size_t k = 0; k < salt_.size(); ++k) {
+    double c = salt_[k].contribution(x, y, salt_t0_);
+    if (contrib) contrib[k] = c;
+    t += c;
+  }
+  return std::max(0.0, t);
+}
+
+double Structure::salt_thickness(double x, double y) const {
+  if (salt_top_ < 0) return 0.0;
+  if (salt_imported_) return z_raw(static_cast<std::size_t>(salt_top_), x, y) - z_raw(static_cast<std::size_t>(salt_base_), x, y);
+  return salt_t(x, y, nullptr);
+}
+
+void Structure::column_pass(double x, double y, double* z, unsigned char* flags) const {
+  const std::size_t nh = kind_.size();
+  // 1. The overburden's response to the salt below it (section 2).
+  if (salt_top_ >= 0) {
+    const std::size_t ts = static_cast<std::size_t>(salt_top_), bs = static_cast<std::size_t>(salt_base_);
+    if (salt_imported_) {
+      const double c = z[ts] - z[bs] - salt_t0_;
+      for (std::size_t h = 0; h < ts; ++h) z[h] += c;
+    } else {
+      double cs[64];
+      std::vector<double> big;
+      double* c = cs;
+      if (salt_.size() > 64) { big.resize(salt_.size()); c = big.data(); }
+      const double t = salt_t(x, y, c);
+      for (std::size_t h = 0; h < ts; ++h)
+        for (std::size_t k = 0; k < salt_.size(); ++k) z[h] += salt_[k].fh[h] * c[k];
+      z[ts] = z[bs] + t;
+    }
+  }
+  // 2. Series relations (STX-TN-07).
+  if (has_rel_) apply_relations(x, y, z, flags, false);
+  // 3. Overburden at or above top salt: piercement; younger at or above older.
+  if (salt_top_ >= 0)
+    for (std::size_t h = static_cast<std::size_t>(salt_top_); h-- > 0;)
+      if (z[h] < z[h + 1]) { z[h] = z[h + 1]; if (flags) flags[h] |= 4; }
+  // 4. Compaction of the depositional geometry, from the rigid base upwards (section 3).
+  if (comp_mode_ == 2 && comp_base_ > 0) {
+    const std::size_t cb = static_cast<std::size_t>(comp_base_);
+    double prev_desc = z[cb];  // described elevation of the base of the unit being stacked
+    for (std::size_t u = cb; u >= 1; --u) {
+      const double desc_top = z[u - 1], t_dep = std::max(0.0, desc_top - prev_desc);
+      double ztop;
+      if (law_[u]) {
+        const double S = solid(static_cast<int>(u), 0.0, t_dep);
+        const double zb = -z[u] - surface_depth_;
+        ztop = -(top_for(static_cast<int>(u), zb, S) + surface_depth_);
+      } else {
+        ztop = z[u] + t_dep;
+      }
+      prev_desc = desc_top;
+      z[u - 1] = ztop;
+    }
+  }
+  (void)nh;
+}
+
+// ---- stage 2D: compaction (STX-TN-08 sections 3 and 4) --------------------------------------
+double Structure::phi(int u, double zb) const {
+  const std::size_t k = static_cast<std::size_t>(u);
+  zb = std::max(0.0, zb);
+  if (law_[k] == 1) return phi0_[k] * std::exp(-decay_[k] * zb);
+  if (law_[k] == 2) {
+    const auto& tz = tz_[k];
+    const auto& tp = tp_[k];
+    if (zb <= tz.front()) return tp.front();
+    if (zb >= tz.back()) return tp.back();
+    std::size_t i = static_cast<std::size_t>(std::upper_bound(tz.begin(), tz.end(), zb) - tz.begin()) - 1;
+    return tp[i] + (tp[i + 1] - tp[i]) * (zb - tz[i]) / (tz[i + 1] - tz[i]);
+  }
+  return 0.0;
+}
+
+double Structure::solid(int u, double z1, double z2) const {
+  const std::size_t k = static_cast<std::size_t>(u);
+  if (law_[k] == 0 || z2 <= z1) return z2 - z1;
+  if (law_[k] == 1) {
+    // depths above the surface (z < 0) hold the surface porosity
+    double s = 0, a = z1, b = z2;
+    if (a < 0) { double e = std::min(b, 0.0); s += (e - a) * (1 - phi0_[k]); a = e; }
+    if (b > a) s += (b - a) - phi0_[k] / decay_[k] * (std::exp(-decay_[k] * a) - std::exp(-decay_[k] * b));
+    return s;
+  }
+  // table: integrate the piecewise-linear porosity exactly between breakpoints
+  std::vector<double> cuts{z1};
+  for (double t : tz_[k])
+    if (t > z1 && t < z2) cuts.push_back(t);
+  if (0 > z1 && 0 < z2) cuts.push_back(0);
+  std::sort(cuts.begin(), cuts.end());
+  cuts.push_back(z2);
+  double por = 0;
+  for (std::size_t i = 0; i + 1 < cuts.size(); ++i) por += 0.5 * (phi(u, cuts[i]) + phi(u, cuts[i + 1])) * (cuts[i + 1] - cuts[i]);
+  return (z2 - z1) - por;
+}
+
+double Structure::base_for(int u, double z1, double S) const {
+  if (S <= 0) return z1;
+  if (law_[static_cast<std::size_t>(u)] == 0) return z1 + S;
+  auto g = [&](double z2) { return solid(u, z1, z2) - S; };
+  double hi = z1 + S + 1;
+  while (g(hi) < 0) hi = z1 + 2 * (hi - z1);
+  return illinois(g, z1, hi, g(z1), g(hi), 1e-9, 0, 200);
+}
+
+double Structure::top_for(int u, double z2, double S) const {
+  if (S <= 0) return z2;
+  if (law_[static_cast<std::size_t>(u)] == 0) return z2 - S;
+  auto g = [&](double z1) { return solid(u, z1, z2) - S; };  // decreasing in z1
+  double lo = z2 - S - 1;
+  while (g(lo) < 0) lo = z2 - 2 * (z2 - lo);
+  return illinois(g, lo, z2, g(lo), g(z2), 1e-9, 0, 200);
+}
+
+double Structure::solid_thickness(int u, double x, double y) const {
+  const std::size_t nh = kind_.size();
+  if (u < 1 || static_cast<std::size_t>(u) >= nh) return kNaN;
+  std::vector<double> z(nh);
+  z_all(x, y, z.data());
+  return solid(u, -z[static_cast<std::size_t>(u) - 1] - surface_depth_, -z[static_cast<std::size_t>(u)] - surface_depth_);
+}
+
+double Structure::depositional_solid(int u, double x, double y) const {
+  const std::size_t nh = kind_.size();
+  if (u < 1 || static_cast<std::size_t>(u) >= nh || comp_mode_ != 2) return kNaN;
+  std::vector<double> z(nh);
+  z_all_raw(x, y, z.data());
+  // the described column: every pass but compaction
+  const int keep = comp_mode_;
+  const_cast<Structure*>(this)->comp_mode_ = 0;
+  column_pass(x, y, z.data(), nullptr);
+  const_cast<Structure*>(this)->comp_mode_ = keep;
+  return solid(u, 0.0, std::max(0.0, z[static_cast<std::size_t>(u) - 1] - z[static_cast<std::size_t>(u)]));
+}
+
+double Structure::decompacted_thickness(int u, double x, double y, double top_burial) const {
+  double S = solid_thickness(u, x, y);
+  if (std::isnan(S)) return kNaN;
+  return base_for(u, top_burial, S) - top_burial;
+}
+
+double Structure::compaction_round_trip(int u, double x, double y) const {
+  const std::size_t nh = kind_.size();
+  std::vector<double> z(nh);
+  z_all(x, y, z.data());
+  const double z1 = -z[static_cast<std::size_t>(u) - 1] - surface_depth_, z2 = -z[static_cast<std::size_t>(u)] - surface_depth_;
+  const double S = solid(u, z1, z2), t0 = base_for(u, 0.0, S);
+  return base_for(u, z1, solid(u, 0.0, t0)) - z1;
+}
+
+double Structure::porosity(int u, double x, double y) const {
+  const std::size_t nh = kind_.size();
+  if (u < 1 || static_cast<std::size_t>(u) >= nh) return kNaN;
+  std::vector<double> z(nh);
+  z_all(x, y, z.data());
+  const double t = z[static_cast<std::size_t>(u) - 1] - z[static_cast<std::size_t>(u)];
+  if (t <= 1e-9) return 0.0;
+  return (t - solid_thickness(u, x, y)) / t;
+}
+
+std::vector<Structure::BurialStep> Structure::burial_history(double x, double y) const {
+  std::vector<BurialStep> out;
+  if (comp_mode_ == 0 || comp_base_ < 0) return out;
+  const std::size_t nh = kind_.size(), cb = static_cast<std::size_t>(comp_base_);
+  std::vector<double> z(nh);
+  z_all(x, y, z.data());
+  std::vector<double> S(nh, 0.0);
+  for (std::size_t u = 1; u <= cb; ++u)
+    S[u] = solid(static_cast<int>(u), -z[u - 1] - surface_depth_, -z[u] - surface_depth_);
+  for (std::size_t j = cb + 1; j-- > 0;) {
+    BurialStep st;
+    st.label = hname_[j];
+    st.age = hage_[j];
+    st.depth.assign(nh, kNaN);
+    st.depth[j] = 0;
+    for (std::size_t u = j + 1; u <= cb; ++u) st.depth[u] = base_for(static_cast<int>(u), st.depth[u - 1], S[u]);
+    out.push_back(std::move(st));
+  }
+  BurialStep now;
+  now.label = "present";
+  now.age = 0;
+  now.depth.assign(nh, kNaN);
+  for (std::size_t h = 0; h <= cb; ++h) now.depth[h] = -z[h] - surface_depth_;
+  out.push_back(std::move(now));
+  return out;
+}
+
+void Structure::report_salt_and_compaction(const desc::Description& d, BuildLog& log) {
+  const Domain dom = d.domain();
+  if (salt_top_ >= 0) {
+    // salt balance on a 25 m (or finer than 400 x 400) grid over the domain
+    const int nx = std::max(2, static_cast<int>(std::min(400.0, dom.sx / 25))), ny = std::max(2, static_cast<int>(std::min(400.0, dom.sy / 25)));
+    const double dx = dom.sx / nx, dy = dom.sy / ny;
+    double net = 0, weld = 0;
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const double x = dom.x0 + (i + 0.5) * dx, y = dom.y0 + (j + 0.5) * dy, t = salt_thickness(x, y);
+        net += (t - salt_t0_) * dx * dy;
+        if (t <= 1e-9) weld += dx * dy;
+      }
+    salt_net_ = net;
+    weld_area_ = weld;
+    log.value("salt.net_volume_change_m3", fmt_fixed(net, 0));
+    log.value("salt.weld_area", fmt_fixed(weld, 0));
+    if (salt_imported_) log.note("salt: top salt imported; its volume relative to the source layer is reported, not balanced");
+  }
+  if (comp_mode_ != 0) {
+    const desc::WellDesc* rw = d.ref_well.empty() ? nullptr : d.well(d.ref_well);
+    const double rx = rw ? rw->head.si(0) : reg_x0_, ry = rw ? rw->head.si(1) : reg_y0_;
+    for (std::size_t u = 1; u < law_.size() && u < kind_.size(); ++u)
+      if (law_[u]) {
+        const std::string key = "unit." + hname_[u - 1] + "_" + hname_[u];
+        log.value(key + ".porosity_at_reference", fmt_fixed(porosity(static_cast<int>(u), rx, ry), 4));
+        log.value(key + ".solid_thickness_at_reference", fmt_fixed(solid_thickness(static_cast<int>(u), rx, ry), 3));
+      }
+  }
+}
 
 double Structure::regional(double x, double y) const { return reg_gx_ * (x - reg_x0_) + reg_gy_ * (y - reg_y0_); }
 
@@ -618,6 +971,7 @@ double Structure::z_uncorrected(std::size_t h, double x, double y) const {
     case Kind::Surface: return surf_sign_[h] * surf_[h]->sample_clamped(x, y);
     case Kind::Isochore: return z_raw(static_cast<std::size_t>(iso_from_[h]), x, y) - iso_thickness(h, x, y, true);
     case Kind::Clinoform: return z_raw(series_[static_cast<std::size_t>(hseries_[h])].last + 1, x, y) + clino_offset(h, x, y);
+    case Kind::Salt: return z_raw(static_cast<std::size_t>(salt_base_), x, y) + salt_t(x, y, nullptr);
   }
   return kNaN;
 }
@@ -645,11 +999,11 @@ void Structure::z_detail(double x, double y, double* raw, double* eff, unsigned 
   const std::size_t nh = kind_.size();
   z_all_raw(x, y, raw);
   for (std::size_t h = 0; h < nh; ++h) { eff[h] = raw[h]; flags[h] = 0; }
-  if (has_rel_) apply_relations(x, y, eff, flags, false);
+  if (column_) column_pass(x, y, eff, flags);
 }
 
 bool Structure::absent(std::size_t h, double x, double y) const {
-  if (!has_rel_) return false;
+  if (!column_) return false;
   const std::size_t nh = kind_.size();
   std::vector<double> raw(nh), eff(nh);
   std::vector<unsigned char> fl(nh);
@@ -673,7 +1027,7 @@ double Structure::z_raw(std::size_t h, double x, double y) const {
 }
 
 double Structure::z(std::size_t h, double x, double y) const {
-  if (!has_rel_) return z_raw(h, x, y);
+  if (!column_) return z_raw(h, x, y);
   double zs[64];
   std::vector<double> big;
   double* zz = zs;
@@ -684,7 +1038,7 @@ double Structure::z(std::size_t h, double x, double y) const {
 
 void Structure::z_all(double x, double y, double* out) const {
   z_all_raw(x, y, out);
-  if (has_rel_) apply_relations(x, y, out, nullptr, false);
+  if (column_) column_pass(x, y, out, nullptr);
 }
 
 void Structure::z_all_raw(double x, double y, double* out) const {

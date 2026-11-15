@@ -335,6 +335,9 @@
               },
               "intended_offset": {
                 "type": "boolean"
+              },
+              "age": {
+                "$ref": "#/$defs/param"
               }
             }
           }
@@ -458,6 +461,61 @@
                     "$ref": "#/$defs/param"
                   },
                   "progradation": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "compaction": {
+          "type": "object",
+          "required": [
+            "geometry",
+            "surface_depth",
+            "units"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "geometry": {
+              "enum": [
+                "present",
+                "depositional"
+              ]
+            },
+            "surface_depth": {
+              "$ref": "#/$defs/param"
+            },
+            "units": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "unit",
+                  "law"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "unit": {
+                    "type": "string"
+                  },
+                  "law": {
+                    "enum": [
+                      "exponential",
+                      "table"
+                    ]
+                  },
+                  "surface_porosity": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "decay": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "table_depths": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "table_porosity": {
                     "$ref": "#/$defs/param"
                   }
                 }
@@ -622,6 +680,90 @@
                   },
                   "end": {
                     "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "salt": {
+          "type": "object",
+          "required": [
+            "top",
+            "base",
+            "source_thickness"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "top": {
+              "type": "string"
+            },
+            "base": {
+              "type": "string"
+            },
+            "source_thickness": {
+              "$ref": "#/$defs/param"
+            },
+            "bodies": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "name",
+                  "centre",
+                  "radius",
+                  "height",
+                  "withdrawal_width"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "pillow",
+                      "diapir",
+                      "wall"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "centre": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "radius": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "flank_width": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "height": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "withdrawal_width": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "axis_azimuth": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "half_length": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "growth": {
+                    "type": "object",
+                    "required": [
+                      "onset",
+                      "end"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "onset": {
+                        "type": "string"
+                      },
+                      "end": {
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
@@ -958,6 +1100,12 @@
               "$ref": "#/$defs/param"
             },
             "area": {
+              "$ref": "#/$defs/param"
+            },
+            "salt_volume": {
+              "$ref": "#/$defs/param"
+            },
+            "solid_thickness": {
               "$ref": "#/$defs/param"
             }
           }

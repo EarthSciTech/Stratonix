@@ -1,0 +1,79 @@
+# Worked example 18: a salt diapir with crestal faults. A 900 m diapir rose from a 300 m source layer,
+# arching its pre-kinematic roof (H3) and piercing the syn-kinematic units, which lap onto the roof; a
+# crestal graben of two normal faults cuts the roof (stage 2D). DESIGN model; every parameter carries
+# value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: example_salt_diapir, version: "1.0.0", status: DESIGN,
+        title: "Salt diapir with crestal faults"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[800, 800] m | user_instruction | worked example: control well, far from the diapir"
+    tops:
+      H1: "600 m | user_instruction | worked example"
+      H2: "900 m | user_instruction | worked example"
+      H3: "1200 m | user_instruction | worked example"
+      BS: "1800 m | user_instruction | worked example"
+      H6: "2100 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[6500, 5000] m | user_instruction | worked example: planned well on the diapir flank"
+    total_depth: "2300 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3, intended_offset: true}, {name: TS, intended_offset: true}, {name: BS}, {name: H6}]
+  units:
+    - {name: Post_kinematic, top: H1, base: H2}
+    - {name: Syn_kinematic, top: H2, base: H3}
+    - {name: Roof, top: H3, base: TS}
+    - {name: Salt, top: TS, base: BS}
+    - {name: Sub_salt, top: BS, base: H6}
+structure:
+  regional: {type: flat}
+  salt:
+    top: TS
+    base: BS
+    source_thickness: "300 m | user_instruction | worked example"
+    bodies:
+      - {type: diapir, name: D1, centre: "[5000, 5000] m | user_instruction | worked example", radius: "800 m | user_instruction | worked example", flank_width: "150 m | user_instruction | worked example", height: "900 m | user_instruction | worked example",
+         withdrawal_width: "3500 m | user_instruction | worked example", growth: {onset: H3, end: H1}}
+faults:
+  - name: FW
+    age: "1 ordinal | user_instruction | worked example"
+    geometry: {type: planar, reference_point: "[4650, 5000] m | user_instruction | worked example", reference_depth: "400 m | user_instruction | worked example", strike: "0 deg | user_instruction | worked example: dips east, towards the crest", dip: "60 deg | user_instruction | worked example"}
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: depth, depth: "650 m | user_instruction | worked example: in the diapir's top"}
+      length: "3000 m | user_instruction | worked example"
+    throw:
+      max: "60 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+  - name: FE
+    age: "2 ordinal | user_instruction | worked example"
+    geometry: {type: planar, reference_point: "[5350, 5000] m | user_instruction | worked example", reference_depth: "400 m | user_instruction | worked example", strike: "180 deg | user_instruction | worked example: dips west, towards the crest", dip: "60 deg | user_instruction | worked example"}
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: depth, depth: "650 m | user_instruction | worked example: in the diapir's top"}
+      length: "3000 m | user_instruction | worked example"
+    throw:
+      max: "60 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[200, 5000], [9800, 5000]] m | user_instruction | worked example: across the diapir and graben"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]
