@@ -16,6 +16,7 @@ stx_layer(stratonix_engines 3)
 # ---- Layer 4: representations --------------------------------------------------------------
 add_library(stratonix_repr STATIC
   src/repr/surfaces.cpp
+  src/repr/faultrock.cpp
   src/repr/faults_wells.cpp
   src/repr/closure.cpp)
 target_link_libraries(stratonix_repr PUBLIC stratonix_model)

@@ -154,6 +154,13 @@ has its own version (`stratonix_schema`).
   (line-length and area balance per section, a warning).
 - Worked example `rift_inversion_history.yaml`.
 
+- Stage 2F specification (technical note STX-TN-10): juxtaposition (Allan) diagrams, shale gouge
+  ratio, clay smear potential, fault-zone thickness, seal capacity from a labelled calibration,
+  stress from a regime or a tensor, slip and dilation tendency, pore-pressure change to
+  reactivation, curvature and fracture trends; checks C19 and C20; rules F27 and F28. New
+  interfaces, additive: `repr::fault_rock_at`, `repr::curvature` (repr/faultrock.hpp),
+  `fault_rock_input`, `stress_input`.
+
 ### Changed
 - The well-correction field measures control-well residuals against the effective horizons
   (after series relations, the salt response and compaction) when these are in force.
@@ -170,7 +177,7 @@ has its own version (`stratonix_schema`).
   unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
   and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
-  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`); stage 2E (`test_v2_history`).
+  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`); stage 2E (`test_v2_history`); stage 2F (`test_v2_faultrock`), expected to fail until its features are built.
 
 ## [2026.1] - 2026-11-14 - First public release
 

@@ -533,4 +533,12 @@ BuildOutcome run_state(const std::filesystem::path& description, const std::file
   return o;
 }
 
+// Stage 2F (STX-TN-10): implemented in Prompts 32 and 33.
+repr::FaultRockInput fault_rock_input(const desc::Description&, const Model& m) {
+  repr::FaultRockInput in;
+  in.unit_clay.assign(m.info().units.size(), kNaN);
+  return in;
+}
+repr::StressInput stress_input(const desc::Description&) { return {}; }
+
 }  // namespace stratonix

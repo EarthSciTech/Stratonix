@@ -7,6 +7,7 @@
 
 #include "stratonix/desc/description.hpp"
 #include "stratonix/engines/builder.hpp"
+#include "stratonix/repr/faultrock.hpp"
 
 namespace stratonix {
 
@@ -55,6 +56,9 @@ BuildOutcome run_section(const std::filesystem::path& description, const std::fi
 /// (stage 2E, STX-TN-09 section 2).
 BuildOutcome run_state(const std::filesystem::path& description, const std::filesystem::path& out_dir, double age,
                        const BuildOptions& opt);
+/// Fault-rock and stress inputs from a description (stage 2F, STX-TN-10), in SI units.
+repr::FaultRockInput fault_rock_input(const desc::Description& d, const Model& m);
+repr::StressInput stress_input(const desc::Description& d);
 /// Restoration report of a timeline model into `folder`: a section and a map at every event,
 /// the sequence as one deck, the flexural-slip unfolded section, balance.csv and the checks of
 /// every state (STX-TN-09 sections 2 and 3). Nothing is written for a model without events.
