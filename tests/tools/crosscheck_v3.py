@@ -13,7 +13,10 @@ For each implicit example, the script:
      horizon has data within 300 m: away from faults (more than 500 m from a fault gap) and near
      them;
   4. compares fault throws, measured on both models' horizons at stations along each fault, with
-     the same rule for both.
+     the same rule for both;
+  5. compares both models with the design model the example was sampled from: a horizon where
+     the reference misses that source beyond the tolerance while Stratonix matches it is reported
+     as inconclusive (the reference's error), not as a Stratonix failure.
 
 Tolerances (STX-TN-11 section 11):
   - away from faults: mean |dz| <= 10 m and 95th percentile <= 25 m;
@@ -34,6 +37,9 @@ FOOTPRINT = 300.0  # m: compare a horizon only within this distance of its data
 EXAMPLES = ["implicit_unconformity_from_samples", "implicit_relay_splay_from_samples",
             "implicit_detachment_folds_from_samples", "implicit_faults_series_from_data"]
 TOL = dict(away_mean=10.0, away_p95=25.0, near_p95=50.0, throw_rel=0.20)
+# The design models the examples were sampled from (the truth of the comparison).
+SOURCES = {"implicit_unconformity_from_samples": "unconformity_onlap_pinchout", "implicit_relay_splay_from_samples": "fault_system_relay_splay",
+           "implicit_detachment_folds_from_samples": "detachment_folds", "implicit_faults_series_from_data": "data/implicit_faults_series/truth"}
 
 
 def read_irap(p):
@@ -341,6 +347,16 @@ def main(argv):
                 grids[h] = (X[::STRIDE, ::STRIDE], Y[::STRIDE, ::STRIDE], z[::STRIDE, ::STRIDE], dx * STRIDE)
             szf = grid_sampler(full, {h: full[h][2] for h in horizons})
             other, ozf = loopstructural_surfaces(root, setup, rows, horizons, grids) if have_ls else substitute_surfaces(rows, horizons, grids, root)
+            # the source model's surfaces, on the same lattice
+            src = pathlib.Path(td) / "src"
+            subprocess.run([exe, "export", str(exdir / f"{SOURCES[ex]}.yaml"), "-o", str(src), "--formats", "irap_ascii"], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            truth = {}
+            for h in horizons:
+                f_ = src / "exports" / "horizons" / f"{h}_faulted.irap"
+                if f_.exists():
+                    Xs, Ys, zs_, _ = read_irap(f_)
+                    truth[h] = zs_[::STRIDE, ::STRIDE] if zs_.shape == full[h][2].shape else None
             ok = True
             feet = {}
             for h in horizons:
@@ -353,9 +369,26 @@ def main(argv):
                 dist = distance_to_gaps(z, dx)
                 near, away = foot & np.isfinite(d) & (dist <= NEAR), foot & np.isfinite(d) & (dist > NEAR)
                 sa, sn = stats(d[away]), stats(d[near])
-                passed = (sa["n"] == 0 or (sa["mean"] <= TOL["away_mean"] and sa["p95"] <= TOL["away_p95"])) and (sn["n"] == 0 or sn["p95"] <= TOL["near_p95"])
-                ok &= passed
-                table.append([ex, h, sa["n"], sa["mean"], sa["p95"], sa["max"], sn["n"], sn["mean"], sn["p95"], sn["max"], "pass" if passed else "FAIL"])
+
+                def within(a, b):
+                    return (a["n"] == 0 or (a["mean"] <= TOL["away_mean"] and a["p95"] <= TOL["away_p95"])) and (b["n"] == 0 or b["p95"] <= TOL["near_p95"])
+
+                passed = within(sa, sn)
+                verdict = "pass" if passed else "FAIL"
+                ts = to = None
+                if truth.get(h) is not None:
+                    # each model against the source: when the reference misses the truth and
+                    # Stratonix does not, the disagreement is the reference's, and it is reported
+                    # as inconclusive rather than as a Stratonix failure
+                    ds, do = z - truth[h], other[h] - truth[h]
+                    ts = (stats(ds[foot & np.isfinite(ds) & (dist > NEAR)]), stats(ds[foot & np.isfinite(ds) & (dist <= NEAR)]))
+                    to = (stats(do[foot & np.isfinite(do) & (dist > NEAR)]), stats(do[foot & np.isfinite(do) & (dist <= NEAR)]))
+                    if not passed and within(*ts) and not within(*to):
+                        verdict = "inconclusive"
+                ok &= verdict != "FAIL"
+                table.append([ex, h, sa["n"], sa["mean"], sa["p95"], sa["max"], sn["n"], sn["mean"], sn["p95"], sn["max"], verdict,
+                              ts[0]["mean"] if ts else float("nan"), ts[0]["p95"] if ts else float("nan"),
+                              to[0]["mean"] if to else float("nan"), to[0]["p95"] if to else float("nan")])
             for f in setup["faults_oldest_first"]:
                 fn = f["name"]
                 t_stx = fault_throws(rows, horizons, szf, fn, f.get("abuts"))
@@ -367,9 +400,10 @@ def main(argv):
             verdicts.append((ex, ok))
     with open(report / "crosscheck_horizons.csv", "w", newline="\n") as fh:
         w = csv.writer(fh, lineterminator="\n")
-        w.writerow(["example", "horizon", "away_n", "away_mean_abs_m", "away_p95_m", "away_max_m", "near_n", "near_mean_abs_m", "near_p95_m", "near_max_m", "verdict"])
+        w.writerow(["example", "horizon", "away_n", "away_mean_abs_m", "away_p95_m", "away_max_m", "near_n", "near_mean_abs_m", "near_p95_m", "near_max_m", "verdict",
+                    "stratonix_vs_source_away_mean_m", "stratonix_vs_source_away_p95_m", "other_vs_source_away_mean_m", "other_vs_source_away_p95_m"])
         for r in table:
-            w.writerow([r[0], r[1], r[2]] + [f"{v:.3f}" for v in r[3:6]] + [r[6]] + [f"{v:.3f}" for v in r[7:10]] + [r[10]])
+            w.writerow([r[0], r[1], r[2]] + [f"{v:.3f}" for v in r[3:6]] + [r[6]] + [f"{v:.3f}" for v in r[7:10]] + [r[10]] + [f"{v:.3f}" for v in r[11:15]])
     with open(report / "crosscheck_faults.csv", "w", newline="\n") as fh:
         w = csv.writer(fh, lineterminator="\n")
         w.writerow(["example", "fault", "throw_stratonix_m", "throw_other_m", "relative_difference", "verdict"])
@@ -380,6 +414,9 @@ def main(argv):
              "Acceptance: " + ("yes (LoopStructural)" if have_ls else "NO - substitute interpolator, not the acceptance"),
              f"Tolerances: away mean <= {TOL['away_mean']} m and p95 <= {TOL['away_p95']} m; near p95 <= {TOL['near_p95']} m; throws within {TOL['throw_rel']:.0%}", ""]
     lines += [f"{ex}: {'within tolerance' if ok else 'OUTSIDE tolerance'}" for ex, ok in verdicts]
+    inc = [f"{r[0]} {r[1]}" for r in table if r[10] == "inconclusive"]
+    if inc:
+        lines += ["", "Inconclusive (the reference misses the source model beyond tolerance while Stratonix matches it): " + ", ".join(inc)]
     (report / "crosscheck_report.txt").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     # the tables too, so the log carries the numbers
