@@ -104,6 +104,10 @@ class ExportContext {
   double vertical_exaggeration = 1;          ///< for viewer state files
   double voxel_dx = 0, voxel_dy = 0, voxel_dz = 0;  ///< voxel grid spacing (0: none)
   double sample_spacing = 250;               ///< point sampling for GemPy / LoopStructural sets
+  /// Stage 2C series, youngest first (name, base relation, horizons), for input sets of other
+  /// modellers (one feature per series); empty without series.
+  struct SeriesExport { std::string name, base; std::vector<std::string> horizons; };
+  std::vector<SeriesExport> series;
   /// Stage 2F (STX-TN-10): fault-surface attributes and curvature grids, written only when given.
   bool fault_rock = false;
   repr::FaultRockInput rock;

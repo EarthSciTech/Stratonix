@@ -215,8 +215,11 @@ void load_build_inputs(const desc::Description& d, BuildInputs& in) {
       if (x.id == id) return &x;
     throw Error(ErrorCode::Build, "input '" + id + "' is not listed under inputs");
   };
-  // Data for the implicit builder: points and orientations.
-  for (auto& x : d.implicit.data) {
+  // Data for the implicit builder and for hybrid conditioning: points and orientations.
+  std::vector<desc::ImplicitData> all_data = d.implicit.data;
+  for (auto& x : d.conditioning.data)
+    if (std::none_of(all_data.begin(), all_data.end(), [&](const desc::ImplicitData& y) { return y.input == x.input; })) all_data.push_back(x);
+  for (auto& x : all_data) {
     auto data = reg.create<Importer>(registry::Kind::Importer, x.format)->read(input_of(x.input)->resolved);
     if (data.z_is == "depth")
       for (auto& p : data.points) p.z = -p.z;

@@ -6,6 +6,7 @@
 
 #include "stratonix/checks/checks.hpp"
 #include "stratonix/checks/manifest.hpp"
+#include "stratonix/engines/conditioning.hpp"
 #include "stratonix/engines/history.hpp"
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/wells.hpp"
@@ -317,6 +318,7 @@ std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Mo
     c.rock = fault_rock_input(d, m);
     c.stress = stress_input(d);
   }
+  for (auto& sr : d.series) c.series.push_back({sr.name, sr.base, sr.horizons});
   for (auto& hn : d.curvature_horizons) {
     const int h = d.horizon_index(hn);
     if (h >= 0) c.curvature_horizons.push_back(h);
@@ -502,6 +504,30 @@ void write_restoration(const desc::Description& d, const Model& m, const std::fi
                     "Section " + sname + " unfolded by flexural slip.", "Bed lengths conserved by construction; compare them for line-length balance.");
 }
 
+/// Stage 3A figures: fitted parameters, and the data misfit per horizon where uncertainties are
+/// stated or the model was conditioned (STX-TN-11 section 6).
+void write_data_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
+                        const std::filesystem::path& folder) {
+  auto* cr = static_cast<const ConditioningResult*>(m.capability("conditioning"));
+  auto* mis = static_cast<const std::vector<DataMisfit>*>(m.capability("data_misfit"));
+  const bool with_sigma = mis && std::any_of(mis->begin(), mis->end(), [](const DataMisfit& r) { return !std::isnan(r.sigma); });
+  if (!cr && !with_sigma) return;
+  auto c = figure_context(d, m, keys);
+  if (cr) {
+    std::vector<fig::FittedRow> rows;
+    for (auto& p : cr->parameters) rows.push_back({p.path, p.unit, p.start, p.value, p.sigma, p.min, p.max});
+    fig::write_figure(fig::conditioning_figure(c, rows, cr->chi2_reduced, cr->residuals.size()), folder, fig::figure_basename(c, "conditioning", ""),
+                      c.model_name + " - fitted parameters", "Parameters fitted to the data, with their admissible ranges and uncertainties.",
+                      "Fitted values are labelled calibrated; the data controlling each are listed in influence.csv.");
+  }
+  std::map<std::string, std::vector<fig::MisfitPoint>> per;
+  for (auto& r : *mis)
+    if (r.kind != "orientation") per[r.label].push_back({r.p.x, r.p.y, r.misfit, r.normalised});
+  for (auto& [h, pts] : per)
+    fig::write_figure(fig::misfit_map_figure(c, h, pts), folder, fig::figure_basename(c, "data-misfit", h), c.model_name + " - data misfit on " + h,
+                      "Misfit of the model at every datum of " + h + ".", "Data are never altered; their misfit is reported, normalised by the stated uncertainty.");
+}
+
 BuildOutcome run_build(const std::filesystem::path& description, const std::filesystem::path& out_dir,
                        const BuildOptions& opt, const std::string& command) {
   auto d = desc::load_description(description);
@@ -509,6 +535,22 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
   BuildOutcome o = build_only(d, opt);
   write_file(out_dir / "model_summary.txt", summary_text(d, *o.model, o.log));
   if (auto mc = data_misfit_csv(*o.model); !mc.empty()) write_file(out_dir / "data_misfit.csv", mc);
+  // stage 3A: fitted parameters and the data that control them (STX-TN-11 section 6)
+  if (auto* cr = static_cast<const ConditioningResult*>(o.model->capability("conditioning"))) {
+    std::string t = "path,unit,start,fitted,sigma,min,max,evidence,source\n", inf = "path,rank,input,horizon,kind,x,y,z,share_of_variance,leverage\n";
+    for (auto& p : cr->parameters) {
+      const desc::Param* fp = cr->fitted.param_by_name(p.path);
+      t += p.path + "," + p.unit + "," + fmt_shortest(p.start) + "," + fmt_shortest(p.value) + "," + fmt_shortest(p.sigma) + "," + fmt_shortest(p.min) +
+           "," + fmt_shortest(p.max) + ",calibrated,\"" + (fp ? fp->source : std::string()) + "\"\n";
+      for (std::size_t q = 0; q < p.controlling.size(); ++q) {
+        auto& r = cr->residuals[p.controlling[q].first];
+        inf += p.path + "," + std::to_string(q + 1) + "," + r.input + "," + r.label + "," + r.kind + "," + fmt_fixed(r.p.x, 2) + "," + fmt_fixed(r.p.y, 2) +
+               "," + fmt_fixed(r.p.z, 2) + "," + fmt_fixed(p.controlling[q].second, 4) + "," + fmt_fixed(cr->leverage[p.controlling[q].first], 4) + "\n";
+      }
+    }
+    write_file(out_dir / "conditioning.csv", t);
+    write_file(out_dir / "influence.csv", inf);
+  }
   CheckContext ctx(*o.model, d, make_well_paths(d), d.grid_spacing.si());
   CheckReport rep = run_checks(ctx);
   o.checks_passed = rep.passed();
@@ -518,12 +560,20 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
   auto rows = keys;
   for (auto& r : event_rows(d)) rows.push_back(r);
   for (auto& r : fault_rock_rows(d, *o.model)) rows.push_back(r);
+  if (auto* cr = static_cast<const ConditioningResult*>(o.model->capability("conditioning"))) {
+    for (auto& p : cr->parameters)
+      rows.push_back({"Fitted " + p.path, fmt_fixed(p.value, 3) + " +- " + fmt_fixed(p.sigma, 3) + " " + p.unit + " (calibrated; start " + fmt_shortest(p.start) +
+                                              ", range " + fmt_shortest(p.min) + " to " + fmt_shortest(p.max) + ")"});
+    rows.push_back({"Conditioning", std::to_string(cr->residuals.size()) + " data, reduced chi2 " + fmt_fixed(cr->chi2_reduced, 3) + ", " +
+                                        std::to_string(cr->iterations) + " iterations"});
+  }
   write_file(out_dir / "summary_table.csv", summary_csv(rows));
   if (!o.checks_passed) {
     log(LogLevel::Error, "checks failed: exports and figures are not written (see checks_report.txt)");
   } else {
     if (opt.figures) write_figures(d, *o.model, keys, out_dir / "figures");
     if (opt.figures && !d.events.empty()) write_restoration(d, *o.model, out_dir / "restoration");
+    if (opt.figures) write_data_figures(d, *o.model, keys, out_dir / "figures");
     auto ids = resolve_export_ids(d, opt.exports);
     if (!ids.empty()) write_exports(d, *o.model, ids, out_dir / "exports", 0);
   }

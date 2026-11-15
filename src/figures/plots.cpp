@@ -1263,6 +1263,77 @@ Figure curvature_figure(const FigureContext& c, int h, const repr::CurvatureGrid
   return f;
 }
 
+Figure conditioning_figure(const FigureContext& c, const std::vector<FittedRow>& rows, double chi2, std::size_t ndata) {
+  const double H = std::max(240.0, 120.0 + 46.0 * static_cast<double>(rows.size()));
+  Figure f(842, H);
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - fitted parameters",
+        "Each bar is the admissible range; open diamond: start value; filled diamond: fitted value with +-2 sigma. Reduced chi2 " + fmt_fixed(chi2, 3) + " over " +
+            std::to_string(ndata) + " data");
+  const double x0 = 300, x1 = 760, y0 = 70;
+  for (std::size_t k = 0; k < rows.size(); ++k) {
+    const auto& r = rows[k];
+    const double y = y0 + 46.0 * static_cast<double>(k) + 20;
+    auto X = [&](double v) { return x0 + (v - r.min) / (r.max - r.min) * (x1 - x0); };
+    f.text({x0 - 10, y - 4}, r.path, 7.5, Anchor::End, true, kInk);
+    f.text({x0 - 10, y + 8}, fmt_fixed(r.value, 3) + " +- " + fmt_fixed(r.sigma, 3) + " " + r.unit + " (start " + fmt_shortest(r.start) + ")", 7,
+           Anchor::End, false, kInk);
+    f.rect(x0, y - 3, x1 - x0, 6, rgb(225, 225, 225), kInk, 0.4);
+    f.text({x0, y + 16}, fmt_shortest(r.min), 6.5, Anchor::Start, false, kInk);
+    f.text({x1, y + 16}, fmt_shortest(r.max) + " " + r.unit, 6.5, Anchor::End, false, kInk);
+    double a = std::clamp(X(r.value - 2 * r.sigma), x0, x1), b = std::clamp(X(r.value + 2 * r.sigma), x0, x1);
+    f.line({a, y}, {b, y}, rgb(20, 60, 140), 1.6);
+    f.line({a, y - 4}, {a, y + 4}, rgb(20, 60, 140), 1.0);
+    f.line({b, y - 4}, {b, y + 4}, rgb(20, 60, 140), 1.0);
+    Pt ps{X(r.start), y};
+    f.path({{ps.x - 3, ps.y}, {ps.x, ps.y - 3}, {ps.x + 3, ps.y}, {ps.x, ps.y + 3}}, true, rgb(255, 255, 255), kInk, 0.8);
+    Pt pv{X(r.value), y};
+    f.path({{pv.x - 3.5, pv.y}, {pv.x, pv.y - 3.5}, {pv.x + 3.5, pv.y}, {pv.x, pv.y + 3.5}}, true, rgb(20, 60, 140), rgb(20, 60, 140), 0.8);
+  }
+  footer(f, c);
+  return f;
+}
+
+Figure misfit_map_figure(const FigureContext& c, const std::string& horizon, const std::vector<MisfitPoint>& pts) {
+  Figure f(842, 595);
+  const auto& d = c.model->info().domain;
+  double side = std::min(595.0 - 110, 842.0 - 280), sc = side / std::max(d.sx, d.sy);
+  double mx0 = 60, my0 = 60, mw = d.sx * sc, mh = d.sy * sc;
+  auto P = [&](double x, double y) { return Pt{mx0 + (x - d.x0) * sc, my0 + mh - (y - d.y0) * sc}; };
+  const bool norm = std::any_of(pts.begin(), pts.end(), [](const MisfitPoint& p) { return !std::isnan(p.normalised); });
+  double vmax = 3.0;
+  if (!norm) {
+    vmax = 1e-3;
+    for (auto& p : pts) vmax = std::max(vmax, std::fabs(p.misfit));
+  }
+  std::size_t beyond = 0;
+  for (auto& p : pts) beyond += norm && std::fabs(p.normalised) > 3;
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - data misfit on " + horizon,
+        std::string(norm ? "Normalised misfit (misfit / stated uncertainty), -3 to 3" : "Misfit (m)") + " at every datum of " + horizon +
+            "; positive: the model lies above the datum");
+  f.rect(mx0, my0, mw, mh, rgb(248, 248, 248), kInk, 0.6);
+  for (auto& p : pts) {
+    double v = norm ? p.normalised : p.misfit;
+    Color cc = std::isnan(v) ? rgb(150, 150, 150) : diverging(v / vmax);
+    Pt q = P(p.x, p.y);
+    f.rect(q.x - 1.6, q.y - 1.6, 3.2, 3.2, cc, std::fabs(v) > vmax ? kInk : none(), 0.4);
+  }
+  for (double t : nice_ticks(d.x0, d.x0 + d.sx, 6)) f.text({P(t, d.y0).x, my0 + mh + 11}, km_or_m(t), 6.5, Anchor::Middle, false, kInk);
+  for (double t : nice_ticks(d.y0, d.y0 + d.sy, 6)) f.text({mx0 - 5, P(d.x0, t).y + 2.5}, km_or_m(t), 6.5, Anchor::End, false, kInk);
+  f.text({mx0 + mw / 2, my0 + mh + 24}, "Easting (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({mx0 - 40, my0 + mh / 2}, "Northing (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  double rx = 842 - 200, ry = 60;
+  f.text({rx, ry}, norm ? "Misfit / sigma" : "Misfit (m)", 7.5, Anchor::Start, true, kInk);
+  for (int k = 0; k < 100; ++k) f.rect(rx, ry + 6 + k * 1.6, 14, 1.7, diverging(1 - 2 * k / 99.0), none());
+  f.rect(rx, ry + 6, 14, 160, none(), kInk, 0.4);
+  f.text({rx + 18, ry + 12}, "+" + fmt_shortest(vmax), 6.5, Anchor::Start, false, kInk);
+  f.text({rx + 18, ry + 88}, "0", 6.5, Anchor::Start, false, kInk);
+  f.text({rx + 18, ry + 166}, "-" + fmt_shortest(vmax), 6.5, Anchor::Start, false, kInk);
+  f.text({rx, ry + 186}, std::to_string(pts.size()) + " data" + (norm ? ", " + std::to_string(beyond) + " beyond 3 sigma (outlined)" : std::string()), 7,
+         Anchor::Start, false, kInk);
+  footer(f, c);
+  return f;
+}
+
 WrittenFigure write_figure(const Figure& f, const std::filesystem::path& folder, const std::string& base, const std::string& t,
                            const std::string& caption, const std::string& notes) {
   WrittenFigure w;

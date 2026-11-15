@@ -1,5 +1,6 @@
 // Parametric engine: Model interface over Structure + FaultNetwork.
 #include "stratonix/engines/parametric.hpp"
+#include "stratonix/engines/conditioning.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -172,6 +173,7 @@ class ParametricBuilder final : public StructureBuilder {
  public:
   bool accepts(const desc::Description& d) const override { return !d.implicit.present; }
   ModelPtr build(const desc::Description& d, const BuildInputs& in, BuildLog& log) const override {
+    if (d.conditioning.present) return build_conditioned_model(d, in, log);  // stage 3A: fit, then build
     return std::make_shared<ParametricModel>(d, in, log);
   }
 };

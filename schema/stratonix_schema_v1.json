@@ -1822,6 +1822,88 @@
           "$ref": "#/$defs/param"
         }
       }
+    },
+    "conditioning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "parameters"
+      ],
+      "properties": {
+        "data": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "input",
+              "kind",
+              "format"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "enum": [
+                  "points",
+                  "orientations"
+                ]
+              },
+              "format": {
+                "type": "string",
+                "minLength": 1
+              },
+              "horizon": {
+                "type": "string"
+              },
+              "uncertainty": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "use_well_tops": {
+          "type": "boolean"
+        },
+        "uncertainty": {
+          "$ref": "#/$defs/param"
+        },
+        "orientation_uncertainty": {
+          "$ref": "#/$defs/param"
+        },
+        "parameters": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "min",
+              "max"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "min": {
+                "$ref": "#/$defs/param"
+              },
+              "max": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "max_iterations": {
+          "$ref": "#/$defs/param"
+        }
+      }
     }
   },
   "$defs": {

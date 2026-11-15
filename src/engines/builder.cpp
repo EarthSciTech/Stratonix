@@ -59,7 +59,7 @@ namespace {
 class FlatLayersBuilder final : public StructureBuilder {
  public:
   bool accepts(const desc::Description& d) const override {
-    if (d.implicit.present || !d.primitives.empty() || !d.faults.empty() || d.regional_type != "flat") return false;
+    if (d.implicit.present || d.conditioning.present || !d.primitives.empty() || !d.faults.empty() || d.regional_type != "flat") return false;
     if (!d.series.empty() || d.salt.present() || d.compaction.present()) return false;  // stages 2C, 2D: parametric builder
     for (auto& h : d.horizons)
       if (!h.surface_input.empty() || !h.iso_input.empty() || !h.iso_trend.empty()) return false;

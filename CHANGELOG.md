@@ -13,7 +13,7 @@ has its own version (`stratonix_schema`).
   leave-one-out errors. Interfaces, additive and not yet built: `SolverOptions`, `PuField`,
   `rippa_loo` (engines/implicit.hpp); `estimate_throws`, `profile_from_sticks` and
   `condition_to_data` (engines/conditioning.hpp); `RbfField::Value::sigma`.
-- Tests: `test_v3_data` (ten cases), expected to fail until Prompts 35 and 36.
+- Tests: `test_v3_data` (ten cases, all passing since Prompt 36).
 - Large-data implicit solver (Prompt 35, decision 11). It is a partition of unity of Hermite RBF
   fields on overlapping columns, blended with Wendland weights, and keeps exact interpolation.
   - `implicit.solver: {type: auto | dense | partition_of_unity, points_per_patch, overlap}`;
@@ -33,6 +33,27 @@ has its own version (`stratonix_schema`).
   and `wells[].top_uncertainty`. Each acts as that point's nugget. `implicit.data_influence: true`
   computes leave-one-out errors (Rippa 1999) and lists the ten most influential data.
   `data_misfit.csv` gains sigma, normalised misfit and leave-one-out columns when they apply.
+- Hybrid conditioning (Prompt 36). A top-level `conditioning` block fits any scalar parameter of
+  a parametric description, named by path (`faults.F1.throw.max`,
+  `structure.primitives.A1.relief.H1`), to points, orientations and well tops with stated
+  uncertainties. The fit is weighted Levenberg-Marquardt.
+  - Fitted values are labelled calibrated, with the data set as source.
+  - Each comes with its uncertainty, the five data that control it and every datum's leverage.
+  - Fits that do not converge, converge on a bound of the admissible range, or are not controlled
+    by the data are refused with the reason, and no model is built.
+  - Outputs: `conditioning.csv`, `influence.csv` and summary rows; figures of the fitted
+    parameters and a data-misfit map per horizon.
+  - New interfaces: `condition_to_data`, `ConditionedModel`, `Description::param_by_name`; model
+    capability `conditioning`.
+- Checks C21 (data misfit within the stated uncertainty) and C22 (conditioning converged inside
+  the admissible ranges); rule F31.
+- Example `hybrid_fault_fold_conditioning`: a throw and a fold relief started 25 to 30 % off are
+  recovered from 3 m-uncertain picks within their uncertainty (`tools/make_hybrid_example.py`).
+- External cross-check `tests/tools/crosscheck_v3.py` (copy in `02_CODE/tools`). It rebuilds the
+  implicit examples in LoopStructural from the exported input sets and compares horizons and
+  throws against the STX-TN-11 tolerances. CI job `crosscheck` installs LoopStructural and runs it.
+- LoopStructural input set: with stage 2C series, one feature per series and
+  `series_youngest_first` in `model_setup.json`. Models without series are unchanged.
 - Rules F29 (solver, uncertainties, isochore horizons) and F30 (throw estimates). Coincident data
   of different horizons are refused with their positions, not left to a singular system.
 - Examples `implicit_unconformity_from_samples`, `implicit_relay_splay_from_samples`,

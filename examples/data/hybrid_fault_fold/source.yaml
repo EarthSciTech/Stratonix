@@ -1,0 +1,53 @@
+# Source model for the stage 3A example hybrid_fault_fold_conditioning (not a worked example itself):
+# an anticline cut by a planar normal fault. Its H1 and H2 picks, with seeded noise, are the data the
+# example's fault throw and fold relief are fitted to (tools/make_hybrid_example.py).
+stratonix_schema: 1
+model: {name: source_hybrid_fault_fold, version: "1.0.0", status: DESIGN,
+        title: "Anticline cut by a normal fault (source of the conditioning data)"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | source model"
+  size:   "[10000, 10000] m | user_instruction | source model"
+  depth_range: "[0, 3000] m | user_instruction | source model"
+  grid_spacing: "50 m | user_instruction | source model"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | source model"
+    tops:
+      H1: "1000 m | user_instruction | source model"
+      H2: "1200 m | user_instruction | source model"
+      H3: "1400 m | user_instruction | source model"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3, intended_offset: true}]
+  units:
+    - {name: U1, top: H1, base: H2}
+    - {name: U2, top: H2, base: H3}
+structure:
+  regional: {type: flat}
+  primitives:
+    - type: anticline
+      name: A1
+      crest: "[5000, 5000] m | user_instruction | source model"
+      axis_azimuth: "0 deg | user_instruction | source model"
+      plunge: "0 deg | user_instruction | source model"
+      half_length: "4000 m | user_instruction | source model"
+      half_width_left: "2500 m | user_instruction | source model"
+      half_width_right: "2500 m | user_instruction | source model"
+      relief:
+        H1: "250 m | user_instruction | source model"
+        H2: "250 m | user_instruction | source model"
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | source model"
+    geometry: {type: planar, reference_point: "[6000, 5000] m | user_instruction | source model", reference_depth: "1200 m | user_instruction | source model",
+               strike: "0 deg | user_instruction | source model", dip: "60 deg | user_instruction | source model"}
+    extent: {upper_tip: {rule: free}, lower_tip: {rule: free}, length: "20000 m | user_instruction | source model"}
+    throw:
+      max: "120 m | user_instruction | source model"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | source model"}
+      profile_strike: {type: flat_topped, taper: "0.01 fraction | user_instruction | source model"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}

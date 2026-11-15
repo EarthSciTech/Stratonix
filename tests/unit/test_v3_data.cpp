@@ -316,7 +316,7 @@ std::string hybrid_yaml(double relief, double throw_m, const std::string& condit
   std::string inputs = conditioning.empty() ? "" : "inputs:\n  - {id: D, path: data.csv, role: surface points, sharing: shareable, source: test, evidence: interpreted}\n";
   return model_yaml(faults, structure, {1000, 1200, 1400}, inputs + conditioning);
 }
-/// Sample H1 and H2 of the true model at random positions, with N(0, 3 m) noise, sigma 3 m.
+/// Sample H1 of the true model at random positions, with N(0, 3 m) noise, sigma 3 m.
 void write_hybrid_data(const fs::path& dir) {
   auto truth = build_text(hybrid_yaml(250, 120, ""));
   std::mt19937_64 rng(77);
@@ -326,7 +326,7 @@ void write_hybrid_data(const fs::path& dir) {
   int n = 0;
   while (n < 240) {
     double x = U(rng), y = U(rng);
-    int h = n % 2;
+    const int h = 0;
     double z = -depth_faulted(*truth, h, x, y);
     if (std::isnan(z)) continue;
     s += fmt_fixed(x, 2) + "," + fmt_fixed(y, 2) + "," + fmt_fixed(z + N(rng), 3) + "," + (h ? "H2" : "H1") + ",3.0\n";

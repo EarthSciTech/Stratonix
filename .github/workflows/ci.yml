@@ -39,6 +39,27 @@ jobs:
           name: stratonix-linux
           path: build/${{ matrix.preset }}/stratonix-*.*
 
+  # External cross-check of the stage 3A implicit examples against LoopStructural (STX-TN-11
+  # section 11): installs LoopStructural and runs tests/tools/crosscheck_v3.py; the report is kept.
+  crosscheck:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libyaml-dev libcairo2-dev zlib1g-dev
+      - name: Build the command-line tool
+        run: cmake --preset linux-gcc-release && cmake --build build/linux-gcc-release --target stratonix
+      - name: Install LoopStructural
+        run: python3 -m pip install --upgrade pip && python3 -m pip install "LoopStructural>=1.5,<2" pandas scipy numpy
+      - name: Cross-check
+        run: python3 tests/tools/crosscheck_v3.py build/linux-gcc-release/apps/stratonix/stratonix examples crosscheck_report --require-loopstructural
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: crosscheck-loopstructural
+          path: crosscheck_report
+
   windows:
     runs-on: windows-2022
     strategy:

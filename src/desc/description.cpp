@@ -126,6 +126,9 @@ std::vector<const Param*> Description::all_params() const {
   for (auto& h : horizons) add(h.age);
   for (auto& u : units) add(u.clay_fraction);
   for (auto& x : implicit.data) add(x.uncertainty);
+  for (auto& x : conditioning.data) add(x.uncertainty);
+  for (auto* q : {&conditioning.uncertainty, &conditioning.orientation_uncertainty, &conditioning.max_iterations}) add(*q);
+  for (auto& fp : conditioning.parameters) { add(fp.min); add(fp.max); }
   for (auto* q : {&fault_rock.shale_threshold, &fault_rock.thickness_ratio, &fault_rock.seal_a, &fault_rock.seal_c, &stress.sv_gradient,
                   &stress.shmax_ratio, &stress.shmin_ratio, &stress.shmax_azimuth, &stress.tensor_gradient, &stress.pore_pressure_gradient,
                   &stress.friction, &stress.cohesion, &fracture_threshold})
@@ -167,6 +170,31 @@ std::vector<const Param*> Description::all_params() const {
     for (auto& k : sh.keys) add(k.fraction);
   }
   return r;
+}
+
+const Param* Description::param_by_name(const std::string& path) const {
+  // map names to indices: faults.<name> -> faults[k], structure.primitives.<name> -> structure.primitives[k], ...
+  std::string ip;
+  auto take = [&](const std::string& prefix, const std::string& indexed, auto names) {
+    if (path.rfind(prefix, 0) != 0) return false;
+    std::string rest = path.substr(prefix.size());
+    auto dot = rest.find('.');
+    std::string nm = rest.substr(0, dot), tail = dot == std::string::npos ? "" : rest.substr(dot);
+    for (std::size_t k = 0; k < names.size(); ++k)
+      if (names[k] == nm) { ip = indexed + "[" + std::to_string(k) + "]" + tail; return true; }
+    return false;
+  };
+  std::vector<std::string> fn, pn, hn, wn;
+  for (auto& f : faults) fn.push_back(f.name);
+  for (auto& p : primitives) pn.push_back(p.name);
+  for (auto& h : horizons) hn.push_back(h.name);
+  for (auto& w : wells) wn.push_back(w.name);
+  if (!take("faults.", "faults", fn) && !take("structure.primitives.", "structure.primitives", pn) &&
+      !take("stratigraphy.horizons.", "stratigraphy.horizons", hn) && !take("wells.", "wells", wn))
+    ip = path;
+  for (auto* p : all_params())
+    if (p->path == ip) return p;
+  return nullptr;
 }
 
 // ---- parameters ----------------------------------------------------------------------------
@@ -800,6 +828,27 @@ struct Typer {
       if (const Node* ip = o->get("isopachs"))
         for (auto& x : ip->seq) d.isopachs.push_back(x.str);
     }
+    if (const Node* cn = root.get("conditioning")) {
+      auto& cd = d.conditioning;
+      cd.present = true;
+      if (const Node* data = cn->get("data"))
+        for (std::size_t k = 0; k < data->seq.size(); ++k) {
+          const Node& x = data->seq[k];
+          cd.data.push_back({S(&x, "input"), S(&x, "kind"), S(&x, "format"), S(&x, "horizon"),
+                             P(&x, "uncertainty", "conditioning.data[" + std::to_string(k) + "]",
+                               S(&x, "kind") == "orientations" ? Dimension::Angle : Dimension::Length, false, 1)});
+        }
+      if (const Node* u = cn->get("use_well_tops")) cd.use_well_tops = u->boolean || u->str == "true";
+      cd.uncertainty = P(cn, "uncertainty", "conditioning", Dimension::Length, false, 1);
+      cd.orientation_uncertainty = P(cn, "orientation_uncertainty", "conditioning", Dimension::Angle, false, 1);
+      cd.max_iterations = P(cn, "max_iterations", "conditioning", Dimension::Ordinal, false, 1);
+      if (const Node* ps = cn->get("parameters"))
+        for (std::size_t k = 0; k < ps->seq.size(); ++k) {
+          const Node& x = ps->seq[k];
+          std::string b = "conditioning.parameters[" + std::to_string(k) + "]";
+          cd.parameters.push_back({S(&x, "path"), P(&x, "min", b, Dimension::Any, true, 1), P(&x, "max", b, Dimension::Any, true, 1)});
+        }
+    }
     if (const Node* fr = root.get("fault_rock")) {
       d.fault_rock.present = true;
       d.fault_rock.shale_threshold = P(fr, "shale_threshold", "fault_rock", Dimension::Dimensionless, false, 1);
@@ -998,6 +1047,33 @@ struct Typer {
         } else {
           c.err(ub + ".law", "F25", "law must be exponential or table");
         }
+      }
+    }
+    // STX-TN-11 (F31): hybrid conditioning
+    if (d.conditioning.present) {
+      const auto& cd = d.conditioning;
+      if (d.implicit.present) c.err("conditioning", "F31", "conditioning fits the parameters of a parametric model; the implicit builder is conditioned by its data");
+      for (std::size_t k = 0; k < cd.data.size(); ++k) {
+        auto& x = cd.data[k];
+        std::string b = "conditioning.data[" + std::to_string(k) + "]";
+        if (std::none_of(d.inputs.begin(), d.inputs.end(), [&](const InputDesc& i) { return i.id == x.input; }))
+          c.err(b + ".input", "F31", "input '" + x.input + "' is not listed under inputs");
+        if (x.uncertainty.present && !(x.uncertainty.si() > 0)) c.err(b + ".uncertainty", "F31", "an uncertainty must be positive");
+      }
+      if (cd.uncertainty.present && !(cd.uncertainty.si() > 0)) c.err("conditioning.uncertainty", "F31", "the uncertainty must be positive");
+      if (cd.orientation_uncertainty.present && !(cd.orientation_uncertainty.si() > 0))
+        c.err("conditioning.orientation_uncertainty", "F31", "the uncertainty must be positive");
+      if (cd.max_iterations.present && !(cd.max_iterations.si() >= 1)) c.err("conditioning.max_iterations", "F31", "at least one iteration");
+      for (std::size_t k = 0; k < cd.parameters.size(); ++k) {
+        auto& fp = cd.parameters[k];
+        std::string b = "conditioning.parameters[" + std::to_string(k) + "]";
+        const Param* p = d.param_by_name(fp.path);
+        if (!p) { c.err(b + ".path", "F31", "'" + fp.path + "' names no parameter of this description"); continue; }
+        if (p->values.size() != 1) { c.err(b + ".path", "F31", "'" + fp.path + "' is not a scalar parameter"); continue; }
+        if (!fp.min.present || !fp.max.present) continue;
+        if (fp.min.dim != p->dim || fp.max.dim != p->dim) { c.err(b, "F31", "min and max must have the dimension of '" + fp.path + "'"); continue; }
+        if (!(fp.min.si() < p->si() && p->si() < fp.max.si()))
+          c.err(b, "F31", "the start value of '" + fp.path + "' (" + p->text + ") must lie strictly inside [min, max]");
       }
     }
     // STX-TN-10 (F27, F28): fault rock and stress

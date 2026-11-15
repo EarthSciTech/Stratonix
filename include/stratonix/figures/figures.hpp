@@ -83,6 +83,14 @@ Figure strike_throw_figure(const FigureContext& c, const std::vector<StrikeThrow
 Figure fault_attribute_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<double>& values,
                               const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const std::string& attribute,
                               const std::string& unit, double vmin = kNaN, double vmax = kNaN);
+/// Stage 3A (STX-TN-11): fitted parameters against their admissible ranges (start, fitted value
+/// with +-2 sigma), one row per parameter.
+struct FittedRow { std::string path, unit; double start, value, sigma, min, max; };
+Figure conditioning_figure(const FigureContext& c, const std::vector<FittedRow>& rows, double chi2_reduced, std::size_t data);
+/// Data misfit map of one horizon: data positions coloured by normalised misfit (r / sigma, -3 to
+/// 3) where an uncertainty is stated, else by misfit in metres.
+struct MisfitPoint { double x, y, misfit, normalised; };
+Figure misfit_map_figure(const FigureContext& c, const std::string& horizon, const std::vector<MisfitPoint>& pts);
 /// Allan diagram: each cell of the fault surface split into its footwall (upper left) and
 /// hanging-wall (lower right) unit colours, with the cut-offs of every horizon.
 Figure allan_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<repr::FaultRockPoint>& pts,

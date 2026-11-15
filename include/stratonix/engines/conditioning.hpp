@@ -3,7 +3,10 @@
 /// profiles from sticks) and hybrid conditioning (parameters of the v2 mechanisms fitted to data
 /// by weighted least squares, with uncertainties and the data that control them).
 #pragma once
+#include <memory>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -79,5 +82,29 @@ struct ConditioningResult {
 /// Fit the parameters named in d.conditioning to the data. Never throws for a failed fit: the
 /// result says why (converged = false).
 ConditioningResult condition_to_data(const desc::Description& d, const BuildInputs& in, BuildLog& log);
+
+/// A parametric model built from the fitted description, with its conditioning result:
+/// capability("conditioning") -> const ConditioningResult*, "data_misfit" -> the residuals.
+class ParametricModel;
+class ConditionedModel final : public Model {
+ public:
+  ConditionedModel(std::shared_ptr<ParametricModel> inner, ConditioningResult r);
+  const ModelInfo& info() const override;
+  void evaluate(std::span<const Vec3> pts, unsigned fields, EvalResult& out) const override;
+  void scalar_in_block(std::span<const Vec3> pts, BlockCode block, int horizon, std::span<double> out) const override;
+  void evaluate_fault(int fault, std::span<const Vec3> pts, FaultEval& out) const override;
+  void restore(std::span<const Vec3> pts, std::span<Vec3> out) const override;
+  const void* capability(std::string_view name) const override;
+  const ConditioningResult& result() const { return r_; }
+
+ private:
+  std::shared_ptr<ParametricModel> inner_;
+  ConditioningResult r_;
+  ModelInfo info_;
+};
+
+/// Condition and build (the parametric builder calls this for a description with conditioning).
+/// Throws Error(Build) with the reason when the fit is refused.
+ModelPtr build_conditioned_model(const desc::Description& d, const BuildInputs& in, BuildLog& log);
 
 }  // namespace stratonix

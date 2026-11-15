@@ -646,9 +646,15 @@ class LoopExporter final : public Exporter {
     std::map<std::string, int> cnt;
     for (auto& r : s.points.rows) { val[r[3]] += parse_double(r[2]); ++cnt[r[3]]; }
     for (auto& [k, v] : val) v /= cnt[k];
+    // with stage 2C series: one feature per series (the series name), as LoopStructural models
+    // unconformities; without series, one feature "strati" (unchanged)
+    std::map<std::string, std::string> feature;
+    for (auto& sr : c.series)
+      for (auto& h : sr.horizons) feature[petrel_name(h)] = petrel_name(sr.name);
+    auto feat = [&](const std::string& h) { auto it = feature.find(h); return it == feature.end() ? std::string("strati") : it->second; };
     CsvTable t{{"X", "Y", "Z", "feature_name", "val", "gx", "gy", "gz", "coord", "stx_horizon", "stx_block"}, {}};
-    for (auto& r : s.points.rows) t.rows.push_back({r[0], r[1], r[2], "strati", num(val[r[3]], 3), "", "", "", "0", r[3], r[4]});
-    for (auto& r : s.orient.rows) t.rows.push_back({r[0], r[1], r[2], "strati", "", r[3], r[4], r[5], "0", r[9], ""});
+    for (auto& r : s.points.rows) t.rows.push_back({r[0], r[1], r[2], feat(r[3]), num(val[r[3]], 3), "", "", "", "0", r[3], r[4]});
+    for (auto& r : s.orient.rows) t.rows.push_back({r[0], r[1], r[2], feat(r[9]), "", r[3], r[4], r[5], "0", r[9], ""});
     std::string faults_json = "[";
     for (std::size_t f = 0; f < inf.faults.size(); ++f) {
       std::string fn = petrel_name(inf.faults[f].name);
@@ -677,7 +683,17 @@ class LoopExporter final : public Exporter {
       js += std::string(first ? "" : ", ") + "\"" + hn + "\": " + num(val[hn], 3);
       first = false;
     }
-    js += "},\n  \"faults_oldest_first\": " + faults_json + ",\n  \"provenance\": \"" + c.comments()[0] + "; " + c.comments()[1] + "; " +
+    js += "},\n  \"faults_oldest_first\": " + faults_json;
+    if (!c.series.empty()) {
+      js += ",\n  \"series_youngest_first\": [";
+      for (std::size_t k = 0; k < c.series.size(); ++k) {
+        js += std::string(k ? ", " : "") + "{\"name\": \"" + petrel_name(c.series[k].name) + "\", \"base\": \"" + c.series[k].base + "\", \"horizons\": [";
+        for (std::size_t q = 0; q < c.series[k].horizons.size(); ++q) js += std::string(q ? ", " : "") + "\"" + petrel_name(c.series[k].horizons[q]) + "\"";
+        js += "]}";
+      }
+      js += "]";
+    }
+    js += ",\n  \"provenance\": \"" + c.comments()[0] + "; " + c.comments()[1] + "; " +
           c.comments()[3] + "\",\n  \"note\": \"columns X, Y, Z, feature_name, val, gx, gy, gz, coord as in the LoopStructural input-data guide; stx_horizon and stx_block are Stratonix extras for checks\"\n}\n";
     put(folder, "loopstructural/model_setup.json", js);
     return {{"loopstructural/data.csv", "LoopStructural data", "-", std::to_string(t.rows.size()) + " constraints (strati interfaces and normals, fault points)"},

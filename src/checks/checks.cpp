@@ -11,6 +11,7 @@
 #include "stratonix/core/roots.hpp"
 #include "stratonix/engines/faults.hpp"
 #include "stratonix/engines/structure.hpp"
+#include "stratonix/engines/conditioning.hpp"
 #include "stratonix/engines/history.hpp"
 #include "stratonix/repr/faultrock.hpp"
 #include "stratonix/repr/repr.hpp"
@@ -36,6 +37,8 @@ STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c17);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c18);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c19);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c20);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c21);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c22);
 
 namespace stratonix {
 
@@ -1073,6 +1076,70 @@ class C20 final : public Check {
   }
 };
 
+/// C21: data misfit within the stated uncertainty (STX-TN-11 section 7).
+class C21 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* mis = static_cast<const std::vector<DataMisfit>*>(c.model().capability("data_misfit"));
+    if (!mis || std::none_of(mis->begin(), mis->end(), [](const DataMisfit& r) { return !std::isnan(r.sigma); })) return out;
+    std::size_t n = 0, within = 0, exact = 0, exact_bad = 0;
+    double worst = 0;
+    const double tol = c.description().tol_wells.present ? c.description().tol_wells.si() : 0.01;  // Stratonix default (C5)
+    for (auto& r : *mis) {
+      if (std::isnan(r.sigma)) continue;
+      if (r.sigma > 0) {
+        ++n;
+        within += std::fabs(r.normalised) <= 3.0;
+        worst = std::max(worst, std::fabs(r.normalised));
+      } else if (r.kind != "orientation") {
+        ++exact;
+        exact_bad += std::fabs(r.misfit) > tol;
+      }
+    }
+    auto r = base(c, "C21", "data misfit within uncertainty", "all data with a stated uncertainty");
+    r.unit = "fraction";
+    r.value = n ? static_cast<double>(within) / static_cast<double>(n) : 1.0;
+    r.tolerance = 0.95;
+    r.tolerance_source = "STX-TN-11 section 7: at least 95 % within 3 sigma";
+    r.passed = r.value >= 0.95 && exact_bad == 0;
+    r.detail = std::to_string(within) + " of " + std::to_string(n) + " within 3 sigma (largest |r| / sigma " + fmt_fixed(worst, 2) + ")" +
+               (exact ? "; " + std::to_string(exact_bad) + " of " + std::to_string(exact) + " exact data beyond " + fmt_fixed(tol, 3) + " m" : std::string());
+    out.push_back(r);
+    return out;
+  }
+};
+
+/// C22: conditioning converged inside the admissible ranges (STX-TN-11 section 7).
+class C22 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* cr = static_cast<const ConditioningResult*>(c.model().capability("conditioning"));
+    if (!cr) return out;
+    for (auto& p : cr->parameters) {
+      auto r = base(c, "C22", "conditioning converged inside the range", p.path);
+      r.unit = p.unit;
+      r.value = p.value;
+      r.tolerance = 0;
+      r.tolerance_source = "STX-TN-11 section 4: strictly inside [" + fmt_shortest(p.min) + ", " + fmt_shortest(p.max) + "] " + p.unit;
+      r.passed = cr->converged && p.value > p.min && p.value < p.max;
+      r.detail = "fitted " + fmt_fixed(p.value, 3) + " +- " + fmt_fixed(p.sigma, 3) + " " + p.unit + " after " + std::to_string(cr->iterations) +
+                 " iterations; reduced chi2 " + fmt_fixed(cr->chi2_reduced, 3);
+      out.push_back(r);
+    }
+    if (cr->chi2_reduced > 4) {
+      auto r = base(c, "C22", "conditioning reduced chi2", "fit");
+      r.warn_only = true;
+      r.value = cr->chi2_reduced;
+      r.tolerance = 4;
+      r.tolerance_source = "STX-TN-11 section 7: warning above 4";
+      r.passed = false;
+      r.detail = "the stated uncertainties are too small for the misfit, or the model lacks a mechanism";
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 STRATONIX_REGISTER(check_c9, registry::Kind::Check, "C9_closure", "1.0.0", "Closure, spill point and area against targets",
                    [] { return std::make_unique<C9>(); })
 STRATONIX_REGISTER(check_c10, registry::Kind::Check, "C10_fault_scaling", "1.0.0", "Displacement-length scaling (warning)",
@@ -1095,6 +1162,10 @@ STRATONIX_REGISTER(check_c19, registry::Kind::Check, "C19_juxtaposition", "1.0.0
                    [] { return std::make_unique<C19>(); })
 STRATONIX_REGISTER(check_c20, registry::Kind::Check, "C20_tendencies", "1.0.0", "Slip and dilation tendency bounded",
                    [] { return std::make_unique<C20>(); })
+STRATONIX_REGISTER(check_c21, registry::Kind::Check, "C21_data_misfit", "1.0.0", "Data misfit within the stated uncertainty",
+                   [] { return std::make_unique<C21>(); })
+STRATONIX_REGISTER(check_c22, registry::Kind::Check, "C22_conditioning", "1.0.0", "Conditioning converged inside the admissible ranges",
+                   [] { return std::make_unique<C22>(); })
 STRATONIX_REGISTER(check_c11, registry::Kind::Check, "C11_fault_system", "1.0.0",
                    "Throw continuous across branch lines and relays", [] { return std::make_unique<C11>(); })
 
@@ -1260,6 +1331,8 @@ void register_check_plugins() {
   STRATONIX_PLUGIN_ANCHOR(check_c18);
   STRATONIX_PLUGIN_ANCHOR(check_c19);
   STRATONIX_PLUGIN_ANCHOR(check_c20);
+  STRATONIX_PLUGIN_ANCHOR(check_c21);
+  STRATONIX_PLUGIN_ANCHOR(check_c22);
 }
 
 }  // namespace stratonix

@@ -222,6 +222,16 @@ struct ImplicitDesc {
   std::vector<std::string> isochore_horizons;  ///< built from the horizon above minus a thickness from their data
 };
 
+/// Hybrid conditioning (stage 3A, STX-TN-11 section 4): parameters of the description fitted to data.
+struct FitParameterDesc { std::string path; Param min, max; };
+struct ConditioningDesc {
+  bool present = false;
+  std::vector<ImplicitData> data;
+  bool use_well_tops = true;
+  Param uncertainty, orientation_uncertainty, max_iterations;
+  std::vector<FitParameterDesc> parameters;
+};
+
 /// A complete, validated model description.
 struct Description {
   std::filesystem::path file;
@@ -241,6 +251,7 @@ struct Description {
   std::vector<SeriesDesc> series;  ///< empty: one conformable series
   CompactionDesc compaction;       ///< stage 2D
   std::vector<EventDesc> events;   ///< stage 2E: empty = implicit timeline
+  ConditioningDesc conditioning;   ///< stage 3A
   FaultRockDesc fault_rock;        ///< stage 2F
   StressDesc stress;               ///< stage 2F
   std::vector<std::string> curvature_horizons;  ///< stage 2F: outputs.curvature.horizons
@@ -281,6 +292,10 @@ struct Description {
   const WellDesc* well(const std::string& name) const;
   /// Every parameter present in the description (for the parameters table and manifest).
   std::vector<const Param*> all_params() const;
+  /// The parameter named by a path with names (faults.F1.throw.max,
+  /// structure.primitives.A1.relief.H1, stratigraphy.horizons.H2.depth, wells.W1.head), or null.
+  const Param* param_by_name(const std::string& path) const;
+  Param* param_by_name(const std::string& path) { return const_cast<Param*>(static_cast<const Description*>(this)->param_by_name(path)); }
   Domain domain() const;
 };
 

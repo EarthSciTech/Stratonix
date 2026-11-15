@@ -22,10 +22,10 @@ stx_test(test_v2_strat stratonix_package)
 stx_test(test_v2_salt stratonix_package)
 stx_test(test_v2_history stratonix_package)
 stx_test(test_v2_faultrock stratonix_package)
-# Stage 3A analytical tests (STX-TN-11), written before the features (Prompt 34) and made to pass
-# by Prompts 35 and 36.
+# Stage 3A analytical tests (STX-TN-11), written before the features (Prompt 34), passing since
+# Prompt 36.
 stx_test(test_v3_data stratonix_package)
-set_tests_properties(test_v3_data PROPERTIES WILL_FAIL TRUE TIMEOUT 5400)
+set_tests_properties(test_v3_data PROPERTIES TIMEOUT 5400)
 # Stage 3A benchmark: 100 000 points within 300 s (release builds; others skip with code 77).
 stx_test(bench_implicit_100k stratonix_package)
 set_tests_properties(bench_implicit_100k PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
@@ -54,7 +54,7 @@ add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:str
          -DDESC=${PROJECT_SOURCE_DIR}/examples/synthetic_fold_two_faults.yaml -DOUT=${STX_TEST_TMP}/cli_build_example
          -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
 # The worked examples of the user guide build with every check passing.
-foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data)
+foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data hybrid_fault_fold_conditioning)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
