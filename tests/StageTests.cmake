@@ -19,6 +19,8 @@ stx_test(test_v2_interaction stratonix_package)
 stx_test(test_v2_movement stratonix_package)
 stx_test(test_v2_folding stratonix_package)
 stx_test(test_v2_strat stratonix_package)
+stx_test(test_v2_salt stratonix_package)
+set_tests_properties(test_v2_salt PROPERTIES WILL_FAIL TRUE)  # until Prompt 27
 # Independent check of the figure files (Python: Pillow, tifffile, python-pptx); skipped if absent.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)

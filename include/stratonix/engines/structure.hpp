@@ -89,6 +89,23 @@ class Structure final : public StratigraphyQuery {
   bool trend_clamped(std::size_t h, double x, double y) const;
   /// Growth fraction of horizon h for a structure growing from `onset` to `end` (indices).
   double growth_fraction(std::size_t h, int onset, int end) const;
+  // ---- stage 2D (STX-TN-08) -----------------------------------------------------------------
+  /// Salt thickness at (x, y) in the restored frame (0 without salt).
+  double salt_thickness(double x, double y) const;
+  /// Solid (grain) thickness of model unit `unit` at (x, y); its present thickness for rigid units.
+  double solid_thickness(int unit, double x, double y) const;
+  /// Thickness of model unit `unit` at (x, y) moved to top burial depth `top_burial`.
+  double decompacted_thickness(int unit, double x, double y, double top_burial) const;
+  /// Present-day mean porosity of model unit `unit` at (x, y) (0 for rigid units).
+  double porosity(int unit, double x, double y) const;
+  /// Burial history at (x, y): one step per horizon of the compacting column reaching the surface
+  /// (base first), then the present. Burial depths per horizon, NaN before deposition.
+  struct BurialStep {
+    double age = kNaN;  ///< Ma when horizon ages are given
+    std::string label;  ///< horizon at the surface, or "present"
+    std::vector<double> depth;
+  };
+  std::vector<BurialStep> burial_history(double x, double y) const;
   /// Missing (eroded) section of model unit `unit` (between horizons unit-1 and unit, both in one
   /// series) at (x, y) in the restored frame (STX-TN-07 section 1).
   double missing_section(int unit, double x, double y) const;

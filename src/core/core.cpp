@@ -69,6 +69,8 @@ std::optional<UnitDef> find_unit(std::string_view name) {
       {"ratio", Dimension::Dimensionless, 1.0}, {"percent", Dimension::Dimensionless, 0.01},
       {"ordinal", Dimension::Ordinal, 1.0},   {"flag", Dimension::Flag, 1.0},
       {"m2", Dimension::Area, 1.0},           {"km2", Dimension::Area, 1.0e6},
+      {"1/m", Dimension::InverseLength, 1.0}, {"1/km", Dimension::InverseLength, 1.0e-3},
+      {"Ma", Dimension::Time, 1.0},
   };
   for (auto& u : table)
     if (u.name == name) return u;
@@ -82,6 +84,8 @@ const char* dimension_name(Dimension d) {
     case Dimension::Dimensionless: return "dimensionless";
     case Dimension::Ordinal: return "ordinal";
     case Dimension::Flag: return "flag";
+    case Dimension::InverseLength: return "inverse length";
+    case Dimension::Time: return "time";
     default: return "any";
   }
 }

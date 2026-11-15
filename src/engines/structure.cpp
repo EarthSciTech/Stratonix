@@ -571,6 +571,13 @@ void Structure::report_terminations(const desc::Description& d, BuildLog& log) {
     }
 }
 
+// Stage 2D (STX-TN-08): implemented in Prompts 26 and 27.
+double Structure::salt_thickness(double, double) const { return 0.0; }
+double Structure::solid_thickness(int, double, double) const { return kNaN; }
+double Structure::decompacted_thickness(int, double, double, double) const { return kNaN; }
+double Structure::porosity(int, double, double) const { return kNaN; }
+std::vector<Structure::BurialStep> Structure::burial_history(double, double) const { return {}; }
+
 double Structure::regional(double x, double y) const { return reg_gx_ * (x - reg_x0_) + reg_gy_ * (y - reg_y0_); }
 
 double Structure::iso_thickness(std::size_t h, double x, double y, bool clamp) const {

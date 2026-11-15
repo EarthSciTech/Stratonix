@@ -104,6 +104,12 @@ has its own version (`stratonix_schema`).
 - Worked examples `unconformity_onlap_pinchout.yaml`, `growth_fault.yaml` and
   `prograding_wedge.yaml`.
 
+- Stage 2D specification (technical note STX-TN-08): salt bodies with volume-balanced
+  withdrawal and welds, the overburden's response, compaction laws, decompaction, burial history
+  and porosity; checks C15 and C16; rules F24 and F25. New interfaces, additive:
+  `Structure::salt_thickness`, `solid_thickness`, `decompacted_thickness`, `porosity`,
+  `burial_history`; units `1/m`, `1/km` and `Ma`.
+
 ### Changed
 - Check C1 measures a unit that terminates by design only where it is present, and passes when
   it is positive there; C13 checks it for negative thickness.
@@ -118,7 +124,7 @@ has its own version (`stratonix_schema`).
   unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
   and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
-  integrations); stage 2C (`test_v2_strat`).
+  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`), expected to fail until its features are built.
 
 ## [2026.1] - 2026-11-14 - First public release
 
