@@ -22,7 +22,9 @@ namespace stratonix {
 /// two tangent constraints e . grad s = 0 (the direction of the gradient, not its magnitude).
 class RbfField {
  public:
-  struct Value { Vec3 p; double v; };
+  /// sigma: the point's stated uncertainty (m), its nugget on the diagonal; < 0 = the field's
+  /// nugget (stage 3A, STX-TN-11 section 5).
+  struct Value { Vec3 p; double v; double sigma = -1; };
   struct Gradient { Vec3 p; Vec3 g; };
   /// Fit. nugget (m) is added to the diagonal of the value rows (0 = exact interpolation).
   /// Coordinates are centred and scaled by `scale` internally for conditioning.
@@ -48,6 +50,46 @@ class RbfField {
   double scale_ = 1, stretch_ = 1;
   std::string solver_;
 };
+
+/// Large-data solver options (stage 3A, STX-TN-11 section 1).
+struct SolverOptions {
+  std::string type = "auto";           ///< auto | dense | partition_of_unity
+  std::size_t points_per_patch = 300;  ///< target interface data per patch
+  double overlap = 1.25;               ///< patch radius = overlap * h / sqrt(2)
+  std::size_t dense_limit = 3000;      ///< auto: dense up to this many interface data
+};
+
+/// Partition of unity of Hermite RBF fields on overlapping vertical columns, blended with
+/// normalised Wendland C2 weights (STX-TN-11 section 1). One patch equals RbfField.
+class PuField {
+ public:
+  /// [x0, x1] x [y0, y1]: the area the patches cover.
+  PuField(std::vector<RbfField::Value> values, std::vector<RbfField::Gradient> grads, double nugget, Vec3 centre, double scale,
+          double vertical_stretch, double x0, double x1, double y0, double y1, const SolverOptions& o);
+  double value(const Vec3& x) const;
+  Vec3 gradient(const Vec3& x) const;
+  std::size_t patches() const { return patches_.size(); }
+  std::size_t largest_patch() const;  ///< unknowns of the largest patch system
+  /// Leave-one-out error of every interface value (Rippa 1999 per patch, blended with the patch
+  /// weights at the datum), in the order the values were given.
+  std::vector<double> leave_one_out() const;
+
+ private:
+  struct Patch { double cx, cy, r; std::vector<std::size_t> vi, gi; std::shared_ptr<RbfField> f; };
+  std::vector<Patch> patches_;
+  std::vector<RbfField::Value> values_;
+  std::vector<RbfField::Gradient> grads_;
+  double nugget_ = 0, scale_ = 1, stretch_ = 1;
+  Vec3 centre_;
+  double h_ = 0;              ///< lattice spacing
+  std::size_t nx_ = 0, ny_ = 0;
+  double x0_ = 0, y0_ = 0;
+};
+
+/// Leave-one-out errors of the interface values of the dense field (Rippa 1999):
+/// e_i = alpha_i / (A^-1)_ii, in the order given.
+std::vector<double> rippa_loo(const std::vector<RbfField::Value>& values, const std::vector<RbfField::Gradient>& grads, double nugget,
+                              Vec3 centre, double scale, double vertical_stretch);
 
 /// Plane fitted to fault sticks: centroid, unit normal pointing up, strike and dip (radians,
 /// right-hand rule: dip direction = strike + 90 degrees) and RMS distance of the points.

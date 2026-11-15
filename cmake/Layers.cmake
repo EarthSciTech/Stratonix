@@ -8,6 +8,7 @@ add_library(stratonix_engines STATIC
   src/engines/faults.cpp
   src/engines/parametric.cpp
   src/engines/implicit.cpp
+  src/engines/conditioning.cpp
   src/engines/wells.cpp
   src/engines/register.cpp)
 target_link_libraries(stratonix_engines PUBLIC stratonix_model stratonix_desc stratonix_registry)

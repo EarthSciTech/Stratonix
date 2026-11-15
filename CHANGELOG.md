@@ -3,6 +3,18 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [Unreleased] - v3 (2026.3) in progress
+
+### Added
+- Stage 3A specification (STX-TN-11): data-conditioned modelling. It covers a large-data implicit
+  solver (partition of unity of Hermite RBF fields, decision 11), one field per stratigraphic
+  series, throws and tips from horizon cut-offs, fault profiles from sticks, hybrid conditioning
+  of v2 parameters by weighted least squares, and per-point data uncertainty with
+  leave-one-out errors. Interfaces, additive and not yet built: `SolverOptions`, `PuField`,
+  `rippa_loo` (engines/implicit.hpp); `estimate_throws`, `profile_from_sticks` and
+  `condition_to_data` (engines/conditioning.hpp); `RbfField::Value::sigma`.
+- Tests: `test_v3_data` (nine cases), expected to fail until Prompts 35 and 36.
+
 ## [2026.2] - 2026-11-15 - Version 2: structural geology in depth
 
 Version 2 adds:

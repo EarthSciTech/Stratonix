@@ -22,6 +22,10 @@ stx_test(test_v2_strat stratonix_package)
 stx_test(test_v2_salt stratonix_package)
 stx_test(test_v2_history stratonix_package)
 stx_test(test_v2_faultrock stratonix_package)
+# Stage 3A analytical tests (STX-TN-11), written before the features (Prompt 34) and made to pass
+# by Prompts 35 and 36.
+stx_test(test_v3_data stratonix_package)
+set_tests_properties(test_v3_data PROPERTIES WILL_FAIL TRUE)
 # Independent check of the figure files (Python: Pillow, tifffile, python-pptx); skipped if absent.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)

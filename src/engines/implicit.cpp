@@ -109,6 +109,19 @@ Vec3 RbfField::gradient(const Vec3& xw) const {
   return g;
 }
 
+// ---- partition of unity (stage 3A, STX-TN-11 section 1): specified, built by Prompt 35 ----------
+PuField::PuField(std::vector<RbfField::Value>, std::vector<RbfField::Gradient>, double, Vec3, double, double, double, double, double, double,
+                 const SolverOptions&) {
+  throw Error(ErrorCode::Build, "partition-of-unity solver: specified in STX-TN-11, not built yet (Prompt 35)");
+}
+double PuField::value(const Vec3&) const { return kNaN; }
+Vec3 PuField::gradient(const Vec3&) const { return {kNaN, kNaN, kNaN}; }
+std::size_t PuField::largest_patch() const { return 0; }
+std::vector<double> PuField::leave_one_out() const { return {}; }
+std::vector<double> rippa_loo(const std::vector<RbfField::Value>&, const std::vector<RbfField::Gradient>&, double, Vec3, double, double) {
+  throw Error(ErrorCode::Build, "leave-one-out errors: specified in STX-TN-11, not built yet (Prompt 35)");
+}
+
 // ---- plane fit -------------------------------------------------------------------------------------
 FittedPlane fit_plane(const std::vector<Polyline>& sticks) {
   FittedPlane fp;
