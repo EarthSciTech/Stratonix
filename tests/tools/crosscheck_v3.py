@@ -29,6 +29,7 @@ import csv, io, json, pathlib, subprocess, sys, tempfile
 import numpy as np
 
 NEAR = 500.0       # m: near a fault = within this distance of a fault gap
+STRIDE = 4         # compare on every 4th grid node (200 m on the 50 m examples)
 FOOTPRINT = 300.0  # m: compare a horizon only within this distance of its data
 EXAMPLES = ["implicit_unconformity_from_samples", "implicit_relay_splay_from_samples",
             "implicit_detachment_folds_from_samples", "implicit_faults_series_from_data"]
@@ -195,7 +196,10 @@ def main(argv):
             setup = json.loads((root / "loopstructural/model_setup.json").read_text())
             rows = list(csv.DictReader(io.StringIO((root / "loopstructural/data.csv").read_text())))
             horizons = [h for h in setup["strati_values"]]
-            grids = {h: read_irap(root / "horizons" / f"{h}_faulted.irap") for h in horizons}
+            grids = {}
+            for h in horizons:
+                X, Y, z, dx = read_irap(root / "horizons" / f"{h}_faulted.irap")
+                grids[h] = (X[::STRIDE, ::STRIDE], Y[::STRIDE, ::STRIDE], z[::STRIDE, ::STRIDE], dx * STRIDE)
             other = loopstructural_surfaces(root, setup, rows, horizons, grids) if have_ls else substitute_surfaces(rows, horizons, grids, root)
             ok = True
             feet = {}
