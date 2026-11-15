@@ -578,6 +578,49 @@ Figure map_figure(const FigureContext& c, int h, const repr::FaultedSurface& sur
   return f;
 }
 
+Figure unfolded_figure(const FigureContext& c, const std::string& section, const std::vector<repr::UnfoldedHorizon>& beds) {
+  Figure f(842, 595);
+  const auto& inf = c.model->info();
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - section " + section + " unfolded by flexural slip",
+        "Each bed straightened along its own length from a pin at the section's start, fault gaps closed, at its depth at the pin "
+        "(Dahlstrom 1969); bed lengths in the legend");
+  const double px = 70, py = 70, pw = 842 - 300, ph = 595 - 140;
+  double lmax = 1, zmin = 1e300, zmax = -1e300;
+  for (auto& b : beds) {
+    lmax = std::max(lmax, b.traced_length);
+    for (auto& p : b.restored) { zmin = std::min(zmin, p.z); zmax = std::max(zmax, p.z); }
+  }
+  if (!(zmax > zmin)) { zmin -= 1; zmax += 1; }
+  const double pad = 0.08 * (zmax - zmin);
+  zmin -= pad;
+  zmax += pad;
+  auto X = [&](double s) { return px + s / lmax * pw; };
+  auto Y = [&](double z) { return py + (zmax - z) / (zmax - zmin) * ph; };
+  f.rect(px, py, pw, ph, none(), kInk, 0.6);
+  for (double t : nice_ticks(0, lmax, 6)) {
+    f.line({X(t), py + ph}, {X(t), py + ph + 3}, kInk, 0.5);
+    f.text({X(t), py + ph + 12}, fmt_fixed(t, 0), 6.5, Anchor::Middle, false, kInk);
+  }
+  for (double t : nice_ticks(-zmax, -zmin, 6)) {
+    f.line({px - 3, Y(-t)}, {px, Y(-t)}, kInk, 0.5);
+    f.text({px - 5, Y(-t) + 2.5}, fmt_fixed(t, 0), 6.5, Anchor::End, false, kInk);
+  }
+  f.text({px + pw / 2, py + ph + 28}, "Restored bed length from the pin (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({px - 45, py + ph / 2}, "Depth at the pin (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  std::vector<LegendEntry> es;
+  for (auto& b : beds) {
+    if (b.restored.size() < 2) continue;
+    Color col = unit_color(c, static_cast<std::size_t>(b.horizon) + 1);
+    Color dark = rgb(static_cast<std::uint8_t>(col.r * 0.6), static_cast<std::uint8_t>(col.g * 0.6), static_cast<std::uint8_t>(col.b * 0.6));
+    f.line({X(0), Y(b.restored.front().z)}, {X(b.traced_length), Y(b.restored.back().z)}, dark, 1.4);
+    es.push_back({"Beds", inf.horizons[static_cast<std::size_t>(b.horizon)].name + ": " + fmt_fixed(b.traced_length, 0) + " m", none(), true, dark, 1.4});
+  }
+  double ly = legend(f, 842 - 200, py, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 200, ly, 190);
+  footer(f, c);
+  return f;
+}
+
 Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b) {
   Figure f(842, 595);
   const auto& inf = c.model->info();

@@ -81,6 +81,12 @@ int Description::fault_index(const std::string& n) const {
     if (faults[i].name == n) return static_cast<int>(i);
   return -1;
 }
+std::vector<const EventDesc*> Description::events_for(const std::string& type, const std::string& ref) const {
+  std::vector<const EventDesc*> out;
+  for (auto& e : events)
+    if (e.type == type && e.ref == ref) out.push_back(&e);
+  return out;
+}
 int Description::series_of(int h) const {
   if (h < 0 || static_cast<std::size_t>(h) >= horizons.size()) return -1;
   for (std::size_t k = 0; k < series.size(); ++k)
@@ -106,7 +112,7 @@ std::vector<const Param*> Description::all_params() const {
   auto add = [&](const Param& p) { if (p.present) r.push_back(&p); };
   for (auto* p : {&origin, &size, &depth_range, &grid_spacing, &ref_point, &regional_dip, &correction_range,
                   &regional_dip_azimuth, &frame_point, &tol_thickness_min, &tol_crossing,
-                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &tol_area, &tol_salt_volume, &tol_solid_thickness, &scaling_min_ratio, &scaling_max_ratio,
+                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &tol_area, &tol_salt_volume, &tol_solid_thickness, &tol_restoration, &tol_balance, &scaling_min_ratio, &scaling_max_ratio,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
                   &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
                   &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch})
@@ -118,6 +124,8 @@ std::vector<const Param*> Description::all_params() const {
   }
   for (auto& h : horizons) { add(h.depth); add(h.thickness_above); add(h.iso_thickness); add(h.iso_gradient); add(h.iso_centre); }
   for (auto& h : horizons) add(h.age);
+  for (auto& e : events)
+    for (auto* q : {&e.age, &e.from, &e.to, &e.throw_}) add(*q);
   add(salt.source_thickness);
   for (auto& b : salt.bodies)
     for (auto* q : {&b.centre, &b.radius, &b.flank_width, &b.height, &b.withdrawal_width, &b.axis_azimuth, &b.half_length}) add(*q);
@@ -632,6 +640,8 @@ struct Typer {
         d.tol_area = P(t, "area", b, Dimension::Dimensionless, false, 1);
         d.tol_salt_volume = P(t, "salt_volume", b, Dimension::Dimensionless, false, 1);
         d.tol_solid_thickness = P(t, "solid_thickness", b, Dimension::Dimensionless, false, 1);
+        d.tol_restoration = P(t, "restoration", b, Dimension::Length, false, 1);
+        d.tol_balance = P(t, "balance", b, Dimension::Dimensionless, false, 1);
       }
       if (const Node* fsc = ch->get("fault_scaling")) {
         d.scaling_min_ratio = P(fsc, "min_ratio", "checks.fault_scaling", Dimension::Dimensionless, false, 1);
@@ -759,6 +769,27 @@ struct Typer {
       if (const Node* ip = o->get("isopachs"))
         for (auto& x : ip->seq) d.isopachs.push_back(x.str);
     }
+    if (const Node* ev = root.get("events"))
+      for (std::size_t k = 0; k < ev->seq.size(); ++k) {
+        const Node& en = ev->seq[k];
+        const std::string eb = "events[" + std::to_string(k) + "]";
+        EventDesc e;
+        e.name = S(&en, "name");
+        e.type = S(&en, "type");
+        e.ref = e.type == "deposition" ? S(&en, "horizon") : e.type == "fault" ? S(&en, "fault") : e.type == "fold" ? S(&en, "primitive")
+                                                                                                  : S(&en, "body");
+        const bool span = en.get("from") || en.get("to");
+        e.age = P(&en, "age", eb, Dimension::Time, !span, 1);
+        e.from = P(&en, "from", eb, Dimension::Time, span, 1);
+        e.to = P(&en, "to", eb, Dimension::Time, span, 1);
+        e.throw_ = P(&en, "throw", eb, Dimension::Length, false, 1);
+        e.sense = S(&en, "sense");
+        if (e.type == "deposition" && e.age.present) {
+          int h = d.horizon_index(e.ref);
+          if (h >= 0 && !d.horizons[static_cast<std::size_t>(h)].age.present) d.horizons[static_cast<std::size_t>(h)].age = e.age;
+        }
+        d.events.push_back(std::move(e));
+      }
   }
 
   // ---- semantic rules ----------------------------------------------------------------------
@@ -907,6 +938,57 @@ struct Typer {
         } else {
           c.err(ub + ".law", "F25", "law must be exponential or table");
         }
+      }
+    }
+    // STX-TN-09 (F26): the event timeline
+    if (!d.events.empty()) {
+      std::set<std::string> enames;
+      for (std::size_t k = 0; k < d.events.size(); ++k) {
+        const auto& e = d.events[k];
+        const std::string eb = "events[" + std::to_string(k) + "]";
+        if (!enames.insert(e.name).second) c.err(eb + ".name", "F26", "duplicate event name '" + e.name + "'");
+        bool known = false;
+        if (e.type == "deposition") known = d.horizon_index(e.ref) >= 0;
+        else if (e.type == "fault") known = d.fault_index(e.ref) >= 0;
+        else if (e.type == "fold") known = std::any_of(d.primitives.begin(), d.primitives.end(), [&](const PrimitiveDesc& p) { return p.name == e.ref; });
+        else if (e.type == "salt") known = std::any_of(d.salt.bodies.begin(), d.salt.bodies.end(), [&](const SaltBodyDesc& b) { return b.name == e.ref; });
+        if (!known) c.err(eb, "F26", "event '" + e.name + "' refers to an unknown " + e.type + " '" + e.ref + "'");
+        if (e.from.present && e.to.present && !(e.from.si() > e.to.si())) c.err(eb + ".from", "F26", "from must be older (larger age) than to");
+        if ((e.throw_.present || !e.sense.empty()) && e.type != "fault") c.err(eb, "F26", "throw and sense belong to fault events");
+      }
+      for (std::size_t h = 0; h < d.horizons.size(); ++h) {
+        const auto& hd = d.horizons[h];
+        if (!hd.age.present) c.err("stratigraphy.horizons[" + std::to_string(h) + "]", "F26",
+                                   "horizon '" + hd.name + "' has no age: a timeline needs a deposition event or an age for every horizon");
+        else if (h > 0 && d.horizons[h - 1].age.present && !(hd.age.si() > d.horizons[h - 1].age.si()))
+          c.err("stratigraphy.horizons[" + std::to_string(h) + "]", "F26", "ages must increase downwards: '" + hd.name +
+                                                                              "' is not older than '" + d.horizons[h - 1].name + "'");
+      }
+      auto timed = [&](const std::string& type, const std::string& ref, const std::string& b, bool has_growth) {
+        auto ev = d.events_for(type, ref);
+        if (ev.empty()) c.err(b, "F26", "in a timeline every " + type + " has an event; '" + ref + "' has none");
+        if (has_growth && !ev.empty()) c.err(b + ".growth", "F26", "give the timing of '" + ref + "' by its events, not by growth");
+        return ev;
+      };
+      for (std::size_t k = 0; k < d.primitives.size(); ++k)
+        timed("fold", d.primitives[k].name, "structure.primitives[" + std::to_string(k) + "]", d.primitives[k].growth.present());
+      for (std::size_t k = 0; k < d.salt.bodies.size(); ++k)
+        timed("salt", d.salt.bodies[k].name, "structure.salt.bodies[" + std::to_string(k) + "]", d.salt.bodies[k].growth.present());
+      for (std::size_t k = 0; k < d.faults.size(); ++k) {
+        const auto& fd = d.faults[k];
+        const std::string b = "faults[" + std::to_string(k) + "]";
+        auto ev = timed("fault", fd.name, b, fd.growth.present());
+        if (ev.size() > 1)
+          for (auto* e : ev)
+            if (!e->throw_.present || (e->sense != "normal" && e->sense != "reverse"))
+              c.err(b, "F26", "fault '" + fd.name + "' moves in phases: event '" + e->name + "' needs its throw and sense (normal or reverse)");
+        // level-dependent displacement needs layer-rigid hanging walls
+        bool varies = ev.size() > 1;
+        for (auto* e : ev)
+          for (auto& hd : d.horizons) varies = varies || (hd.age.present && hd.age.si() < e->start());
+        if (varies && fd.hw_type != "layer_rigid")
+          c.err(b + ".hanging_wall.type", "F26", "fault '" + fd.name + "' displaces horizons by different amounts (phases, or deposition during or after "
+                                                 "its events): it takes hanging_wall: layer_rigid");
       }
     }
     for (std::size_t k = 0; k < d.faults.size(); ++k) {

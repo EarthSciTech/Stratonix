@@ -1107,6 +1107,12 @@
             },
             "solid_thickness": {
               "$ref": "#/$defs/param"
+            },
+            "restoration": {
+              "$ref": "#/$defs/param"
+            },
+            "balance": {
+              "$ref": "#/$defs/param"
             }
           }
         },
@@ -1610,6 +1616,60 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "deposition",
+              "fault",
+              "fold",
+              "salt"
+            ]
+          },
+          "horizon": {
+            "type": "string"
+          },
+          "fault": {
+            "type": "string"
+          },
+          "primitive": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "age": {
+            "$ref": "#/$defs/param"
+          },
+          "from": {
+            "$ref": "#/$defs/param"
+          },
+          "to": {
+            "$ref": "#/$defs/param"
+          },
+          "throw": {
+            "$ref": "#/$defs/param"
+          },
+          "sense": {
+            "enum": [
+              "normal",
+              "reverse"
+            ]
           }
         }
       }

@@ -1,0 +1,76 @@
+# Worked example 20: a basin history with inversion. Pre-rift strata (H3 to H5) were cut by a normal
+# fault with 300 m of throw (95 to 85 Ma); syn- to post-rift H2 was deposited; the fault was then
+# inverted by 150 m of reverse slip while a hanging-wall anticline grew (55 to 45 Ma); H1 erodes the
+# uplifted crest and seals it all. The pre-rift keeps net normal throw, H2 is in reverse, H1 is
+# unfaulted. Every event is a
+# restored state in the package (stage 2E). DESIGN model; every parameter carries value, unit,
+# evidence and source.
+stratonix_schema: 1
+model: {name: example_inversion, version: "1.0.0", status: DESIGN,
+        title: "Rift and inversion history"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 2500] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, footwall"
+    tops:
+      H1: "800 m | user_instruction | worked example"
+      H2: "1000 m | user_instruction | worked example"
+      H3: "1300 m | user_instruction | worked example"
+      H4: "1500 m | user_instruction | worked example"
+      H5: "1700 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[6500, 5000] m | user_instruction | worked example: planned well on the inversion anticline"
+    total_depth: "2200 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}, {name: H4}, {name: H5, intended_offset: true}]
+  units:
+    - {name: Post_inversion, top: H1, base: H2}
+    - {name: Post_rift, top: H2, base: H3}
+    - {name: Pre_rift_upper, top: H3, base: H4}
+    - {name: Pre_rift_lower, top: H4, base: H5}
+  series:
+    - {name: Post_inversion, horizons: [H1], base: erosional}
+    - {name: Basin, horizons: [H2, H3, H4, H5], base: conformable}
+structure:
+  regional: {type: flat}
+  primitives:
+    - {type: anticline, name: Inversion_fold, crest: "[6500, 5000] m | user_instruction | worked example: hanging wall of F1", axis_azimuth: "0 deg | user_instruction | worked example",
+       half_width_left: "1500 m | user_instruction | worked example", half_width_right: "1500 m | user_instruction | worked example", relief: {H5: "120 m | user_instruction | worked example"}}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry: {type: planar, reference_point: "[5000, 5000] m | user_instruction | worked example", reference_depth: "1200 m | user_instruction | worked example", strike: "0 deg | user_instruction | worked example: dips east", dip: "60 deg | user_instruction | worked example"}
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "30000 m | user_instruction | worked example: longer than the model"
+    throw:
+      max: "300 m | user_instruction | worked example: rift throw (the events give each phase)"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.01 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: layer_rigid}
+frame: {fixed: {well: W1}}
+events:
+  - {name: Dep_H5, type: deposition, horizon: H5, age: "120 Ma | user_instruction | worked example"}
+  - {name: Dep_H4, type: deposition, horizon: H4, age: "110 Ma | user_instruction | worked example"}
+  - {name: Dep_H3, type: deposition, horizon: H3, age: "100 Ma | user_instruction | worked example"}
+  - {name: Rift, type: fault, fault: F1, from: "95 Ma | user_instruction | worked example", to: "85 Ma | user_instruction | worked example", throw: "300 m | user_instruction | worked example", sense: normal}
+  - {name: Dep_H2, type: deposition, horizon: H2, age: "70 Ma | user_instruction | worked example"}
+  - {name: Inversion, type: fault, fault: F1, from: "55 Ma | user_instruction | worked example", to: "45 Ma | user_instruction | worked example", throw: "150 m | user_instruction | worked example", sense: reverse}
+  - {name: Folding, type: fold, primitive: Inversion_fold, from: "55 Ma | user_instruction | worked example", to: "45 Ma | user_instruction | worked example"}
+  - {name: Dep_H1, type: deposition, horizon: H1, age: "30 Ma | user_instruction | worked example"}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[200, 5000], [9800, 5000]] m | user_instruction | worked example: across the fault and the fold"
+  vertical_exaggeration: "3 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

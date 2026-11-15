@@ -54,6 +54,22 @@ int cmd_build(Args& a) {
   return 0;
 }
 
+int cmd_state(Args& a) {
+  if (a.positional().empty() || !a.has("o") || !a.has("age"))
+    throw Error(ErrorCode::InvalidArgument, "usage: stratonix state <description.yaml> --age <Ma> -o <new folder>");
+  BuildOptions o;
+  o.figures = !a.flag("no-figures");
+  o.exports = csv(a.get("formats"));
+  const double age = std::stod(a.get("age"));
+  auto r = run_state(a.positional()[0], a.get("o"), age, o);
+  std::cout << "state at " << a.get("age") << " Ma of " << r.model->info().name << " -> " << a.get("o") << "\n";
+  if (!r.checks_passed) {
+    std::cout << "checks FAILED (see checks_report.txt)\n";
+    return 4;
+  }
+  return 0;
+}
+
 int cmd_section(Args& a) {
   if (a.positional().empty() || !a.has("o")) throw Error(ErrorCode::InvalidArgument, "usage: stratonix section <description.yaml> -o <new folder> (--name N | --line x1,y1;x2,y2;...)");
   Polyline pl;

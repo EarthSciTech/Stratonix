@@ -396,7 +396,49 @@ std::vector<TerminationLine> termination_lines(const Model& m, int unit, const G
   return out;
 }
 
-// Stage 2E (STX-TN-09 section 3): implemented in Prompt 30.
-std::vector<UnfoldedHorizon> unfold_flexural(const Model&, const Section&) { return {}; }
+// Stage 2E (STX-TN-09 section 3): horizon runs per fault block, flexural-slip unfolding.
+std::vector<std::vector<Vec3>> horizon_segments(const Model& m, const Section& s, int h) {
+  std::vector<std::vector<Vec3>> out;
+  const auto& hz = s.horizon_z[static_cast<std::size_t>(h)];
+  std::vector<Vec3> pts;
+  std::vector<std::size_t> col;
+  for (std::size_t i = 0; i < s.ns; ++i)
+    if (!std::isnan(hz[i])) { pts.push_back({s.xy[i].x, s.xy[i].y, hz[i] - 0.01}); col.push_back(i); }
+  if (pts.empty()) return out;
+  EvalResult r;
+  m.evaluate(pts, kEvalBlock, r);
+  std::vector<Vec3> run;
+  for (std::size_t k = 0; k < pts.size(); ++k) {
+    Vec3 p{pts[k].x, pts[k].y, pts[k].z + 0.01};
+    bool joined = !run.empty() && col[k] == col[k - 1] + 1 && r.block[k] == r.block[k - 1];
+    if (!joined && run.size() >= 2) out.push_back(run);
+    if (!joined) run.clear();
+    run.push_back(p);
+  }
+  if (run.size() >= 2) out.push_back(run);
+  return out;
+}
+
+std::vector<UnfoldedHorizon> unfold_flexural(const Model& m, const Section& s) {
+  std::vector<UnfoldedHorizon> out;
+  for (std::size_t h = 0; h < m.info().horizons.size(); ++h) {
+    UnfoldedHorizon u;
+    u.horizon = static_cast<int>(h);
+    auto segs = horizon_segments(m, s, static_cast<int>(h));
+    if (segs.empty()) { out.push_back(u); continue; }
+    // pin: the first point of the trace, at its depth; the bed straightened along its own length
+    const Vec3 pin = segs.front().front();
+    double acc = 0;
+    u.restored.push_back({0, 0, pin.z});
+    for (auto& run : segs)
+      for (std::size_t k = 1; k < run.size(); ++k) {
+        acc += norm(run[k] - run[k - 1]);
+        u.restored.push_back({acc, 0, pin.z});
+      }
+    u.traced_length = acc;
+    out.push_back(u);
+  }
+  return out;
+}
 
 }  // namespace stratonix::repr

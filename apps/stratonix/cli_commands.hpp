@@ -55,6 +55,7 @@ class Args {
 int cmd_validate(Args&);
 int cmd_build(Args&);
 int cmd_section(Args&);
+int cmd_state(Args&);
 int cmd_export(Args&);
 int cmd_package(Args&);
 int cmd_plugins(Args&);

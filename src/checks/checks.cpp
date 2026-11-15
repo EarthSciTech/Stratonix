@@ -11,6 +11,7 @@
 #include "stratonix/core/roots.hpp"
 #include "stratonix/engines/faults.hpp"
 #include "stratonix/engines/structure.hpp"
+#include "stratonix/engines/history.hpp"
 
 // Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c1);
@@ -29,6 +30,8 @@ STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c13);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c14);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c15);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c16);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c17);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(check_c18);
 
 namespace stratonix {
 
@@ -117,7 +120,8 @@ double CheckContext::tolerance(const std::string& key, std::string* source) cons
                      {"offset_outside_tips", &d_.tol_offset_outside_tips, 0.05}, {"throw", &d_.tol_throw, 0.5},
                      {"wells", &d_.tol_wells, 0.01}, {"unoffset", &d_.tol_unoffset, 0.05},
                      {"area", &d_.tol_area, 0.01}, {"salt_volume", &d_.tol_salt_volume, 0.01},
-                     {"solid_thickness", &d_.tol_solid_thickness, 0.001}};
+                     {"solid_thickness", &d_.tol_solid_thickness, 0.001}, {"restoration", &d_.tol_restoration, 0.05},
+                     {"balance", &d_.tol_balance, 0.02}};
   for (auto& t : table)
     if (key == t.key) {
       if (t.p->present) {
@@ -716,6 +720,85 @@ class C16 final : public Check {
   }
 };
 
+/// C17: restorability at every event (STX-TN-09 section 4).
+class C17 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const auto& d = c.description();
+    if (d.events.empty() || !c.timeline_checks || !c.model().capability("structure")) return out;
+    std::string src;
+    std::string src2;
+    const double tol = c.tolerance("restoration", &src), cross = c.tolerance("crossing", &src2);
+    auto ages = event_ages(d);
+    ages.push_back(0.0);
+    const auto& g = c.grid();
+    const std::size_t step = std::max<std::size_t>(1, g.size() / 1500);
+    double round_trip = 0, worst_thk = 1e300;
+    std::string bad;
+    std::size_t built = 0;
+    for (double a : ages) {
+      ModelPtr s;
+      try {
+        s = build_state(d, c.model(), a);
+      } catch (const std::exception& e) {
+        bad += (bad.empty() ? "" : "; ") + std::string("state at ") + fmt_shortest(a) + " Ma does not build: " + e.what();
+        continue;
+      }
+      ++built;
+      auto* st = static_cast<const Structure*>(s->capability("structure"));
+      const std::size_t nh = st->horizons();
+      std::vector<double> z(nh);
+      for (std::size_t k = 0; k < g.size(); k += step) {
+        st->z_all(g.x(k % g.nx), g.y(k / g.nx), z.data());
+        for (std::size_t h = 1; h < nh; ++h) worst_thk = std::min(worst_thk, z[h - 1] - z[h]);
+      }
+      if (a == 0.0) {  // the present state reproduces the full model
+        auto* full = static_cast<const Structure*>(c.model().capability("structure"));
+        std::vector<double> zf(full->horizons());
+        for (std::size_t k = 0; k < g.size(); k += step) {
+          const double x = g.x(k % g.nx), y = g.y(k / g.nx);
+          st->z_all(x, y, z.data());
+          full->z_all(x, y, zf.data());
+          for (std::size_t h = 0; h < nh && h < zf.size(); ++h) round_trip = std::max(round_trip, std::fabs(z[h] - zf[h]));
+        }
+      }
+    }
+    auto r = base(c, "C17", "restorability at every event", "timeline");
+    r.value = round_trip;
+    r.tolerance = tol;
+    r.tolerance_source = src;
+    r.passed = bad.empty() && round_trip <= tol && worst_thk >= -cross;
+    r.detail = std::to_string(built) + " of " + std::to_string(ages.size()) + " states built; minimum thickness " +
+               fmt_fixed(worst_thk, 3) + " m; present state against the model" + (bad.empty() ? "" : "; " + bad);
+    out.push_back(r);
+    return out;
+  }
+};
+
+/// C18: line-length and area balance per section (STX-TN-09 section 4), a warning.
+class C18 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const auto& d = c.description();
+    if (d.events.empty() || !c.timeline_checks) return out;
+    std::string src;
+    const double tol = c.tolerance("balance", &src);
+    for (auto& b : balance_rows(c.model(), d)) {
+      auto r = base(c, "C18", "balance (" + b.method + ")", b.section + " / " + b.subject);
+      r.unit = "fraction";
+      r.value = b.mismatch;
+      r.tolerance = tol;
+      r.tolerance_source = src;
+      r.passed = !b.tested || b.mismatch <= tol;
+      r.info = !b.tested;
+      r.warn_only = true;
+      r.detail = "present " + fmt_fixed(b.present, 1) + ", restored " + fmt_fixed(b.restored, 1);
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 /// C5: control wells honoured (check wells reported as warnings).
 class C5 final : public Check {
   std::vector<CheckResult> run(CheckContext& c) const override {
@@ -928,8 +1011,95 @@ STRATONIX_REGISTER(check_c15, registry::Kind::Check, "C15_salt_volume", "1.0.0",
                    [] { return std::make_unique<C15>(); })
 STRATONIX_REGISTER(check_c16, registry::Kind::Check, "C16_solid_thickness", "1.0.0", "Solid thickness conserved through compaction",
                    [] { return std::make_unique<C16>(); })
+STRATONIX_REGISTER(check_c17, registry::Kind::Check, "C17_restorability", "1.0.0", "Restorability at every event",
+                   [] { return std::make_unique<C17>(); })
+STRATONIX_REGISTER(check_c18, registry::Kind::Check, "C18_balance", "1.0.0", "Line-length and area balance (warning)",
+                   [] { return std::make_unique<C18>(); })
 STRATONIX_REGISTER(check_c11, registry::Kind::Check, "C11_fault_system", "1.0.0",
                    "Throw continuous across branch lines and relays", [] { return std::make_unique<C11>(); })
+
+std::vector<BalanceRow> balance_rows(const Model& m, const desc::Description& d) {
+  std::vector<BalanceRow> rows;
+  std::vector<std::pair<std::string, Polyline>> secs;
+  for (auto& s : d.sections) {
+    Polyline pl;
+    for (std::size_t r = 0; r < s.polyline.rows(); ++r) pl.push_back({s.polyline.si(2 * r), s.polyline.si(2 * r + 1), 0});
+    secs.push_back({s.name, pl});
+  }
+  const Domain& dm = m.info().domain;
+  if (secs.empty()) secs.push_back({"X_centre", {{dm.x0, dm.y0 + dm.sy / 2, 0}, {dm.x0 + dm.sx, dm.y0 + dm.sy / 2, 0}}});
+  const auto& inf = m.info();
+  for (auto& [name, line] : secs) {
+    auto s = repr::make_section(m, name, line, std::max(10.0, d.grid_spacing.si() / 2), 5.0);
+    std::vector<std::vector<std::vector<Vec3>>> segs(inf.horizons.size());
+    // a horizon where it coincides with a younger one is absent there (eroded, or lapping out)
+    auto coincident = [&](std::size_t h, const Vec3& p) {
+      for (std::size_t j = 0; j < h; ++j) {
+        double zj = kNaN;
+        double best = 1e300;
+        for (std::size_t i = 0; i < s.ns; ++i)
+          if (std::fabs(s.xy[i].x - p.x) + std::fabs(s.xy[i].y - p.y) < best) { best = std::fabs(s.xy[i].x - p.x) + std::fabs(s.xy[i].y - p.y); zj = s.horizon_z[j][i]; }
+        if (!std::isnan(zj) && std::fabs(zj - p.z) < 0.05) return true;
+      }
+      return false;
+    };
+    for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
+      segs[h] = repr::horizon_segments(m, s, static_cast<int>(h));
+      double lp = 0, lr = 0;
+      for (auto& run : segs[h]) {
+        std::vector<Vec3> rr(run.size());
+        m.restore(run, rr);
+        for (std::size_t k = 1; k < run.size(); ++k) {
+          if (coincident(h, run[k]) || coincident(h, run[k - 1])) continue;
+          lp += norm(run[k] - run[k - 1]);
+          lr += norm(rr[k] - rr[k - 1]);
+        }
+      }
+      if (lp > 0) rows.push_back({name, inf.horizons[h].name, "line length, faults restored by their own inverses", lp, lr, std::fabs(lr - lp) / lp});
+    }
+    // area of each unit: quads between consecutive columns where top and base are in one block
+    for (std::size_t u = 1; u < inf.horizons.size(); ++u) {
+      const auto &zt = s.horizon_z[u - 1], &zb = s.horizon_z[u];
+      std::vector<Vec3> pts;
+      std::vector<std::size_t> cols;
+      for (std::size_t i = 0; i < s.ns; ++i)
+        if (!std::isnan(zt[i]) && !std::isnan(zb[i]) && zt[i] - zb[i] > 0.01) {
+          pts.push_back({s.xy[i].x, s.xy[i].y, zt[i] - 0.01});
+          pts.push_back({s.xy[i].x, s.xy[i].y, zb[i] + 0.01});
+          cols.push_back(i);
+        }
+      if (cols.size() < 2) continue;
+      EvalResult er;
+      m.evaluate(pts, kEvalBlock, er);
+      std::vector<Vec3> rr(pts.size());
+      m.restore(pts, rr);
+      auto quad = [](const Vec3& a, const Vec3& b, const Vec3& cc, const Vec3& dd) {
+        return 0.5 * norm(cross(cc - a, dd - b));
+      };
+      double ap = 0, ar = 0;
+      for (std::size_t k = 0; k + 1 < cols.size(); ++k) {
+        if (cols[k + 1] != cols[k] + 1) continue;
+        const std::size_t a0 = 2 * k, b0 = 2 * k + 1, a1 = 2 * k + 2, b1 = 2 * k + 3;
+        if (er.block[a0] != er.block[b0] || er.block[a0] != er.block[a1] || er.block[a1] != er.block[b1]) continue;
+        ap += quad(pts[a0], pts[a1], pts[b1], pts[b0]);
+        ar += quad(rr[a0], rr[a1], rr[b1], rr[b0]);
+      }
+      // only units deposited before every deformation event keep their area in the restored frame;
+      // syn- and post-kinematic units are thicker or thinner by deposition, and are reported only
+      bool pre = true;
+      if (!d.events.empty()) {
+        const auto& top = d.horizons[u - 1];
+        for (auto& e : d.events)
+          if (e.type != "deposition" && top.age.present && top.age.si() < e.start()) pre = false;
+      }
+      if (ap > 0)
+        rows.push_back({name, inf.units[u].name,
+                        pre ? "area, faults restored by their own inverses" : "area, syn- or post-kinematic unit (reported only)", ap, ar,
+                        std::fabs(ar - ap) / ap, pre});
+    }
+  }
+  return rows;
+}
 
 CheckReport run_checks(CheckContext& ctx) {
   CheckReport rep;
@@ -962,6 +1132,8 @@ void register_check_plugins() {
   STRATONIX_PLUGIN_ANCHOR(check_c14);
   STRATONIX_PLUGIN_ANCHOR(check_c15);
   STRATONIX_PLUGIN_ANCHOR(check_c16);
+  STRATONIX_PLUGIN_ANCHOR(check_c17);
+  STRATONIX_PLUGIN_ANCHOR(check_c18);
 }
 
 }  // namespace stratonix

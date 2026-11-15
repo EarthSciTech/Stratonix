@@ -51,6 +51,14 @@ void write_figures(const desc::Description& d, const Model& m, const std::vector
 /// four figure formats; the model is built and checked first and nothing is drawn if a check fails.
 BuildOutcome run_section(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::string& name,
                          const Polyline& line, const BuildOptions& opt);
+/// Build the model at time `age` (Ma) of a description with events, and write its package
+/// (stage 2E, STX-TN-09 section 2).
+BuildOutcome run_state(const std::filesystem::path& description, const std::filesystem::path& out_dir, double age,
+                       const BuildOptions& opt);
+/// Restoration report of a timeline model into `folder`: a section and a map at every event,
+/// the sequence as one deck, the flexural-slip unfolded section, balance.csv and the checks of
+/// every state (STX-TN-09 sections 2 and 3). Nothing is written for a model without events.
+void write_restoration(const desc::Description& d, const Model& m, const std::filesystem::path& folder);
 
 /// Export ids from a request ("petrel" expands to the Petrel set; unknown ids are skipped with a
 /// warning); an empty request takes the description's outputs.exports.

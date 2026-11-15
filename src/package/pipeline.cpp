@@ -6,6 +6,7 @@
 
 #include "stratonix/checks/checks.hpp"
 #include "stratonix/checks/manifest.hpp"
+#include "stratonix/engines/history.hpp"
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/wells.hpp"
 #include "stratonix/figures/figures.hpp"
@@ -305,6 +306,110 @@ std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Mo
   return io::export_set(c, ids, folder, note);
 }
 
+/// Summary rows for the events of a timeline (stage 2E): each event's displacement.
+std::vector<std::pair<std::string, std::string>> event_rows(const desc::Description& d) {
+  std::vector<std::pair<std::string, std::string>> k;
+  for (auto& e : d.events) {
+    const std::string when = e.from.present ? fmt_shortest(e.from.si()) + " to " + fmt_shortest(e.to.si()) + " Ma" : fmt_shortest(e.age.si()) + " Ma";
+    std::string what;
+    if (e.type == "deposition") what = "deposition of " + e.ref;
+    else if (e.type == "fault") {
+      const auto& fd = d.faults[static_cast<std::size_t>(d.fault_index(e.ref))];
+      const double t = e.throw_.present ? e.throw_.si() : fd.throw_max.si();
+      const std::string sense = !e.sense.empty() ? e.sense : (fd.sense.empty() ? "normal" : fd.sense);
+      what = "fault " + e.ref + ": throw " + fmt_fixed(t, 1) + " m " + sense;
+    } else if (e.type == "fold") {
+      double r = 0;
+      for (auto& p : d.primitives)
+        if (p.name == e.ref)
+          for (auto& [hn, q] : p.relief) r = std::max(r, std::fabs(q.si()));
+      what = "fold " + e.ref + ": relief " + fmt_fixed(r, 1) + " m";
+    } else {
+      for (auto& b : d.salt.bodies)
+        if (b.name == e.ref) what = "salt body " + e.ref + ": height " + fmt_fixed(b.height.si(), 1) + " m";
+    }
+    k.push_back({"Event " + e.name + " (" + when + ")", what});
+  }
+  return k;
+}
+
+void write_restoration(const desc::Description& d, const Model& m, const std::filesystem::path& folder) {
+  if (d.events.empty()) return;
+  std::filesystem::create_directories(folder);
+  auto ages = event_ages(d);
+  ages.push_back(0.0);
+  Polyline line;
+  std::string sname = "X_centre";
+  if (!d.sections.empty()) {
+    sname = d.sections.front().name;
+    for (std::size_t r = 0; r < d.sections.front().polyline.rows(); ++r)
+      line.push_back({d.sections.front().polyline.si(2 * r), d.sections.front().polyline.si(2 * r + 1), 0});
+  } else {
+    const Domain& dm = m.info().domain;
+    line = {{dm.x0, dm.y0 + dm.sy / 2, 0}, {dm.x0 + dm.sx, dm.y0 + dm.sy / 2, 0}};
+  }
+  std::string csv = "age_ma,events,horizons,faults,checks_run,checks_failed\n";
+  std::vector<fig::Slide> slides;
+  for (std::size_t k = 0; k < ages.size(); ++k) {
+    const double a = ages[k];
+    auto sd = state_description(d, m, a);
+    if (sd.horizons.empty()) continue;
+    BuildLog lg;
+    auto sm = build_model(sd, BuildInputs{}, lg, "parametric");
+    CheckContext ctx(*sm, sd, make_well_paths(sd), sd.grid_spacing.si());
+    ctx.timeline_checks = false;
+    auto rep = run_checks(ctx);
+    std::string names;
+    for (auto& e : d.events)
+      if (std::fabs(e.end() - a) < 1e-9 || std::fabs(e.start() - a) < 1e-9) names += (names.empty() ? "" : " ") + e.name;
+    csv += fmt_shortest(a) + ",\"" + names + "\"," + std::to_string(sd.horizons.size()) + "," + std::to_string(sd.faults.size()) + "," +
+           std::to_string(rep.results.size()) + "," + std::to_string(rep.failures()) + "\n";
+    std::vector<std::pair<std::string, std::string>> keys{{"State", fmt_shortest(a) + " Ma"}, {"Events", names.empty() ? "-" : names},
+                                                         {"Checks", std::to_string(rep.results.size()) + " run, " + std::to_string(rep.failures()) + " failed"}};
+    auto c = figure_context(sd, *sm, keys);
+    std::string tag = (k + 1 < 10 ? "0" : "") + std::to_string(k + 1) + "_" + fmt_shortest(a) + "Ma";
+    std::replace(tag.begin(), tag.end(), '.', 'p');
+    auto s = repr::make_section(*sm, sname, line, std::max(5.0, c.grid_spacing / 4), 2.0);
+    auto sf = fig::section_figure(c, s, nullptr);
+    const std::string title = c.model_name + " at " + fmt_shortest(a) + " Ma - section " + sname;
+    auto w = fig::write_figure(sf, folder, fig::figure_basename(c, "evolution", tag + "_section"), title,
+                               "State at " + fmt_shortest(a) + " Ma" + (names.empty() ? "" : " (after " + names + ")") + ": section " + sname + ".",
+                               "Restored state built from the description; horizons deposited later and events after it removed.");
+    if (fig::raster_available()) {
+      std::string png = read_file(folder / (w.basename + ".png"));
+      auto u32 = [&](std::size_t o) { return (static_cast<unsigned char>(png[o]) << 24) | (static_cast<unsigned char>(png[o + 1]) << 16) |
+                                             (static_cast<unsigned char>(png[o + 2]) << 8) | static_cast<unsigned char>(png[o + 3]); };
+      slides.push_back({title, w.caption, "State " + std::to_string(k + 1) + " of " + std::to_string(ages.size()), png,
+                        static_cast<int>(u32(16)), static_cast<int>(u32(20))});
+    }
+    const Domain& dm = sm->info().domain;
+    GridSpec g = GridSpec::covering(dm, std::max(c.grid_spacing, std::max(dm.sx, dm.sy) / 300));
+    auto fs = repr::horizon_grid_faulted(*sm, 0, g);
+    std::vector<std::vector<repr::CutoffLine>> cut;
+    for (std::size_t ff = 0; ff < sm->info().faults.size(); ++ff)
+      cut.push_back(repr::cutoff_lines(*sm, repr::fault_surface(*sm, static_cast<int>(ff), std::max(10.0, g.dx / 2)), 0));
+    auto mf = fig::map_figure(c, 0, fs, cut, nullptr);
+    fig::write_figure(mf, folder, fig::figure_basename(c, "evolution", tag + "_map"),
+                      c.model_name + " at " + fmt_shortest(a) + " Ma - " + sd.horizons.front().name + " depth map",
+                      "State at " + fmt_shortest(a) + " Ma: depth map of the youngest horizon, " + sd.horizons.front().name + ".",
+                      "Restored state built from the description.");
+  }
+  write_file(folder / "states_checks.csv", csv);
+  if (!slides.empty()) write_file(folder / (m.info().name + "_v" + m.info().version + "_evolution-sequence.pptx"),
+                                  fig::make_pptx(slides, m.info().name + " evolution sequence"));
+  // Balance and the flexural-slip unfolded section of the present model.
+  std::string b = "section,subject,method,present,restored,mismatch,tested\n";
+  for (auto& r : balance_rows(m, d))
+    b += r.section + "," + r.subject + ",\"" + r.method + "\"," + fmt_fixed(r.present, 3) + "," + fmt_fixed(r.restored, 3) + "," +
+         fmt_fixed(r.mismatch, 6) + "," + (r.tested ? "yes" : "no") + "\n";
+  write_file(folder / "balance.csv", b);
+  auto c = figure_context(d, m, {{"Method", "flexural slip"}});
+  auto s = repr::make_section(m, sname, line, std::max(5.0, c.grid_spacing / 4), 2.0);
+  auto uf = fig::unfolded_figure(c, sname, repr::unfold_flexural(m, s));
+  fig::write_figure(uf, folder, fig::figure_basename(c, "unfolded", sname), c.model_name + " - section " + sname + " unfolded",
+                    "Section " + sname + " unfolded by flexural slip.", "Bed lengths conserved by construction; compare them for line-length balance.");
+}
+
 BuildOutcome run_build(const std::filesystem::path& description, const std::filesystem::path& out_dir,
                        const BuildOptions& opt, const std::string& command) {
   auto d = desc::load_description(description);
@@ -318,11 +423,14 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
   write_file(out_dir / "checks_report.txt", rep.text());
   write_file(out_dir / "checks_report.csv", rep.csv());
   auto keys = key_numbers(d, *o.model, rep, ctx);
-  write_file(out_dir / "summary_table.csv", summary_csv(keys));
+  auto rows = keys;
+  for (auto& r : event_rows(d)) rows.push_back(r);
+  write_file(out_dir / "summary_table.csv", summary_csv(rows));
   if (!o.checks_passed) {
     log(LogLevel::Error, "checks failed: exports and figures are not written (see checks_report.txt)");
   } else {
     if (opt.figures) write_figures(d, *o.model, keys, out_dir / "figures");
+    if (opt.figures && !d.events.empty()) write_restoration(d, *o.model, out_dir / "restoration");
     auto ids = resolve_export_ids(d, opt.exports);
     if (!ids.empty()) write_exports(d, *o.model, ids, out_dir / "exports", 0);
   }
@@ -390,6 +498,36 @@ BuildOutcome run_export(const std::filesystem::path& description, const std::fil
     write_exports(d, *o.model, ids, out_dir / "exports", grid_spacing);
   }
   Manifest man = Manifest::from_description(d, "export");
+  man.add_outputs(out_dir);
+  man.write(out_dir / "manifest.json");
+  return o;
+}
+
+BuildOutcome run_state(const std::filesystem::path& description, const std::filesystem::path& out_dir, double age,
+                       const BuildOptions& opt) {
+  auto d = desc::load_description(description);
+  ensure_new_output_dir(out_dir);
+  BuildOutcome full = build_only(d, opt);
+  auto sd = state_description(d, *full.model, age);
+  BuildOutcome o;
+  o.model = build_model(sd, BuildInputs{}, o.log, "parametric");
+  write_file(out_dir / "model_summary.txt", summary_text(sd, *o.model, o.log));
+  CheckContext ctx(*o.model, sd, make_well_paths(sd), sd.grid_spacing.si());
+  ctx.timeline_checks = false;
+  CheckReport rep = run_checks(ctx);
+  o.checks_passed = rep.passed();
+  write_file(out_dir / "checks_report.txt", rep.text());
+  write_file(out_dir / "checks_report.csv", rep.csv());
+  auto keys = key_numbers(sd, *o.model, rep, ctx);
+  keys.insert(keys.begin(), {"State", fmt_shortest(age) + " Ma"});
+  write_file(out_dir / "summary_table.csv", summary_csv(keys));
+  if (o.checks_passed) {
+    if (opt.figures) write_figures(sd, *o.model, keys, out_dir / "figures");
+    auto ids = resolve_export_ids(sd, opt.exports);
+    if (!ids.empty()) write_exports(sd, *o.model, ids, out_dir / "exports", 0);
+  }
+  Manifest man = Manifest::from_description(d, "state --age " + fmt_shortest(age));
+  for (auto& [k, v] : o.log.values) man.extra.emplace_back(k, v);
   man.add_outputs(out_dir);
   man.write(out_dir / "manifest.json");
   return o;

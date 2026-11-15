@@ -2,6 +2,7 @@
 /// @brief The v1 parametric engine: unfaulted structure + fault network + frame rule, exposed
 /// through the Model interface.
 #pragma once
+#include <algorithm>
 #include <memory>
 
 #include "stratonix/engines/faults.hpp"
@@ -31,6 +32,20 @@ class ParametricModel final : public Model {
   ModelInfo info_;
   std::shared_ptr<Structure> structure_;
   std::shared_ptr<FaultNetwork> faults_;
+  /// Erosional surfaces that no fault displaces (stage 2E): they truncate the older horizons in
+  /// the present geometry, after the faulting they postdate.
+  std::vector<std::size_t> post_erosion_;
+  /// True when p lies above an erosional surface no fault displaces: younger material that never
+  /// moved (its restoration is the identity).
+  bool above_post_erosion(const Vec3& p) const {
+    for (std::size_t u : post_erosion_)
+      if (p.z >= structure_->z(u, p.x, p.y) - 1e-6) return true;
+    return false;
+  }
+  void post_truncate(double* scalars) const {
+    for (std::size_t u : post_erosion_)
+      for (std::size_t k = u + 1; k < structure_->horizons(); ++k) scalars[k] = std::max(scalars[k], scalars[u]);
+  }
 };
 
 }  // namespace stratonix

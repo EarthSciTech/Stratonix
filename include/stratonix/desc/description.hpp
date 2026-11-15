@@ -72,6 +72,15 @@ struct SeriesDesc {
 };
 /// Growth strata (STX-TN-07 section 4): movement between onset and end.
 struct GrowthDesc { std::string onset, end; bool present() const { return !onset.empty(); } };
+/// Event of the timeline (STX-TN-09 section 1).
+struct EventDesc {
+  std::string name, type;          ///< deposition, fault, fold or salt
+  std::string ref;                 ///< horizon, fault, primitive or body
+  Param age, from, to, throw_;     ///< ages in Ma; per-phase throw (faults)
+  std::string sense;               ///< per-phase sense (faults)
+  double start() const { return from.present ? from.si() : age.si(); }  ///< older end (Ma)
+  double end() const { return to.present ? to.si() : age.si(); }        ///< younger end (Ma)
+};
 /// Salt (STX-TN-08 section 1).
 struct SaltBodyDesc {
   std::string type, name;          ///< pillow, diapir or wall
@@ -208,6 +217,7 @@ struct Description {
   std::vector<UnitDesc> units;
   std::vector<SeriesDesc> series;  ///< empty: one conformable series
   CompactionDesc compaction;       ///< stage 2D
+  std::vector<EventDesc> events;   ///< stage 2E: empty = implicit timeline
   SaltDesc salt;                   ///< stage 2D
   std::string above_top_name, below_base_name;
   std::string regional_type = "flat";
@@ -220,7 +230,7 @@ struct Description {
   Param frame_point;
   // checks
   Param tol_thickness_min, tol_crossing, tol_offset_outside_tips, tol_throw, tol_wells, tol_unoffset, tol_rollover, tol_area,
-      tol_salt_volume, tol_solid_thickness;
+      tol_salt_volume, tol_solid_thickness, tol_restoration, tol_balance;
   Param scaling_min_ratio, scaling_max_ratio;  ///< checks.fault_scaling (C10)
   std::string closure_horizon;
   Param closure_faults_seal, target_closure, target_area, target_spill_depth, target_tolerance;
@@ -237,6 +247,8 @@ struct Description {
   int horizon_index(const std::string& name) const;
   int unit_index(const std::string& name) const;
   int fault_index(const std::string& name) const;
+  /// Events referring to a fault, primitive or body (stage 2E).
+  std::vector<const EventDesc*> events_for(const std::string& type, const std::string& ref) const;
   /// Series of horizon h (index into series), -1 when no series are given.
   int series_of(int h) const;
   const WellDesc* well(const std::string& name) const;

@@ -512,7 +512,31 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
       f.abut_hw_side = fd.abuts_side == "hanging_wall";
       f.transfer = fd.abuts_transfer;
     }
-    if (fd.growth.present()) {
+    if (auto evs = d.events_for("fault", fd.name); !evs.empty()) {
+      // STX-TN-09 section 1: phases summed into one signed throw per horizon
+      const double base_sign = fd.sense == "reverse" ? -1.0 : 1.0;
+      std::vector<double> net(st.horizons(), 0.0);
+      for (auto* e : evs) {
+        const double T = e->throw_.present ? e->throw_.si() : fd.throw_max.si();
+        const double sg = e->sense.empty() ? base_sign : (e->sense == "reverse" ? -1.0 : 1.0);
+        log.value("event." + e->name + ".throw", fmt_fixed(sg * T, 3));
+        for (std::size_t h = 0; h < st.horizons(); ++h) net[h] += sg * T * st.event_fraction(h, e->start(), e->end());
+      }
+      double tref = 0;
+      bool constant = true;
+      for (double v : net) {
+        tref = std::max(tref, std::fabs(v));
+        constant = constant && std::fabs(v - net[0]) < 1e-9;
+      }
+      if (constant) {
+        f.tmax = net[0];
+      } else {
+        f.tmax = tref;
+        for (double v : net) f.growth_f.push_back(v / tref);
+      }
+      for (std::size_t h = 0; h < st.horizons(); ++h) log.value(f.name + "." + d.horizons[h].name + ".net_throw", fmt_fixed(net[h], 3));
+      f.slip = f.kin->slip_vector(f.s, f.dd, f.dip, f.rake);
+    } else if (fd.growth.present()) {
       const int on = d.horizon_index(fd.growth.onset), en = d.horizon_index(fd.growth.end);
       for (std::size_t h = 0; h < st.horizons(); ++h) f.growth_f.push_back(st.growth_fraction(h, on, en));
       // growth index per unit at the reference strike position (Thorsen 1963)

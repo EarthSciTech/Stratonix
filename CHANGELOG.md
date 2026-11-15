@@ -135,6 +135,25 @@ has its own version (`stratonix_schema`).
   additive: `event_ages`, `state_description`, `build_state` (engines/history.hpp) and
   `repr::unfold_flexural`.
 
+- Event timeline (Prompt 29): `events:` lists deposition, fault, fold and salt events with ages
+  in Ma (`age`, or `from` and `to`). Every mechanism's timing comes from the ages: each horizon
+  carries the part of an event that followed its deposition. Faults move in phases with a throw
+  and sense each, summed into one signed, level-dependent throw, so inversion works (net normal
+  pre-rift, reverse syn-rift). Rule F26. The summary table lists every event's displacement.
+- The model at any event: `build_state` and `stratonix state <description> --age <Ma>`. The state
+  is the description with later horizons and events removed and events under way scaled, built
+  by the same builder, so sections, maps, exports and checks work on it; under depositional
+  compaction it is backstripped.
+- Restoration report (Prompt 30): `restoration/` in the build package holds a section and a map at
+  every event (evolution figures, four formats), the sequence as one PPTX deck, the flexural-slip
+  unfolded section, `balance.csv` and `states_checks.csv`. `repr::unfold_flexural` and
+  `balance_rows` are available to callers.
+- An erosional surface that no fault displaces truncates the faulted geometry (post-deformation
+  unconformities), and material above it restores as itself.
+- Checks C17 (restorability at every event; the present state reproduces the model) and C18
+  (line-length and area balance per section, a warning).
+- Worked example `rift_inversion_history.yaml`.
+
 ### Changed
 - The well-correction field measures control-well residuals against the effective horizons
   (after series relations, the salt response and compaction) when these are in force.
@@ -151,7 +170,7 @@ has its own version (`stratonix_schema`).
   unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
   and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
-  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`); stage 2E (`test_v2_history`), expected to fail until its features are built.
+  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`); stage 2E (`test_v2_history`).
 
 ## [2026.1] - 2026-11-14 - First public release
 

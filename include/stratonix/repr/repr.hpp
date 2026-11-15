@@ -64,6 +64,8 @@ struct UnfoldedHorizon {
   Polyline restored;         ///< (along-section distance, 0, elevation) points of the straightened bed
 };
 std::vector<UnfoldedHorizon> unfold_flexural(const Model& m, const Section& s);
+/// A horizon's trace along a section split into runs of one fault block (fault gaps between runs).
+std::vector<std::vector<Vec3>> horizon_segments(const Model& m, const Section& s, int horizon);
 
 // ---- faults --------------------------------------------------------------------------------
 struct FaultSurface {

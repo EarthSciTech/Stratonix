@@ -60,7 +60,7 @@ TEST_CASE("P29 state between the phases and before faulting") {
   CHECK_NEAR(offset(*s75, 0, 1200), 0, 0.5);    // H2 flat
   CHECK_NEAR(offset(*s75, 1, 1400), 300, 0.5);  // H3, H4 offset by the rift phase only
   CHECK_NEAR(offset(*s75, 2, 1600), 300, 0.5);
-  auto s95 = build_state(d, *m, 95.0);
+  auto s95 = build_state(d, *m, 88.0);  // after H3 (90 Ma), before the rift (85 Ma)
   REQUIRE(s95->info().horizons.size() == 2);
   CHECK_NEAR(offset(*s95, 0, 1400), 0, 0.01);
   CHECK_NEAR(offset(*s95, 1, 1600), 0, 0.01);

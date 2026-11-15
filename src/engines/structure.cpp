@@ -317,7 +317,7 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
     }
     if (rw)
       for (auto& [n, p] : rw->tops)
-        if (n == hd.name) ref_depth_[h] = p.si();
+        if (n == hd.name) { ref_depth_[h] = p.si(); from_top_ = true; }
     if (std::isnan(ref_depth_[h]) && hd.depth.present) ref_depth_[h] = hd.depth.si();
     if (std::isnan(ref_depth_[h]) && hd.thickness_above.present && h > 0) ref_depth_[h] = ref_depth_[h - 1] + hd.thickness_above.si();
     if (std::isnan(ref_depth_[h]) && kind_[h] == Kind::Surface) ref_depth_[h] = -surf_sign_[h] * surf_[h]->sample_clamped(rx, ry);
@@ -331,7 +331,7 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
   // Depositional compaction (STX-TN-08 section 3): the well tops are present depths. Convert the
   // reference depths of the compacting column to depositional ones by decompacting each unit to
   // the surface, stacked from the rigid base, so the compacted reference column honours the tops.
-  if (comp_mode_ == 2 && comp_base_ > 0) {
+  if (comp_mode_ == 2 && comp_base_ > 0 && from_top_) {
     const std::vector<double> pres = ref_depth_;
     for (std::size_t u = static_cast<std::size_t>(comp_base_); u >= 1; --u) {
       double t_dep = pres[u] - pres[u - 1];
@@ -344,7 +344,15 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
   for (std::size_t k = 0; k < salt_.size(); ++k) {
     const auto& g = d.salt.bodies[k].growth;
     const int on = g.present() ? d.horizon_index(g.onset) : static_cast<int>(nh), en = g.present() ? d.horizon_index(g.end) : -1;
-    for (std::size_t h = 0; h < nh; ++h) salt_[k].fh.push_back(g.present() ? growth_fraction(h, on, en) : 1.0);
+    auto evs = d.events_for("salt", salt_[k].name);
+    for (std::size_t h = 0; h < nh; ++h) {
+      double f = g.present() ? growth_fraction(h, on, en) : 1.0;
+      if (!evs.empty()) {
+        f = 0;
+        for (auto* e : evs) f += event_fraction(h, e->start(), e->end()) / static_cast<double>(evs.size());
+      }
+      salt_[k].fh.push_back(f);
+    }
   }
   column_ = has_rel_ || salt_top_ >= 0 || comp_mode_ == 2;
 
@@ -494,6 +502,15 @@ void Structure::add_copies(const desc::PrimitiveDesc& pd, FoldPrimitive p, const
     for (std::size_t h = 0; h < first && h < p.relief.size(); ++h) {
       p.relief[h] = 0;
       if (h < p.offset.size()) p.offset[h] = nullptr;
+    }
+  }
+  if (auto evs = d.events_for("fold", pd.name); !evs.empty()) {
+    // STX-TN-09: timing from ages; several fold events take equal shares of the relief
+    for (std::size_t h = 0; h < p.relief.size(); ++h) {
+      double f = 0;
+      for (auto* e : evs) f += event_fraction(h, e->start(), e->end()) / static_cast<double>(evs.size());
+      p.relief[h] *= f;
+      if (h < p.offset.size() && f < 1) p.offset[h] = nullptr;
     }
   }
   if (pd.growth.present()) {
@@ -951,6 +968,15 @@ double Structure::clino_offset(std::size_t h, double x, double y) const {
   const double u = ((x - S.bx) * S.ax + (y - S.by) * S.ay - i * S.rate) / S.width;
   const double p = S.sigmoid ? 0.5 * (1 - std::tanh(2 * u)) : std::min(1.0, std::max(0.0, 0.5 - u));
   return S.height * p;
+}
+
+double Structure::event_fraction(std::size_t h, double from, double to) const {
+  const double a = hage_[h];
+  if (std::isnan(a)) return 1.0;
+  double g;
+  if (!(from > to)) g = a <= from ? 1.0 : 0.0;  // instantaneous: a horizon deposited at the event's age postdates it
+  else g = std::clamp((from - a) / (from - to), 0.0, 1.0);
+  return 1.0 - g;
 }
 
 double Structure::growth_fraction(std::size_t h, int onset, int end) const {

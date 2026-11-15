@@ -53,6 +53,8 @@ Figure section_figure(const FigureContext& c, const repr::Section& s, const std:
 Figure map_figure(const FigureContext& c, int horizon, const repr::FaultedSurface& surface,
                   const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const repr::Closure* closure,
                   const std::vector<repr::TerminationLine>* terminations = nullptr);
+/// Flexural-slip unfolded section (stage 2E): every bed straightened along its own length.
+Figure unfolded_figure(const FigureContext& c, const std::string& section, const std::vector<repr::UnfoldedHorizon>& beds);
 /// Burial-history curves at one location (stage 2D).
 Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b);
 /// Isopach map of a unit (stage 2C): vertical thickness per fault block, with its termination lines.

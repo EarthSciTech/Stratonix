@@ -84,10 +84,22 @@ class Structure final : public StratigraphyQuery {
   bool has_relations() const { return has_rel_; }
   /// Termination of model unit u ("" when it does not terminate in the model).
   const std::string& unit_termination(std::size_t u) const { return term_[u]; }
+  /// Horizons that are the base of an erosional series (unconformity surfaces), youngest first.
+  std::vector<std::size_t> erosional_surfaces() const {
+    std::vector<std::size_t> out;
+    for (auto& S : series_)
+      if (S.base == 1) out.push_back(S.last);
+    return out;
+  }
   /// Series index of horizon h (0 when no series are given).
   int series_of(std::size_t h) const { return hseries_[h]; }
   /// Whether a raw thickness below zero is a designed pinch-out (thickness trend clamped).
   bool trend_clamped(std::size_t h, double x, double y) const;
+  /// Age (Ma) of horizon h; NaN without a timeline.
+  double horizon_age(std::size_t h) const { return hage_[h]; }
+  /// Fraction of an event active from `from` to `to` (Ma) that followed the deposition of horizon
+  /// h: 1 - g(a_h), g the completed fraction (STX-TN-09 section 1).
+  double event_fraction(std::size_t h, double from, double to) const;
   /// Growth fraction of horizon h for a structure growing from `onset` to `end` (indices).
   double growth_fraction(std::size_t h, int onset, int end) const;
   // ---- stage 2D (STX-TN-08) -----------------------------------------------------------------
@@ -166,6 +178,7 @@ class Structure final : public StratigraphyQuery {
   std::vector<std::string> hname_;
   std::vector<double> hage_;
   bool column_ = false;               ///< a column pass is needed (relations, salt or compaction)
+  bool from_top_ = false;             ///< reference depths from the reference well's (present) tops
   double phi(int u, double z) const;
   double solid(int u, double z1, double z2) const;
   double base_for(int u, double z1, double S) const;

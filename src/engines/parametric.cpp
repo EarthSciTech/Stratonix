@@ -16,6 +16,18 @@ ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& 
   structure_ = std::make_shared<Structure>(d, in, log);
   for (std::size_t u = 1; u < info_.units.size() && u < info_.horizons.size(); ++u) info_.units[u].termination = structure_->unit_termination(u);
   faults_ = std::make_shared<FaultNetwork>(d, *structure_, log);
+  for (std::size_t u : structure_->erosional_surfaces()) {
+    bool undisplaced = !faults_->empty();
+    for (auto& f : faults_->faults())
+      undisplaced = undisplaced && (f.tmax == 0 || (!f.growth_f.empty() && u < f.growth_f.size() && f.growth_f[u] == 0));
+    if (undisplaced) {
+      post_erosion_.push_back(u);
+      for (std::size_t k = u + 1; k < info_.units.size() && k < structure_->horizons(); ++k)  // may be truncated
+        if (info_.units[k].termination.find("truncation") == std::string::npos)
+          info_.units[k].termination = info_.units[k].termination.empty() ? "truncation" : "truncation, " + info_.units[k].termination;
+      log.note("horizon " + d.horizons[u].name + ": an erosional surface no fault displaces; it truncates the faulted geometry");
+    }
+  }
   for (auto& f : faults_->faults()) {
     FaultInfo fi;
     fi.name = f.name;
@@ -54,6 +66,7 @@ ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& 
       }
     }
     fi.overlapping = f.curved ? f.curved->fpf && f.curved->heave < 0 : (f.tmax < 0 ? -f.slip.z : f.slip.z) > 1e-12;
+    for (double g : f.growth_f) fi.overlapping = fi.overlapping || g < 0;  // inverted layers move up the fault
     const auto& all = faults_->faults();
     if (f.abuts >= 0) fi.relations.push_back((f.transfer ? "splay of " : "abuts ") + all[static_cast<std::size_t>(f.abuts)].name);
     if (f.relay_with >= 0) fi.relations.push_back("relays with " + all[static_cast<std::size_t>(f.relay_with)].name);
@@ -70,11 +83,13 @@ const void* ParametricModel::capability(std::string_view name) const {
 
 void ParametricModel::eval_point(const Vec3& p, BlockCode* block, Vec3* restored, double* scalars) const {
   Vec3 r = faults_->empty() ? p : faults_->restore(p, block);
+  if (!post_erosion_.empty() && above_post_erosion(p)) r = p;
   if (faults_->empty() && block) *block = 0;
   if (restored) *restored = r;
   if (scalars) {
     structure_->z_all(r.x, r.y, scalars);
     for (std::size_t h = 0; h < structure_->horizons(); ++h) scalars[h] = r.z - scalars[h];
+    if (!post_erosion_.empty()) post_truncate(scalars);
   }
 }
 
@@ -105,7 +120,10 @@ void ParametricModel::scalar_in_block(std::span<const Vec3> pts, BlockCode block
   auto body = [&](std::size_t a, std::size_t b) {
     for (std::size_t i = a; i < b; ++i) {
       Vec3 r = faults_->empty() ? pts[i] : faults_->restore(pts[i], nullptr, &block);
+      if (!post_erosion_.empty() && above_post_erosion(pts[i])) r = pts[i];
       out[i] = r.z - structure_->z(static_cast<std::size_t>(horizon), r.x, r.y);
+      for (std::size_t u : post_erosion_)
+        if (static_cast<std::size_t>(horizon) > u) out[i] = std::max(out[i], r.z - structure_->z(u, r.x, r.y));
     }
   };
   if (optimised_kernels() && pts.size() >= 2048) parallel_for(pts.size(), 1024, body);
@@ -142,7 +160,10 @@ void ParametricModel::evaluate_fault(int f, std::span<const Vec3> pts, FaultEval
 }
 
 void ParametricModel::restore(std::span<const Vec3> pts, std::span<Vec3> out) const {
-  for (std::size_t i = 0; i < pts.size(); ++i) out[i] = faults_->empty() ? pts[i] : faults_->restore(pts[i], nullptr);
+  for (std::size_t i = 0; i < pts.size(); ++i) {
+    out[i] = faults_->empty() ? pts[i] : faults_->restore(pts[i], nullptr);
+    if (!post_erosion_.empty() && above_post_erosion(pts[i])) out[i] = pts[i];
+  }
 }
 
 namespace {

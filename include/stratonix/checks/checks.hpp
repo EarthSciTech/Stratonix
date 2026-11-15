@@ -43,6 +43,8 @@ class CheckContext {
   CheckContext(const Model& m, const desc::Description& d, std::vector<WellPath> wells, double grid_spacing);
   const Model& model() const { return m_; }
   const desc::Description& description() const { return d_; }
+  /// False when checking a state of a timeline (C17 and C18 then belong to the full model).
+  bool timeline_checks = true;
   const std::vector<WellPath>& wells() const { return wells_; }
   const GridSpec& grid() const { return grid_; }
   const repr::BlockList& blocks();
@@ -78,6 +80,16 @@ class Check : public registry::PluginBase {
 
 /// Run every registered check (in name order) and return the report.
 CheckReport run_checks(CheckContext& ctx);
+
+/// Line-length and area balance of a section (stage 2E, STX-TN-09 section 3): each horizon's bed
+/// length and each unit's area in the present section against the same material restored (faults
+/// undone by their own inverses). One row per horizon ("line length") and per unit ("area").
+struct BalanceRow {
+  std::string section, subject, method;
+  double present = 0, restored = 0, mismatch = 0;  ///< mismatch: |restored - present| / present
+  bool tested = true;  ///< false: reported only (a syn- or post-kinematic unit's area)
+};
+std::vector<BalanceRow> balance_rows(const Model& m, const desc::Description& d);
 
 /// Register this layer's plugins.
 void register_check_plugins();
