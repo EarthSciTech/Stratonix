@@ -409,9 +409,14 @@ TEST_CASE("G11 the stage 2A fault-system and stage 2E inversion examples, gridde
   }
 }
 
-TEST_CASE("G12 RESQML round trip through FESAPI and resqpy") {
+TEST_CASE("G12 RESQML export through FESAPI (read back by resqpy in the CI job 'resqml')") {
 #ifdef STRATONIX_HAVE_FESAPI
-  CHECK(false);  // run by the resqml CI job (tests/tools/resqml_roundtrip.py); not reached in this build
+  auto dir = tmpdir("resqml");
+  BuildOptions o;
+  auto r = run_export(fs::path(STX_SOURCE_DIR) / "examples" / "fault_system_relay_splay.yaml", dir / "out", {"grdecl", "resqml"}, 0, o);
+  CHECK(r.checks_passed);
+  CHECK(fs::exists(dir / "out" / "exports" / "grid" / "example_fault_system_grid.epc"));
+  CHECK(fs::exists(dir / "out" / "exports" / "grid" / "example_fault_system_grid.h5"));
 #else
   std::printf("  skipped: this build has no FESAPI (the RESQML case runs in the CI job 'resqml')\n");
 #endif

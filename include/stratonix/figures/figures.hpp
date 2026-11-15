@@ -15,6 +15,7 @@
 #include "stratonix/figures/canvas.hpp"
 #include "stratonix/model/model.hpp"
 #include "stratonix/repr/faultrock.hpp"
+#include "stratonix/repr/grid.hpp"
 #include "stratonix/repr/repr.hpp"
 
 namespace stratonix::fig {
@@ -97,6 +98,13 @@ Figure allan_figure(const FigureContext& c, int fault, const repr::FaultSurface&
                     const std::vector<std::vector<repr::CutoffLine>>& cutoffs);
 /// Curvature map of a horizon: mean curvature (convex up red, concave blue) and fracture-trend ticks.
 Figure curvature_figure(const FigureContext& c, int horizon, const repr::CurvatureGrids& cg);
+/// Stage 3B (STX-TN-12): a section through the grid along row j (along_x) or column i, cells
+/// coloured by zone (prop nullptr) or by a property; fault pillars in red.
+Figure grid_section_figure(const FigureContext& c, const repr::CornerPointGrid& g, const repr::CellProperty* prop, bool along_x, int line);
+/// A property (or the zone) on layer k, in map view.
+Figure grid_layer_figure(const FigureContext& c, const repr::CornerPointGrid& g, const repr::CellProperty* prop, int k);
+/// 3D view of the grid's outer faces coloured by zone.
+Figure grid_view3d_figure(const FigureContext& c, const repr::CornerPointGrid& g, double azimuth_deg, double elevation_deg);
 Figure fault_plane_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<double>& displacement,
                           const std::vector<std::vector<repr::CutoffLine>>& cutoffs);
 

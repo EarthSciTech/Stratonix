@@ -11,6 +11,7 @@
 #include "stratonix/model/model.hpp"
 #include "stratonix/registry/registry.hpp"
 #include "stratonix/repr/faultrock.hpp"
+#include "stratonix/repr/grid.hpp"
 #include "stratonix/repr/repr.hpp"
 
 namespace stratonix {
@@ -38,6 +39,27 @@ struct CheckReport {
   std::size_t failures() const;
 };
 
+/// Grids and properties of a description's grid block (stage 3B, STX-TN-12), computed once and
+/// shared by the checks (C23 to C25), the exports and the figures.
+struct GridProducts {
+  repr::GridOptions options;
+  repr::CornerPointGrid grid;
+  repr::PropertySet props;
+  bool has_trans = false;
+  repr::TransmissibilityResult trans;
+  bool has_tets = false;
+  repr::TetGrid tets;
+  repr::GridDefects defects;
+  double fault_tolerance = 0;              ///< C25 tolerance (m)
+  std::vector<std::string> fault_names;    ///< by fault index
+};
+/// Model unit index of a description unit (by its top and base horizons), or -1.
+int model_unit_of(const desc::Description& d, const Model& m, const std::string& unit);
+repr::GridOptions grid_options(const desc::Description& d, const Model& m);
+repr::PropertyInputs property_inputs(const desc::Description& d, const Model& m);
+/// Everything the grid block asks for; requires d.grid.present.
+GridProducts make_grid_products(const desc::Description& d, const Model& m);
+
 /// Shared, lazily computed representations used by checks (and reused by exports/figures).
 class CheckContext {
  public:
@@ -58,6 +80,8 @@ class CheckContext {
   double tolerance(const std::string& key, std::string* source) const;
   bool warn_only(const std::string& check_id) const;
   double fault_spacing() const { return fault_spacing_; }
+  /// Grid products of the description's grid block (nullptr without one); computed once.
+  const GridProducts* grid_products();
 
  private:
   const Model& m_;
@@ -71,6 +95,7 @@ class CheckContext {
   std::map<int, repr::FaultSurface> lattice_;
   std::map<std::pair<int, int>, std::vector<repr::CutoffLine>> cutoffs_;
   std::map<std::pair<int, int>, repr::ThrowRow> throws_;
+  std::unique_ptr<GridProducts> grid_products_;
 };
 
 /// Check plugin interface.

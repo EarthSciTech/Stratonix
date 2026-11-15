@@ -71,6 +71,26 @@ has its own version (`stratonix_schema`).
   additive and not yet built: `repr/grid.hpp`, the model capability `PorosityQuery` and
   `io::write_grdecl`.
 - Tests: `test_v3_grids` (thirteen cases), expected to fail until Prompts 38 and 39.
+- Corner-point grids (Prompt 38, STX-TN-12 section 1). A top-level `grid` block (spacing,
+  margin, minimum thickness, zones with layers and proportional / follow_top / follow_base
+  layering) grids any model by evaluation:
+  - fault-conforming pillars on the lattice lines across each fault, the neighbouring pillars
+    tilted with them; stair steps where a fault's trace changes lattice node;
+  - every cell carries its zone (model unit) and fault block; cells thinner than the minimum
+    thickness are inactive, with the reason;
+  - checks C23 (positive cell volumes), C24 (no inverted cells: corner order and corner
+    Jacobians) and C25 (fault faces on the fault surfaces, 1 % of the cell size);
+  - rule F32 for the block.
+- Grid outputs: `grid/cells.csv` (every cell: indices, active, zone, block, volume, centre,
+  properties), summary rows, and grid figures in four formats: sections along a row and a column,
+  a layer map of the fault blocks, and 3D views from the south-west and south-east.
+- Exporters `grdecl` (SPECGRID, COORD, ZCORN, ACTNUM, properties with their units and evidence,
+  FAULTS), `grid_vtk` (hexahedra, VTK type 12) and `resqml` (RESQML 2.0.1 IJK grid with split
+  coordinate lines and properties, through FESAPI when built with `STRATONIX_WITH_FESAPI`; the CI
+  job `resqml` builds FESAPI and reads the package back with resqpy).
+- Test tools: `tests/tools/read_grdecl.py` (independent GRDECL reader: volumes, active cells,
+  blocks and FAULTS against `grid/cells.csv`) and `tests/tools/resqml_roundtrip.py`.
+- Unit `mD` (and `D`) for permeability.
 
 ### Changed
 - GemPy and LoopStructural input sets: no pick where a series relation removes a horizon
@@ -79,6 +99,8 @@ has its own version (`stratonix_schema`).
 - Fault `extent` keys are required by validation, not by the schema, so that estimated faults may
   omit them (rule F10 states the requirement).
 - The implicit builder accepts curved faults from sticks (F14).
+- Examples `fault_system_relay_splay` (1.2.0) and `rift_inversion_history` (1.1.0) carry a grid
+  block and export GRDECL and VTK grids.
 
 ## [2026.2] - 2026-11-15 - Version 2: structural geology in depth
 

@@ -6,7 +6,7 @@
 # restored state in the package (stage 2E). DESIGN model; every parameter carries value, unit,
 # evidence and source.
 stratonix_schema: 1
-model: {name: example_inversion, version: "1.0.0", status: DESIGN,
+model: {name: example_inversion, version: "1.1.0", status: DESIGN,
         title: "Rift and inversion history"}
 crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
 domain:
@@ -68,9 +68,18 @@ events:
   - {name: Inversion, type: fault, fault: F1, from: "55 Ma | user_instruction | worked example", to: "45 Ma | user_instruction | worked example", throw: "150 m | user_instruction | worked example", sense: reverse}
   - {name: Folding, type: fold, primitive: Inversion_fold, from: "55 Ma | user_instruction | worked example", to: "45 Ma | user_instruction | worked example"}
   - {name: Dep_H1, type: deposition, horizon: H1, age: "30 Ma | user_instruction | worked example"}
+# Stage 3B: a corner-point grid of the inverted basin (STX-TN-12).
+grid:
+  spacing: "[200, 200] m | user_instruction | worked example: areal cell size"
+  margin: "50 m | user_instruction | worked example"
+  zones:
+    - {unit: Post_inversion, layers: "2 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Post_rift, layers: "3 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Pre_rift_upper, layers: "2 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Pre_rift_lower, layers: "2 ordinal | user_instruction | worked example", layering: proportional}
 outputs:
   sections:
     - name: XS_EW
       polyline: "[[200, 5000], [9800, 5000]] m | user_instruction | worked example: across the fault and the fold"
   vertical_exaggeration: "3 ratio | user_instruction | worked example"
-  exports: [petrel, vtk]
+  exports: [petrel, vtk, grdecl, grid_vtk]

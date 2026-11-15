@@ -411,8 +411,10 @@ STRATONIX_REGISTER(exp_well_tops, registry::Kind::Exporter, "well_tops", "1.0.0"
                    [] { return std::make_unique<WellTopsExporter>(); })
 
 void register_neutral_exporters();
+void register_grid_exporters();
 void register_exporters() {
   register_neutral_exporters();
+  register_grid_exporters();
   STRATONIX_PLUGIN_ANCHOR(exp_irap_ascii);
   STRATONIX_PLUGIN_ANCHOR(exp_zmap);
   STRATONIX_PLUGIN_ANCHOR(exp_fault_polygons);

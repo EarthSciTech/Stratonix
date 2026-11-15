@@ -1781,6 +1781,137 @@
         }
       }
     },
+    "grid": {
+      "type": "object",
+      "required": [
+        "spacing"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "spacing": {
+          "$ref": "#/$defs/param"
+        },
+        "margin": {
+          "$ref": "#/$defs/param"
+        },
+        "min_thickness": {
+          "$ref": "#/$defs/param"
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "unit",
+              "layers"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "unit": {
+                "type": "string"
+              },
+              "layers": {
+                "$ref": "#/$defs/param"
+              },
+              "layering": {
+                "enum": [
+                  "proportional",
+                  "follow_top",
+                  "follow_base"
+                ]
+              },
+              "layer_thickness": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "facies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "unit",
+              "code"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "unit": {
+                "type": "string"
+              },
+              "code": {
+                "$ref": "#/$defs/param"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "porosity": {
+          "enum": [
+            "compaction"
+          ]
+        },
+        "transforms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "unit",
+              "from",
+              "law",
+              "a",
+              "b"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,7}$"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "law": {
+                "enum": [
+                  "linear",
+                  "exponential",
+                  "power"
+                ]
+              },
+              "a": {
+                "$ref": "#/$defs/param"
+              },
+              "b": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "fault_transmissibility": {
+          "type": "object",
+          "required": [
+            "calibration"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "calibration": {
+              "enum": [
+                "manzocchi_1999"
+              ]
+            }
+          }
+        },
+        "tetrahedral": {
+          "type": "boolean"
+        }
+      }
+    },
     "stress": {
       "type": "object",
       "additionalProperties": false,

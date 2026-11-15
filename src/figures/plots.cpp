@@ -1592,4 +1592,217 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
   return out;
 }
 
+// =========================================================================================
+// Grids (stage 3B, STX-TN-12)
+// =========================================================================================
+namespace {
+struct PropScale {
+  double lo = 0, hi = 1;
+  bool zone = true;
+};
+PropScale prop_scale(const repr::CellProperty* p, const repr::CornerPointGrid& g) {
+  PropScale s;
+  if (!p) return s;
+  s.zone = false;
+  std::vector<double> v;
+  for (std::size_t c = 0; c < p->v.size(); ++c)
+    if (g.actnum[c] && std::isfinite(p->v[c])) v.push_back(p->v[c]);
+  if (v.empty()) return s;
+  std::sort(v.begin(), v.end());
+  s.lo = v[static_cast<std::size_t>(0.02 * static_cast<double>(v.size() - 1))];
+  s.hi = v[static_cast<std::size_t>(0.98 * static_cast<double>(v.size() - 1))];
+  if (!(s.hi > s.lo)) { s.lo = v.front(); s.hi = v.back() > v.front() ? v.back() : v.front() + 1; }
+  return s;
+}
+Color cell_color(const FigureContext& c, const repr::CornerPointGrid& g, const repr::CellProperty* p, const PropScale& s, std::size_t id) {
+  if (!p) return unit_color(c, static_cast<std::size_t>(std::max(0, g.zone[id])));
+  double v = p->v[id];
+  if (!std::isfinite(v)) return rgb(200, 200, 200);
+  return viridis_like((v - s.lo) / (s.hi - s.lo));
+}
+void prop_legend(Figure& f, const FigureContext& c, const repr::CornerPointGrid& g, const repr::CellProperty* p, const PropScale& s, double rx,
+                 double ry, double maxy) {
+  if (!p) {
+    std::vector<LegendEntry> es;
+    std::vector<int> seen;
+    for (int u : g.layer_unit)
+      if (std::find(seen.begin(), seen.end(), u) == seen.end()) {
+        seen.push_back(u);
+        es.push_back({"Zones", c.model->info().units[static_cast<std::size_t>(u)].name, unit_color(c, static_cast<std::size_t>(u))});
+      }
+    es.push_back({"Faults", "Fault pillars", none(), true, kFault, 1.2});
+    double ly = legend(f, rx, ry, 180, es, maxy) + 8;
+    key_box(f, c, rx, ly, 180);
+    return;
+  }
+  f.text({rx, ry}, p->name + " (" + p->unit + ")", 7.5, Anchor::Start, true, kInk);
+  for (int k = 0; k < 100; ++k) f.rect(rx, ry + 6 + k * 1.6, 14, 1.7, viridis_like(1 - k / 99.0), none());
+  f.rect(rx, ry + 6, 14, 160, none(), kInk, 0.4);
+  f.text({rx + 18, ry + 12}, fmt_shortest(std::round(s.hi * 1000) / 1000), 6.5, Anchor::Start, false, kInk);
+  f.text({rx + 18, ry + 166}, fmt_shortest(std::round(s.lo * 1000) / 1000), 6.5, Anchor::Start, false, kInk);
+  f.rect(rx, ry + 176, 14, 8, rgb(200, 200, 200), kInk, 0.4);
+  f.text({rx + 18, ry + 183}, "missing (" + std::to_string(p->missing) + " cells)", 6.5, Anchor::Start, false, kInk);
+  f.text({rx, ry + 198}, "Evidence: " + p->evidence, 6.5, Anchor::Start, false, kInk);
+  double ly = ry + 214;
+  key_box(f, c, rx, ly, 180);
+}
+}  // namespace
+
+Figure grid_section_figure(const FigureContext& c, const repr::CornerPointGrid& g, const repr::CellProperty* prop, bool along_x, int line) {
+  Figure f(842, 595);
+  const auto& inf = c.model->info();
+  const auto sc = prop_scale(prop, g);
+  // cell polygons in (distance along the line, z), averaged over the two sides of the row
+  struct Poly { std::vector<std::pair<double, double>> p; Color col; };
+  std::vector<Poly> polys;
+  double zmin = 1e300, zmax = -1e300;
+  const int n = along_x ? g.nx : g.ny;
+  const double a0 = along_x ? g.x0 : g.y0;
+  for (int k = 0; k < g.nz; ++k)
+    for (int s = 0; s < n; ++s) {
+      int i = along_x ? s : line, j = along_x ? line : s;
+      auto id = g.cell(i, j, k);
+      if (!g.actnum[id]) continue;
+      auto cc = g.corners(i, j, k);
+      auto mid = [&](int a, int b) { Vec3 m = (cc[a] + cc[b]) / 2.0; return std::make_pair((along_x ? m.x : m.y) - a0, m.z); };
+      // corners: lower along-line side first; pairs across the row
+      Poly pl;
+      if (along_x) pl.p = {mid(0, 2), mid(1, 3), mid(5, 7), mid(4, 6)};
+      else pl.p = {mid(0, 1), mid(2, 3), mid(6, 7), mid(4, 5)};
+      for (auto& q : pl.p) { zmin = std::min(zmin, q.second); zmax = std::max(zmax, q.second); }
+      pl.col = cell_color(c, g, prop, sc, id);
+      polys.push_back(std::move(pl));
+    }
+  const double len = along_x ? g.nx * g.dx : g.ny * g.dy;
+  if (zmax < zmin) { zmin = inf.domain.z_base; zmax = inf.domain.z_top; }
+  const double px = 60, py = 70, pw = 842 - 280, ph = 595 - 150;
+  const double ve = c.vertical_exaggeration;
+  // the description's exaggeration, raised where needed so the section fills at least 40 % of the height
+  double sx = pw / len, sz = std::min(ph / (zmax - zmin), sx * std::max(ve, 0.4 * ph / ((zmax - zmin) * sx)));
+  auto P = [&](double a, double z) { return Pt{px + a * sx, py + (zmax - z) * sz}; };
+  const std::string where = along_x ? "row j = " + std::to_string(line + 1) + " (northing " + fmt_fixed(g.y0 + (line + 0.5) * g.dy, 0) + " m)"
+                                    : "column i = " + std::to_string(line + 1) + " (easting " + fmt_fixed(g.x0 + (line + 0.5) * g.dx, 0) + " m)";
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - grid section, " + where,
+        std::string("Active cells of the corner-point grid coloured by ") + (prop ? prop->name : std::string("zone")) +
+            "; fault pillars in red; vertical exaggeration " + fmt_fixed(sz / sx, 1) + "x");
+  f.clip(px, py, len * sx, (zmax - zmin) * sz);
+  for (auto& pl : polys) {
+    std::vector<Pt> q;
+    for (auto& [a, z] : pl.p) q.push_back(P(a, z));
+    f.path(q, true, pl.col, rgb(90, 90, 90), 0.15);
+  }
+  for (int s = 0; s <= n; ++s) {
+    int i = along_x ? s : line, j = along_x ? line : s;
+    for (int side = 0; side < 2; ++side) {
+      int ii = along_x ? i : i + side, jj = along_x ? j + side : j;
+      auto p = g.pillar(ii, jj);
+      if (g.pillar_fault[p] < 0) continue;
+      const double* cd = &g.coord[6 * p];
+      f.line(P((along_x ? cd[0] : cd[1]) - a0, cd[2]), P((along_x ? cd[3] : cd[4]) - a0, cd[5]), kFault, 1.0);
+    }
+  }
+  f.unclip();
+  f.rect(px, py, len * sx, (zmax - zmin) * sz, none(), kInk, 0.6);
+  for (double t : nice_ticks(0, len, 7)) f.text({P(t, zmin).x, py + (zmax - zmin) * sz + 11}, km_or_m(t), 6.5, Anchor::Middle, false, kInk);
+  for (double t : nice_ticks(-zmax, -zmin, 6)) f.text({px - 4, P(0, -t).y + 2.5}, km_or_m(t), 6.5, Anchor::End, false, kInk);
+  f.text({px + len * sx / 2, py + (zmax - zmin) * sz + 26}, std::string("Distance along the ") + (along_x ? "row (m, easting from the grid origin)" : "column (m, northing from the grid origin)"),
+         7.5, Anchor::Middle, false, kInk);
+  f.text({px - 40, py + (zmax - zmin) * sz / 2}, "Depth below datum (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  prop_legend(f, c, g, prop, sc, 842 - 200, 60, 595.0 - 30 - key_box_height(c) - 8);
+  footer(f, c);
+  return f;
+}
+
+Figure grid_layer_figure(const FigureContext& c, const repr::CornerPointGrid& g, const repr::CellProperty* prop, int k) {
+  Figure f(842, 595);
+  const auto& inf = c.model->info();
+  const auto& d = inf.domain;
+  const auto sc = prop_scale(prop, g);
+  double side = std::min(595.0 - 110, 842.0 - 280);
+  double s = side / std::max(d.sx, d.sy);
+  double mx0 = 60, my0 = 60, mw = d.sx * s, mh = d.sy * s;
+  auto P = [&](double x, double y) { return Pt{mx0 + (x - d.x0) * s, my0 + mh - (y - d.y0) * s}; };
+  const std::string zn = inf.units[static_cast<std::size_t>(g.layer_unit[static_cast<std::size_t>(k)])].name;
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - grid layer " + std::to_string(k + 1) + " (" + zn + ")",
+        std::string("Cells of layer ") + std::to_string(k + 1) + " in map view coloured by " + (prop ? prop->name : std::string("zone")) +
+            "; inactive cells blank; fault pillars in red");
+  f.clip(mx0, my0, mw, mh);
+  for (int j = 0; j < g.ny; ++j)
+    for (int i = 0; i < g.nx; ++i) {
+      auto id = g.cell(i, j, k);
+      if (!g.actnum[id]) continue;
+      auto cc = g.corners(i, j, k);
+      std::vector<Pt> q;
+      for (int a : {0, 1, 3, 2}) { Vec3 m = (cc[a] + cc[a + 4]) / 2.0; q.push_back(P(m.x, m.y)); }
+      f.path(q, true, cell_color(c, g, prop, sc, id), cell_color(c, g, prop, sc, id), 0.2);
+    }
+  for (int j = 0; j <= g.ny; ++j)
+    for (int i = 0; i <= g.nx; ++i) {
+      auto p = g.pillar(i, j);
+      if (g.pillar_fault[p] < 0) continue;
+      for (int dir = 0; dir < 2; ++dir) {
+        int i2 = dir == 0 ? i : i + 1, j2 = dir == 0 ? j + 1 : j;
+        if (i2 > g.nx || j2 > g.ny) continue;
+        auto p2 = g.pillar(i2, j2);
+        if (g.pillar_fault[p2] != g.pillar_fault[p]) continue;
+        const double *a = &g.coord[6 * p], *b = &g.coord[6 * p2];
+        f.line(P(0.5 * (a[0] + a[3]), 0.5 * (a[1] + a[4])), P(0.5 * (b[0] + b[3]), 0.5 * (b[1] + b[4])), kFault, 1.2);
+      }
+    }
+  f.unclip();
+  f.rect(mx0, my0, mw, mh, none(), kInk, 0.6);
+  for (double t : nice_ticks(d.x0, d.x0 + d.sx, 6)) f.text({P(t, d.y0).x, my0 + mh + 11}, km_or_m(t), 6.5, Anchor::Middle, false, kInk);
+  for (double t : nice_ticks(d.y0, d.y0 + d.sy, 6)) f.text({mx0 - 5, P(d.x0, t).y + 2.5}, km_or_m(t), 6.5, Anchor::End, false, kInk);
+  f.text({mx0 + mw / 2, my0 + mh + 24}, "Easting (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({mx0 - 40, my0 + mh / 2}, "Northing (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  prop_legend(f, c, g, prop, sc, 842 - 200, 60, 595.0 - 30 - key_box_height(c) - 8);
+  footer(f, c);
+  return f;
+}
+
+Figure grid_view3d_figure(const FigureContext& c, const repr::CornerPointGrid& g, double az, double el) {
+  Figure f(842, 560);
+  const auto& inf = c.model->info();
+  std::map<int, TriMesh> by_zone;
+  auto active = [&](int i, int j, int k) { return i >= 0 && j >= 0 && k >= 0 && i < g.nx && j < g.ny && k < g.nz && g.actnum[g.cell(i, j, k)]; };
+  auto quad = [&](TriMesh& m, const std::array<Vec3, 8>& cc, int a, int b, int d2, int e) {
+    auto base = static_cast<std::uint32_t>(m.v.size());
+    for (int q : {a, b, d2, e}) m.v.push_back(cc[q]);
+    m.t.push_back({base, base + 1, base + 2});
+    m.t.push_back({base, base + 2, base + 3});
+  };
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        if (!active(i, j, k)) continue;
+        auto cc = g.corners(i, j, k);
+        auto& m = by_zone[g.zone[g.cell(i, j, k)]];
+        if (!active(i, j, k - 1)) quad(m, cc, 0, 1, 3, 2);
+        if (!active(i, j, k + 1)) quad(m, cc, 4, 6, 7, 5);
+        // sides at the grid's edge, next to inactive cells and across faults (block changes)
+        const BlockCode b = g.block[g.cell(i, j, k)];
+        auto open = [&](int a, int bb) { return !active(a, bb, k) || g.block[g.cell(a, bb, k)] != b; };
+        if (open(i - 1, j)) quad(m, cc, 0, 2, 6, 4);
+        if (open(i + 1, j)) quad(m, cc, 1, 5, 7, 3);
+        if (open(i, j - 1)) quad(m, cc, 0, 4, 5, 1);
+        if (open(i, j + 1)) quad(m, cc, 2, 3, 7, 6);
+      }
+  std::vector<Mesh3> meshes;
+  for (auto& [u, m] : by_zone) meshes.push_back({m, unit_color(c, static_cast<std::size_t>(std::max(0, u))), 1.0});
+  BBox box = inf.domain.box();
+  Image im = render_meshes(meshes, az, el, c.vertical_exaggeration, 1800, 1000, box);
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - grid, 3D view",
+        "Outer faces of the active cells and their faces across faults, coloured by zone; viewed from azimuth " + fmt_fixed(az, 0) + " deg, elevation " + fmt_fixed(el, 0) +
+            " deg; vertical exaggeration " + fmt_fixed(c.vertical_exaggeration, 1) + "x");
+  const Image* img = f.own(std::move(im));
+  double iw = 842 - 250, ih = iw * 1000.0 / 1800.0;
+  f.image(20, 70, iw, ih, img);
+  std::vector<LegendEntry> es;
+  for (auto& [u, m] : by_zone) es.push_back({"Zones", inf.units[static_cast<std::size_t>(std::max(0, u))].name, unit_color(c, static_cast<std::size_t>(std::max(0, u)))});
+  double ly = legend(f, 842 - 214, 56, 196, es, 560.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 214, ly, 196);
+  footer(f, c);
+  return f;
+}
+
 }  // namespace stratonix::fig

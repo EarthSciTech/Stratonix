@@ -127,6 +127,10 @@ struct FaultFace {
   double k_i = kNaN, k_j = kNaN, L_i = kNaN, L_j = kNaN, mult = kNaN;
   std::string missing;      ///< why mult is missing ("" when computed)
 };
+/// Fault faces of a grid: faces between neighbouring cells of different fault blocks, inside the
+/// tip line of the fault that separates them (the lowest differing block bit).
+std::vector<FaultFace> grid_fault_faces(const Model& m, const CornerPointGrid& g);
+
 struct TransmissibilityResult {
   std::vector<FaultFace> faces;
   CellProperty multx, multy;

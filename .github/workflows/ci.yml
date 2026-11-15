@@ -60,6 +60,55 @@ jobs:
           name: crosscheck-loopstructural
           path: crosscheck_report
 
+  # Stage 3B: RESQML 2.0.1 grid export through FESAPI (built from source here), read back by
+  # resqpy and validated against the RESQML schemas when they are provided (STX-TN-12 section 6).
+  resqml:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libyaml-dev libcairo2-dev zlib1g-dev libhdf5-dev libminizip-dev libboost-dev uuid-dev
+      - name: FESAPI revision
+        id: fesapi
+        run: echo "sha=$(git ls-remote https://github.com/F2I-Consulting/fesapi.git HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: fesapi-cache
+        with:
+          path: fesapi-install
+          key: fesapi-${{ steps.fesapi.outputs.sha }}-ubuntu-22.04
+      - name: Build FESAPI
+        if: steps.fesapi-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/F2I-Consulting/fesapi.git fesapi-src
+          cmake -S fesapi-src -B fesapi-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/fesapi-install \
+                -DMINIZIP_INCLUDE_DIR=/usr/include/minizip -DMINIZIP_LIBRARY_RELEASE=/usr/lib/x86_64-linux-gnu/libminizip.so \
+                -DWITH_EXAMPLE=OFF -DWITH_JAVA_WRAPPING=OFF -DWITH_PYTHON_WRAPPING=OFF -DWITH_DOTNET_WRAPPING=OFF
+          cmake --build fesapi-build --parallel
+          cmake --install fesapi-build
+      - name: FESAPI interface used by Stratonix (for the log)
+        run: |
+          grep -rhn "setGeometryAsCoordinateLineNodes\|createLocalDepth3dCrs\|createDiscreteProperty\|createContinuousProperty\|Hdf5Array3dOfValues\|createHdfProxy\|setEnabledCells\|serializeFrom\|EpcDocument(" fesapi-install/include | head -80 || true
+          find fesapi-install -name "*.so*" | head
+      - name: Build Stratonix with FESAPI
+        run: |
+          cmake --preset linux-gcc-release -DSTRATONIX_WITH_FESAPI=ON -DFESAPI_ROOT=$PWD/fesapi-install
+          cmake --build build/linux-gcc-release --target stratonix test_v3_grids
+      - name: Export a grid as RESQML and GRDECL
+        run: |
+          export LD_LIBRARY_PATH=$PWD/fesapi-install/lib:$PWD/fesapi-install/lib64:$LD_LIBRARY_PATH
+          build/linux-gcc-release/apps/stratonix/stratonix export examples/fault_system_relay_splay.yaml -o resqml_out --formats grdecl,resqml
+          build/linux-gcc-release/tests/test_v3_grids G12
+      - name: Read back with resqpy
+        run: |
+          python3 -m pip install --upgrade pip && python3 -m pip install resqpy lxml
+          python3 tests/tools/resqml_roundtrip.py resqml_out/exports
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resqml-grid
+          path: resqml_out/exports/grid
+
   windows:
     runs-on: windows-2022
     strategy:

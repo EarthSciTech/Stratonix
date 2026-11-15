@@ -135,6 +135,10 @@ std::vector<const Param*> Description::all_params() const {
     add(*q);
   for (auto& e : events)
     for (auto* q : {&e.age, &e.from, &e.to, &e.throw_}) add(*q);
+  for (auto* q : {&grid.spacing, &grid.margin, &grid.min_thickness}) add(*q);
+  for (auto& z : grid.zones) { add(z.layers); add(z.layer_thickness); }
+  for (auto& f : grid.facies) add(f.code);
+  for (auto& t : grid.transforms) { add(t.a); add(t.b); }
   add(salt.source_thickness);
   for (auto& b : salt.bodies)
     for (auto* q : {&b.centre, &b.radius, &b.flank_width, &b.height, &b.withdrawal_width, &b.axis_azimuth, &b.half_length}) add(*q);
@@ -849,6 +853,39 @@ struct Typer {
           cd.parameters.push_back({S(&x, "path"), P(&x, "min", b, Dimension::Any, true, 1), P(&x, "max", b, Dimension::Any, true, 1)});
         }
     }
+    if (const Node* gn = root.get("grid")) {
+      auto& g = d.grid;
+      g.present = true;
+      g.spacing = P(gn, "spacing", "grid", Dimension::Length, true);
+      g.margin = P(gn, "margin", "grid", Dimension::Length, false, 1);
+      g.min_thickness = P(gn, "min_thickness", "grid", Dimension::Length, false, 1);
+      if (const Node* zs = gn->get("zones"))
+        for (std::size_t k = 0; k < zs->seq.size(); ++k) {
+          const Node& x = zs->seq[k];
+          std::string b = "grid.zones[" + std::to_string(k) + "]";
+          GridZoneDesc z;
+          z.unit = S(&x, "unit");
+          if (!S(&x, "layering").empty()) z.layering = S(&x, "layering");
+          z.layers = P(&x, "layers", b, Dimension::Ordinal, true, 1);
+          z.layer_thickness = P(&x, "layer_thickness", b, Dimension::Length, false, 1);
+          g.zones.push_back(std::move(z));
+        }
+      if (const Node* fs = gn->get("facies"))
+        for (std::size_t k = 0; k < fs->seq.size(); ++k) {
+          const Node& x = fs->seq[k];
+          g.facies.push_back({S(&x, "unit"), S(&x, "name"), P(&x, "code", "grid.facies[" + std::to_string(k) + "]", Dimension::Ordinal, true, 1)});
+        }
+      g.porosity = S(gn, "porosity");
+      if (const Node* ts = gn->get("transforms"))
+        for (std::size_t k = 0; k < ts->seq.size(); ++k) {
+          const Node& x = ts->seq[k];
+          std::string b = "grid.transforms[" + std::to_string(k) + "]";
+          g.transforms.push_back({S(&x, "name"), S(&x, "unit"), S(&x, "from"), S(&x, "law"), P(&x, "a", b, Dimension::Any, true, 1),
+                                  P(&x, "b", b, Dimension::Any, true, 1)});
+        }
+      if (const Node* ft = gn->get("fault_transmissibility")) g.transmissibility = S(ft, "calibration");
+      if (const Node* tt = gn->get("tetrahedral")) g.tetrahedral = tt->boolean || tt->str == "true";
+    }
     if (const Node* fr = root.get("fault_rock")) {
       d.fault_rock.present = true;
       d.fault_rock.shale_threshold = P(fr, "shale_threshold", "fault_rock", Dimension::Dimensionless, false, 1);
@@ -1089,6 +1126,57 @@ struct Typer {
       if (fr.seal_a.present && !(fr.seal_a.si() > 0)) c.err("fault_rock.seal_calibration.a", "F27", "a must be positive");
       if (!fr.seal_type.empty() && std::none_of(d.units.begin(), d.units.end(), [](const UnitDesc& u) { return u.clay_fraction.present; }))
         c.err("fault_rock.seal_calibration", "F27", "a seal calibration needs clay fractions on the units");
+    }
+    // STX-TN-12 (F32): the grid block
+    if (d.grid.present) {
+      const auto& g = d.grid;
+      if (g.spacing.present && (g.spacing.values.empty() || g.spacing.values.size() > 2))
+        c.err("grid.spacing", "F32", "the grid spacing is one value or [dx, dy]");
+      for (double v : g.spacing.si_list())
+        if (!(v > 0)) c.err("grid.spacing", "F32", "the grid spacing must be positive");
+      if (g.margin.present && g.margin.si() < 0) c.err("grid.margin", "F32", "the margin must not be negative");
+      if (g.min_thickness.present && !(g.min_thickness.si() >= 0)) c.err("grid.min_thickness", "F32", "the minimum thickness must not be negative");
+      std::set<std::string> seen;
+      int prev_base = -2;
+      for (std::size_t k = 0; k < g.zones.size(); ++k) {
+        const auto& z = g.zones[k];
+        const std::string b = "grid.zones[" + std::to_string(k) + "]";
+        const int u = d.unit_index(z.unit);
+        if (u < 0) { c.err(b + ".unit", "F32", "unknown unit '" + z.unit + "'"); continue; }
+        if (!seen.insert(z.unit).second) c.err(b + ".unit", "F32", "unit '" + z.unit + "' is gridded twice");
+        const int ht = d.horizon_index(d.units[static_cast<std::size_t>(u)].top), hb = d.horizon_index(d.units[static_cast<std::size_t>(u)].base);
+        if (ht < 0 || hb < 0) c.err(b + ".unit", "F32", "unit '" + z.unit + "' is not between two horizons");
+        if (prev_base != -2 && ht != prev_base) c.err(b + ".unit", "F32", "zones must be consecutive units, listed top to base");
+        prev_base = hb;
+        if (z.layers.present && !(z.layers.si() >= 1 && std::fabs(z.layers.si() - std::round(z.layers.si())) < 1e-9))
+          c.err(b + ".layers", "F32", "a zone needs a whole number of layers, 1 or more");
+        if (z.layering != "proportional" && z.layering != "follow_top" && z.layering != "follow_base")
+          c.err(b + ".layering", "F32", "layering is proportional, follow_top or follow_base");
+        if (z.layering != "proportional" && !(z.layer_thickness.present && z.layer_thickness.si() > 0))
+          c.err(b + ".layer_thickness", "F32", "follow_top and follow_base need a positive layer thickness");
+      }
+      for (std::size_t k = 0; k < g.facies.size(); ++k)
+        if (d.unit_index(g.facies[k].unit) < 0) c.err("grid.facies[" + std::to_string(k) + "].unit", "F32", "unknown unit '" + g.facies[k].unit + "'");
+      if (!g.porosity.empty() && g.porosity != "compaction") c.err("grid.porosity", "F32", "porosity comes from compaction (stage 2D)");
+      if (g.porosity == "compaction" && !d.compaction.present())
+        c.err("grid.porosity", "F32", "porosity from compaction needs a compaction block (stage 2D)");
+      std::set<std::string> known = {"ZONE", "BLOCK"};
+      if (!g.facies.empty()) known.insert("FACIES");
+      if (g.porosity == "compaction") known.insert("PORO");
+      for (std::size_t k = 0; k < g.transforms.size(); ++k) {
+        const auto& t = g.transforms[k];
+        const std::string b = "grid.transforms[" + std::to_string(k) + "]";
+        if (!known.count(t.from)) c.err(b + ".from", "F32", "'" + t.from + "' is not a property computed before this transform");
+        if (t.law != "linear" && t.law != "exponential" && t.law != "power") c.err(b + ".law", "F32", "law is linear, exponential or power");
+        if (known.count(t.name)) c.err(b + ".name", "F32", "property '" + t.name + "' is defined twice");
+        known.insert(t.name);
+      }
+      if (!g.transmissibility.empty()) {
+        if (g.transmissibility != "manzocchi_1999") c.err("grid.fault_transmissibility.calibration", "F32", "calibration is manzocchi_1999");
+        if (!d.fault_rock.present) c.err("grid.fault_transmissibility", "F32", "fault transmissibility needs a fault_rock block (stage 2F)");
+        if (!known.count("PERMX") || !known.count("PERMY"))
+          c.err("grid.fault_transmissibility", "F32", "fault transmissibility needs PERMX and PERMY (transforms)");
+      }
     }
     if (d.stress.present) {
       const auto& st2 = d.stress;

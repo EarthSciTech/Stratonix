@@ -242,6 +242,9 @@ def main(argv):
     lines += [f"{ex}: {'within tolerance' if ok else 'OUTSIDE tolerance'}" for ex, ok in verdicts]
     (report / "crosscheck_report.txt").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
+    # the tables too, so the log carries the numbers
+    print("\n" + (report / "crosscheck_horizons.csv").read_text())
+    print((report / "crosscheck_faults.csv").read_text())
     if have_ls:
         return 0 if allok else 1
     return 0

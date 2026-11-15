@@ -83,6 +83,7 @@ std::string write_vtu(const VtuData& d, int dec) {
   for (auto& [n, v] : d.point_data) o += "<DataArray type=\"Float64\" Name=\"" + n + "\" format=\"ascii\">\n" + join_nums(v, dec) + "</DataArray>\n";
   o += "</PointData>\n<CellData>\n";
   for (auto& [n, v] : d.cell_data) o += "<DataArray type=\"Int32\" Name=\"" + n + "\" format=\"ascii\">\n" + join_nums(v, 0) + "</DataArray>\n";
+  for (auto& [n, v] : d.cell_data_real) o += "<DataArray type=\"Float64\" Name=\"" + n + "\" format=\"ascii\">\n" + join_nums(v, dec) + "</DataArray>\n";
   o += "</CellData>\n<Points>\n<DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n";
   for (auto& p : d.pts) o += num(p.x, dec) + " " + num(p.y, dec) + " " + num(p.z, dec) + "\n";
   o += "</DataArray>\n</Points>\n<Cells>\n";

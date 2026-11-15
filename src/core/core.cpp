@@ -76,6 +76,7 @@ std::optional<UnitDef> find_unit(std::string_view name) {
       {"psi", Dimension::Pressure, 6894.757293168},
       {"MPa/km", Dimension::PressureGradient, 1.0e3}, {"kPa/m", Dimension::PressureGradient, 1.0e3},
       {"bar/m", Dimension::PressureGradient, 1.0e5},  {"psi/ft", Dimension::PressureGradient, 6894.757293168 / 0.3048},
+      {"mD", Dimension::Permeability, 9.869233e-16}, {"D", Dimension::Permeability, 9.869233e-13},
   };
   for (auto& u : table)
     if (u.name == name) return u;
@@ -93,6 +94,7 @@ const char* dimension_name(Dimension d) {
     case Dimension::Time: return "time";
     case Dimension::Pressure: return "pressure";
     case Dimension::PressureGradient: return "pressure gradient";
+    case Dimension::Permeability: return "permeability";
     default: return "any";
   }
 }

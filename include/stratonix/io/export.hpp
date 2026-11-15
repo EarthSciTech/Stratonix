@@ -72,7 +72,10 @@ std::string write_well_path(const WellPath& w, int decimals = 2);
 struct GrdeclInfo {
   std::vector<std::string> header;        ///< comment lines at the top of the file
   std::vector<std::string> fault_names;   ///< by fault index, for FAULTS
+  const std::vector<repr::FaultFace>* faces = nullptr;  ///< for FAULTS (none written without)
 };
+/// Missing values of real properties in GRDECL (stated in the file's header).
+constexpr double kGrdeclMissing = -999.25;
 std::string write_grdecl(const repr::CornerPointGrid& g, const repr::PropertySet* props,
                          const repr::TransmissibilityResult* trans, const GrdeclInfo& info, int decimals = 3);
 
@@ -84,9 +87,14 @@ struct VtuData {
   std::vector<std::uint8_t> types;                ///< VTK cell types (5 triangle, 4 polyline)
   std::vector<std::pair<std::string, std::vector<double>>> point_data;
   std::vector<std::pair<std::string, std::vector<std::int32_t>>> cell_data;
+  std::vector<std::pair<std::string, std::vector<double>>> cell_data_real;  ///< Float64 cell arrays
 };
 std::string write_vtu(const VtuData& d, int decimals = 4);
 VtuData read_vtu(const std::string& text);
+/// VTK unstructured grids of the active hexahedra (cell type 12) and of a tetrahedral grid
+/// (type 10), with ZONE, BLOCK and the properties as cell data.
+VtuData grid_vtu(const repr::CornerPointGrid& g, const repr::PropertySet* props);
+VtuData tet_vtu(const repr::TetGrid& t, const repr::CornerPointGrid& g, const repr::PropertySet* props);
 /// VTK XML image data of a voxel grid (cell arrays unit and block).
 std::string write_vti(const repr::VoxelGrid& v, int decimals = 4);
 repr::VoxelGrid read_vti(const std::string& text);
@@ -126,6 +134,15 @@ class ExportContext {
   repr::StressInput stress;
   std::vector<int> curvature_horizons;
   double fracture_threshold = kNaN;
+  /// Stage 3B (STX-TN-12): the grid of the description's grid block and what goes with it.
+  struct CellGrid {
+    const repr::CornerPointGrid* grid = nullptr;
+    const repr::PropertySet* props = nullptr;
+    const repr::TransmissibilityResult* trans = nullptr;
+    const std::vector<repr::FaultFace>* faces = nullptr;
+    const repr::TetGrid* tets = nullptr;
+  };
+  CellGrid cells;
   /// Lines written at the top of every file that takes comments (model, CRS, z convention).
   std::vector<std::string> comments() const;
 

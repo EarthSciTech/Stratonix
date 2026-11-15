@@ -121,6 +121,11 @@ const repr::ThrowRow& CheckContext::throw_row(int f, int h) {
   if (it == throws_.end()) it = throws_.emplace(k, repr::throw_row(m_, fault_lattice(f), cutoffs(f, h), h)).first;
   return it->second;
 }
+const GridProducts* CheckContext::grid_products() {
+  if (!d_.grid.present || !timeline_checks) return nullptr;  // grids are of the present-day model, not of restored states
+  if (!grid_products_) grid_products_ = std::make_unique<GridProducts>(make_grid_products(d_, m_));
+  return grid_products_.get();
+}
 double CheckContext::tolerance(const std::string& key, std::string* source) const {
   struct T { const char* key; const desc::Param* p; double def; };
   const T table[] = {{"thickness_min", &d_.tol_thickness_min, 0.5}, {"crossing", &d_.tol_crossing, 0.01},
@@ -1140,6 +1145,45 @@ class C22 final : public Check {
   }
 };
 
+/// C23 to C25: grid checks (STX-TN-12 section 7), when the description asks for a grid.
+class C23 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const GridProducts* gp = c.grid_products();
+    if (!gp) return out;
+    const auto& g = gp->grid;
+    std::size_t act = 0;
+    for (auto a : g.actnum) act += a;
+    const std::string subj = std::to_string(g.nx) + " x " + std::to_string(g.ny) + " x " + std::to_string(g.nz) + " grid, " + std::to_string(act) + " active cells";
+    auto r = base(c, "C23", "positive cell volumes", subj);
+    r.unit = "cells";
+    r.value = static_cast<double>(gp->defects.nonpositive_volume);
+    r.tolerance = 0;
+    r.tolerance_source = "STX-TN-12 section 7: none";
+    r.passed = gp->defects.nonpositive_volume == 0;
+    r.detail = r.passed ? "every active cell has a positive volume" : "first: " + gp->defects.first_nonpositive;
+    out.push_back(r);
+    auto r2 = base(c, "C24", "no inverted cells", subj);
+    r2.unit = "cells";
+    r2.value = static_cast<double>(gp->defects.inverted);
+    r2.tolerance = 0;
+    r2.tolerance_source = "STX-TN-12 section 7: none";
+    r2.passed = gp->defects.inverted == 0;
+    r2.detail = r2.passed ? "top corners at or above bottom corners; positive Jacobian at every corner" : "first: " + gp->defects.first_inverted;
+    out.push_back(r2);
+    auto r3 = base(c, "C25", "fault faces on the fault surfaces", std::to_string(gp->defects.fault_faces) + " fault faces on fault pillars");
+    r3.unit = "m";
+    r3.value = gp->defects.worst_fault_distance;
+    r3.tolerance = gp->fault_tolerance;
+    r3.tolerance_source = "Stratonix default: 1 % of the areal cell size (plus the chord of a curved fault)";
+    r3.passed = gp->defects.fault_face_off == 0;
+    r3.detail = r3.passed ? "largest distance of a fault-face corner from its fault " + fmt_fixed(gp->defects.worst_fault_distance, 4) + " m"
+                          : std::to_string(gp->defects.fault_face_off) + " faces off; first: " + gp->defects.first_fault_off;
+    out.push_back(r3);
+    return out;
+  }
+};
+
 STRATONIX_REGISTER(check_c9, registry::Kind::Check, "C9_closure", "1.0.0", "Closure, spill point and area against targets",
                    [] { return std::make_unique<C9>(); })
 STRATONIX_REGISTER(check_c10, registry::Kind::Check, "C10_fault_scaling", "1.0.0", "Displacement-length scaling (warning)",
@@ -1166,6 +1210,8 @@ STRATONIX_REGISTER(check_c21, registry::Kind::Check, "C21_data_misfit", "1.0.0",
                    [] { return std::make_unique<C21>(); })
 STRATONIX_REGISTER(check_c22, registry::Kind::Check, "C22_conditioning", "1.0.0", "Conditioning converged inside the admissible ranges",
                    [] { return std::make_unique<C22>(); })
+STRATONIX_REGISTER(check_c23, registry::Kind::Check, "C23_grid", "1.0.0", "Grid: positive volumes, no inverted cells, fault faces on the faults",
+                   [] { return std::make_unique<C23>(); })
 STRATONIX_REGISTER(check_c11, registry::Kind::Check, "C11_fault_system", "1.0.0",
                    "Throw continuous across branch lines and relays", [] { return std::make_unique<C11>(); })
 
@@ -1273,6 +1319,71 @@ repr::FaultRockInput fault_rock_input(const desc::Description& d, const Model& m
     in.seal_c = fr.seal_c.si();
   }
   return in;
+}
+int model_unit_of(const desc::Description& d, const Model& m, const std::string& unit) {
+  const int u = d.unit_index(unit);
+  if (u < 0) return -1;
+  const int ht = d.horizon_index(d.units[static_cast<std::size_t>(u)].top), hb = d.horizon_index(d.units[static_cast<std::size_t>(u)].base);
+  const auto& mu = m.info().units;
+  for (std::size_t k = 0; k < mu.size(); ++k)
+    if (mu[k].top_horizon == ht && mu[k].base_horizon == hb && ht >= 0 && hb >= 0) return static_cast<int>(k);
+  return -1;
+}
+repr::GridOptions grid_options(const desc::Description& d, const Model& m) {
+  repr::GridOptions o;
+  const auto& g = d.grid;
+  auto sp = g.spacing.si_list();
+  o.dx = sp.empty() ? d.grid_spacing.si() : sp[0];
+  o.dy = sp.size() > 1 ? sp[1] : o.dx;
+  if (g.margin.present) o.margin = g.margin.si();
+  if (g.min_thickness.present) o.min_thickness = g.min_thickness.si();
+  if (g.zones.empty()) {
+    const auto& mu = m.info().units;
+    for (std::size_t k = 0; k < mu.size(); ++k)
+      if (mu[k].top_horizon >= 0 && mu[k].base_horizon >= 0) o.zones.push_back({static_cast<int>(k), 1, repr::Layering::Proportional, 0});
+  }
+  for (auto& z : g.zones) {
+    repr::ZoneSpec s;
+    s.unit = model_unit_of(d, m, z.unit);
+    s.layers = z.layers.present ? static_cast<int>(std::llround(z.layers.si())) : 1;
+    s.layering = z.layering == "follow_top" ? repr::Layering::FollowTop : z.layering == "follow_base" ? repr::Layering::FollowBase : repr::Layering::Proportional;
+    if (z.layer_thickness.present) s.layer_thickness = z.layer_thickness.si();
+    o.zones.push_back(s);
+  }
+  return o;
+}
+repr::PropertyInputs property_inputs(const desc::Description& d, const Model& m) {
+  repr::PropertyInputs in;
+  const auto& g = d.grid;
+  for (auto& f : g.facies)
+    in.facies.push_back({model_unit_of(d, m, f.unit), static_cast<int>(std::llround(f.code.si())), f.name, desc::evidence_name(f.code.evidence), f.code.source});
+  in.porosity_from_compaction = g.porosity == "compaction";
+  for (auto& t : g.transforms) {
+    // a and b as written (their units are those of the law); evidence of the weaker of the two
+    std::string ev = desc::evidence_name(t.a.evidence);
+    if (t.b.evidence != t.a.evidence) ev += " / " + std::string(desc::evidence_name(t.b.evidence));
+    in.transforms.push_back({t.name, t.unit, t.from, t.law, t.a.values.empty() ? kNaN : t.a.values[0], t.b.values.empty() ? kNaN : t.b.values[0], ev,
+                             t.a.source == t.b.source ? t.a.source : t.a.source + "; " + t.b.source});
+  }
+  return in;
+}
+GridProducts make_grid_products(const desc::Description& d, const Model& m) {
+  GridProducts gp;
+  gp.options = grid_options(d, m);
+  gp.grid = repr::corner_point_grid(m, gp.options);
+  gp.props = repr::grid_properties(m, gp.grid, property_inputs(d, m));
+  if (!d.grid.transmissibility.empty()) {
+    gp.trans = repr::fault_transmissibility(m, gp.grid, gp.props, fault_rock_input(d, m));
+    gp.has_trans = true;
+  }
+  if (d.grid.tetrahedral) {
+    gp.tets = repr::tetrahedral_grid(gp.grid);
+    gp.has_tets = true;
+  }
+  gp.fault_tolerance = 0.01 * std::min(gp.grid.dx, gp.grid.dy);  // Stratonix default
+  gp.defects = repr::grid_defects(m, gp.grid, gp.fault_tolerance);
+  for (auto& f : m.info().faults) gp.fault_names.push_back(f.name);
+  return gp;
 }
 repr::StressInput stress_input(const desc::Description& d) {
   repr::StressInput s;

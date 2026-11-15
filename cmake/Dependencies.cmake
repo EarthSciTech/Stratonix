@@ -94,6 +94,20 @@ if(STRATONIX_WITH_CAIRO)
   endif()
 endif()
 
+# FESAPI (Apache 2.0): optional RESQML writer (stage 3B), linked dynamically. Built from source by
+# the CI job 'resqml'; FESAPI_ROOT points to its install prefix.
+if(STRATONIX_WITH_FESAPI)
+  find_path(STX_FESAPI_INC fesapi/common/DataObjectRepository.h HINTS ${FESAPI_ROOT}/include ENV FESAPI_ROOT PATH_SUFFIXES include)
+  find_library(STX_FESAPI_LIB NAMES FesapiCpp FesapiCppd HINTS ${FESAPI_ROOT}/lib ${FESAPI_ROOT}/lib64 ENV FESAPI_ROOT PATH_SUFFIXES lib lib64)
+  if(NOT STX_FESAPI_INC OR NOT STX_FESAPI_LIB)
+    message(FATAL_ERROR "STRATONIX_WITH_FESAPI: FESAPI not found (set FESAPI_ROOT to its install prefix)")
+  endif()
+  add_library(stx_fesapi_imported UNKNOWN IMPORTED)
+  set_target_properties(stx_fesapi_imported PROPERTIES IMPORTED_LOCATION ${STX_FESAPI_LIB} INTERFACE_INCLUDE_DIRECTORIES ${STX_FESAPI_INC})
+  add_library(stx::fesapi ALIAS stx_fesapi_imported)
+  message(STATUS "FESAPI: ${STX_FESAPI_LIB}")
+endif()
+
 if(STRATONIX_WITH_PROJ)
   find_package(PROJ CONFIG REQUIRED)
 endif()

@@ -308,7 +308,7 @@ std::vector<std::string> resolve_export_ids(const desc::Description& d, const st
 }
 
 std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Model& m, const std::vector<std::string>& ids,
-                                            const std::filesystem::path& folder, double grid_spacing) {
+                                            const std::filesystem::path& folder, double grid_spacing, const GridProducts* gp = nullptr) {
   double sp = grid_spacing > 0 ? grid_spacing : d.grid_spacing.si();
   double sticks = d.fault_stick_spacing.present ? d.fault_stick_spacing.si() : 250.0;  // Stratonix default when not given
   io::ExportContext c(m, make_well_paths(d), GridSpec::covering(m.info().domain, sp), std::max(10.0, sp / 2), sticks);
@@ -329,6 +329,19 @@ std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Mo
     if (v.size() == 3) { c.voxel_dx = v[0]; c.voxel_dy = v[1]; c.voxel_dz = v[2]; }
   }
   c.sample_spacing = std::max(250.0, 5 * sp);  // Stratonix default: sparse enough for implicit modellers
+  std::vector<repr::FaultFace> faces;
+  if (gp) {
+    c.cells.grid = &gp->grid;
+    c.cells.props = &gp->props;
+    if (gp->has_trans) {
+      c.cells.trans = &gp->trans;
+      c.cells.faces = &gp->trans.faces;
+    } else {
+      faces = repr::grid_fault_faces(m, gp->grid);
+      c.cells.faces = &faces;
+    }
+    if (gp->has_tets) c.cells.tets = &gp->tets;
+  }
   std::string note = "Every parameter of the description carries a value, unit, evidence class and source (see manifest.json).";
   return io::export_set(c, ids, folder, note);
 }
@@ -528,6 +541,83 @@ void write_data_figures(const desc::Description& d, const Model& m, const std::v
                       "Misfit of the model at every datum of " + h + ".", "Data are never altered; their misfit is reported, normalised by the stated uncertainty.");
 }
 
+std::vector<std::pair<std::string, std::string>> grid_rows(const GridProducts& gp) {
+  std::vector<std::pair<std::string, std::string>> k;
+  const auto& g = gp.grid;
+  std::size_t act = 0;
+  double vol = 0;
+  for (int kk = 0; kk < g.nz; ++kk)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i)
+        if (g.actnum[g.cell(i, j, kk)]) { ++act; vol += repr::cell_volume(g.corners(i, j, kk)); }
+  std::size_t fp = 0;
+  for (auto f : g.pillar_fault) fp += f >= 0;
+  k.push_back({"Grid", std::to_string(g.nx) + " x " + std::to_string(g.ny) + " x " + std::to_string(g.nz) + " cells (" + fmt_fixed(g.dx, 1) + " x " +
+                           fmt_fixed(g.dy, 1) + " m), " + std::to_string(act) + " active, " + std::to_string(fp) + " fault pillars"});
+  k.push_back({"Grid bulk volume (active cells)", fmt_fixed(vol / 1e6, 3) + " million m3"});
+  for (auto& p : gp.props.props)
+    if (p.missing) k.push_back({"Grid property " + p.name + " missing", std::to_string(p.missing) + " cells: " + p.missing_reason});
+  return k;
+}
+
+/// Grid tables and figures (stage 3B): grid/cells.csv, grid/fault_faces.csv and the grid figures.
+void write_grid_outputs(const desc::Description& d, const Model& m, const GridProducts& gp, const std::vector<std::pair<std::string, std::string>>& keys,
+                        const std::filesystem::path& out_dir, bool figures) {
+  const auto& g = gp.grid;
+  const auto& inf = m.info();
+  std::string t = "i,j,k,active,zone,block,volume_m3,x,y,z";
+  for (auto& p : gp.props.props)
+    if (p.name != "ZONE" && p.name != "BLOCK") t += "," + p.name;
+  t += "\n";
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        auto id = g.cell(i, j, k);
+        auto cc = g.corners(i, j, k);
+        Vec3 ctr = repr::cell_centre(cc);
+        t += std::to_string(i + 1) + "," + std::to_string(j + 1) + "," + std::to_string(k + 1) + "," + std::to_string(g.actnum[id]) + "," +
+             (g.zone[id] >= 0 ? inf.units[static_cast<std::size_t>(g.zone[id])].name : std::string()) + "," + std::to_string(g.block[id]) + "," +
+             fmt_fixed(repr::cell_volume(cc), 3) + "," + fmt_fixed(ctr.x, 3) + "," + fmt_fixed(ctr.y, 3) + "," + fmt_fixed(ctr.z, 3);
+        for (auto& p : gp.props.props)
+          if (p.name != "ZONE" && p.name != "BLOCK") t += "," + (std::isnan(p.v[id]) ? std::string() : (p.integer ? std::to_string(std::llround(p.v[id])) : fmt_shortest(p.v[id])));
+        t += "\n";
+      }
+  std::filesystem::create_directories(out_dir / "grid");
+  write_file(out_dir / "grid" / "cells.csv", t);
+  if (gp.has_trans) {
+    std::string f = "fault,i,j,k,face,x,y,z,sgr,thickness_m,displacement_m,k_fault_mD,k_i_mD,k_j_mD,L_i_m,L_j_m,multiplier,missing\n";
+    for (auto& ff : gp.trans.faces)
+      f += gp.fault_names[static_cast<std::size_t>(ff.fault)] + "," + std::to_string(ff.i + 1) + "," + std::to_string(ff.j + 1) + "," + std::to_string(ff.k + 1) +
+           "," + ff.dir + "+," + fmt_fixed(ff.centre.x, 2) + "," + fmt_fixed(ff.centre.y, 2) + "," + fmt_fixed(ff.centre.z, 2) + "," + fmt_shortest(ff.sgr) + "," +
+           fmt_shortest(ff.thickness) + "," + fmt_shortest(ff.displacement) + "," + fmt_shortest(ff.k_fault) + "," + fmt_shortest(ff.k_i) + "," +
+           fmt_shortest(ff.k_j) + "," + fmt_shortest(ff.L_i) + "," + fmt_shortest(ff.L_j) + "," + fmt_shortest(ff.mult) + ",\"" + ff.missing + "\"\n";
+    write_file(out_dir / "grid" / "fault_faces.csv", f);
+  }
+  if (!figures) return;
+  auto c = figure_context(d, m, keys);
+  const std::string ev = std::string("Evidence basis: ") + basis_label(inf.basis) + ".";
+  auto folder = out_dir / "figures";
+  auto put = [&](const fig::Figure& f, const std::string& kind, const std::string& name, const std::string& t2, const std::string& cap) {
+    fig::write_figure(f, folder, fig::figure_basename(c, kind, name), c.model_name + " - " + t2, cap, ev);
+  };
+  put(fig::grid_section_figure(c, g, nullptr, true, g.ny / 2), "grid-section", "row_zone", "grid section along a row",
+      "Corner-point grid along the middle row, cells by zone, fault pillars in red.");
+  put(fig::grid_section_figure(c, g, nullptr, false, g.nx / 2), "grid-section", "column_zone", "grid section along a column",
+      "Corner-point grid along the middle column, cells by zone, fault pillars in red.");
+  if (const auto* b = gp.props.find("BLOCK"))
+    put(fig::grid_layer_figure(c, g, b, 0), "grid-layer", "1_block", "fault blocks on layer 1", "Fault-block code of the cells of layer 1.");
+  for (auto& p : gp.props.props) {
+    if (p.integer) continue;
+    const std::string nm = io::petrel_name(p.name);
+    put(fig::grid_section_figure(c, g, &p, true, g.ny / 2), "grid-section", "row_" + nm, "grid section by " + p.name,
+        p.name + " (" + p.unit + ", " + p.evidence + ") along the middle row; grey cells are missing.");
+    put(fig::grid_layer_figure(c, g, &p, g.nz / 2), "grid-layer", std::to_string(g.nz / 2 + 1) + "_" + nm, p.name + " on a layer",
+        p.name + " (" + p.unit + ") on layer " + std::to_string(g.nz / 2 + 1) + "; grey cells are missing.");
+  }
+  put(fig::grid_view3d_figure(c, g, 210, 30), "grid-3d", "SW", "grid 3D view from the south-west", "Outer faces of the active cells and their faces across faults, by zone.");
+  put(fig::grid_view3d_figure(c, g, 135, 30), "grid-3d", "SE", "grid 3D view from the south-east", "Outer faces of the active cells and their faces across faults, by zone.");
+}
+
 BuildOutcome run_build(const std::filesystem::path& description, const std::filesystem::path& out_dir,
                        const BuildOptions& opt, const std::string& command) {
   auto d = desc::load_description(description);
@@ -567,6 +657,9 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     rows.push_back({"Conditioning", std::to_string(cr->residuals.size()) + " data, reduced chi2 " + fmt_fixed(cr->chi2_reduced, 3) + ", " +
                                         std::to_string(cr->iterations) + " iterations"});
   }
+  const GridProducts* gp = ctx.grid_products();
+  if (gp)
+    for (auto& r : grid_rows(*gp)) rows.push_back(r);
   write_file(out_dir / "summary_table.csv", summary_csv(rows));
   if (!o.checks_passed) {
     log(LogLevel::Error, "checks failed: exports and figures are not written (see checks_report.txt)");
@@ -574,8 +667,9 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     if (opt.figures) write_figures(d, *o.model, keys, out_dir / "figures");
     if (opt.figures && !d.events.empty()) write_restoration(d, *o.model, out_dir / "restoration");
     if (opt.figures) write_data_figures(d, *o.model, keys, out_dir / "figures");
+    if (gp) write_grid_outputs(d, *o.model, *gp, keys, out_dir, opt.figures);
     auto ids = resolve_export_ids(d, opt.exports);
-    if (!ids.empty()) write_exports(d, *o.model, ids, out_dir / "exports", 0);
+    if (!ids.empty()) write_exports(d, *o.model, ids, out_dir / "exports", 0, gp);
   }
   Manifest man = Manifest::from_description(d, command);
   for (auto& [k, v] : o.log.values) man.extra.emplace_back(k, v);
@@ -638,7 +732,7 @@ BuildOutcome run_export(const std::filesystem::path& description, const std::fil
   } else {
     auto ids = resolve_export_ids(d, formats);
     if (ids.empty()) throw Error(ErrorCode::InvalidArgument, "no available export format requested");
-    write_exports(d, *o.model, ids, out_dir / "exports", grid_spacing);
+    write_exports(d, *o.model, ids, out_dir / "exports", grid_spacing, ctx.grid_products());
   }
   Manifest man = Manifest::from_description(d, "export");
   man.add_outputs(out_dir);

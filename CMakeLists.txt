@@ -12,6 +12,7 @@ endif()
 
 option(STRATONIX_WITH_CAIRO "Rasterise figures (PNG, TIFF) with Cairo" ON)
 option(STRATONIX_WITH_PROJ "Enable coordinate reprojection with PROJ" OFF)
+option(STRATONIX_WITH_FESAPI "RESQML 2.0.1 grid export through FESAPI (FESAPI_ROOT: its install prefix)" OFF)
 option(STRATONIX_SANITIZE "Build with address and undefined-behaviour sanitisers" OFF)
 option(STRATONIX_BUILD_TESTS "Build tests" ON)
 option(STRATONIX_BUILD_BENCHMARKS "Build benchmarks" ON)

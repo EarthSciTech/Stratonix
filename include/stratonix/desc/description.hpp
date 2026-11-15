@@ -232,6 +232,21 @@ struct ConditioningDesc {
   std::vector<FitParameterDesc> parameters;
 };
 
+/// Grids and properties (stage 3B, STX-TN-12 section 10).
+struct GridZoneDesc { std::string unit, layering = "proportional"; Param layers, layer_thickness; };
+struct GridFaciesDesc { std::string unit, name; Param code; };
+struct GridTransformDesc { std::string name, unit, from, law; Param a, b; };
+struct GridDesc {
+  bool present = false;
+  Param spacing, margin, min_thickness;
+  std::vector<GridZoneDesc> zones;          ///< empty: every unit between two horizons, one layer
+  std::vector<GridFaciesDesc> facies;
+  std::string porosity;                     ///< "" or "compaction"
+  std::vector<GridTransformDesc> transforms;
+  std::string transmissibility;             ///< "" or "manzocchi_1999"
+  bool tetrahedral = false;
+};
+
 /// A complete, validated model description.
 struct Description {
   std::filesystem::path file;
@@ -253,6 +268,7 @@ struct Description {
   std::vector<EventDesc> events;   ///< stage 2E: empty = implicit timeline
   ConditioningDesc conditioning;   ///< stage 3A
   FaultRockDesc fault_rock;        ///< stage 2F
+  GridDesc grid;                   ///< stage 3B
   StressDesc stress;               ///< stage 2F
   std::vector<std::string> curvature_horizons;  ///< stage 2F: outputs.curvature.horizons
   Param fracture_threshold;        ///< stage 2F: outputs.curvature.fracture_threshold (1/m)

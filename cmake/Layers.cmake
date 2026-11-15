@@ -41,6 +41,11 @@ add_library(stratonix_io STATIC
   src/io/grid_export.cpp
   src/io/register.cpp)
 target_link_libraries(stratonix_io PUBLIC stratonix_engines stratonix_repr)
+if(STRATONIX_WITH_FESAPI)
+  target_sources(stratonix_io PRIVATE src/io/resqml_fesapi.cpp)
+  target_link_libraries(stratonix_io PRIVATE stx::fesapi)
+  target_compile_definitions(stratonix_io PRIVATE STRATONIX_HAVE_FESAPI=1)
+endif()
 stx_layer(stratonix_io 5)
 
 # ---- Layer 5: figures ----------------------------------------------------------------------

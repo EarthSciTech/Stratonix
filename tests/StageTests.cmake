@@ -30,6 +30,9 @@ set_tests_properties(test_v3_data PROPERTIES TIMEOUT 5400)
 # by Prompts 38 and 39.
 stx_test(test_v3_grids stratonix_package)
 set_tests_properties(test_v3_grids PROPERTIES WILL_FAIL TRUE TIMEOUT 3600)
+if(STRATONIX_WITH_FESAPI)
+  target_compile_definitions(test_v3_grids PRIVATE STRATONIX_HAVE_FESAPI=1)
+endif()
 # Stage 3A benchmark: 100 000 points within 300 s (release builds; others skip with code 77).
 stx_test(bench_implicit_100k stratonix_package)
 set_tests_properties(bench_implicit_100k PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
@@ -52,6 +55,14 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME neutral_set_independent_check
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_neutral_set.py ${STX_TEST_TMP}/export_interop)
   set_tests_properties(neutral_set_independent_check PROPERTIES DEPENDS test_interop SKIP_RETURN_CODE 77)
+endif()
+# Stage 3B: the GRDECL of the gridded examples read back by an independent reader (test tool).
+if(Python3_Interpreter_FOUND)
+  foreach(ex fault_system_relay_splay rift_inversion_history)
+    add_test(NAME grdecl_independent_${ex}
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/read_grdecl.py ${STX_TEST_TMP}/cli_build_${ex})
+    set_tests_properties(grdecl_independent_${ex} PROPERTIES DEPENDS cli_build_${ex} SKIP_RETURN_CODE 77)
+  endforeach()
 endif()
 # The example builds with every check passing (exit code 0).
 add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>

@@ -26,7 +26,10 @@ namespace fs = std::filesystem;
 void ensure_new_output_dir(const fs::path& out_dir);
 BuildOutcome build_only(const desc::Description& d, const BuildOptions& opt);
 std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Model& m, const std::vector<std::string>& ids, const fs::path& folder,
-                                            double grid_spacing);
+                                            double grid_spacing, const GridProducts* gp = nullptr);
+std::vector<std::pair<std::string, std::string>> grid_rows(const GridProducts& gp);
+void write_grid_outputs(const desc::Description& d, const Model& m, const GridProducts& gp, const std::vector<std::pair<std::string, std::string>>& keys,
+                        const fs::path& out_dir, bool figures);
 
 std::string evidence_in_plain_words(desc::Evidence e) {
   switch (e) {
@@ -285,12 +288,19 @@ PackageOutcome run_package(const fs::path& description, const fs::path& out_dir,
   write_file(out_dir / "checks_report.txt", rep.text());
   write_file(out_dir / "checks_report.csv", rep.csv());
   auto keys = key_numbers(d, *o.model, rep, ctx);
-  write_file(out_dir / "summary_table.csv", summary_csv(keys));
+  const GridProducts* gp = ctx.grid_products();
+  {
+    auto rows = keys;
+    if (gp)
+      for (auto& r : grid_rows(*gp)) rows.push_back(r);
+    write_file(out_dir / "summary_table.csv", summary_csv(rows));
+  }
   write_file(out_dir / "parameters.csv", parameters_csv(d));
   write_file(out_dir / "model_description.yaml", read_file(description));
   auto ids = resolve_export_ids(d, cfg.formats);
-  auto files = write_exports(d, *o.model, ids, out_dir / "exports", 0);
+  auto files = write_exports(d, *o.model, ids, out_dir / "exports", 0, gp);
   if (cfg.figures) write_figures(d, *o.model, keys, out_dir / "figures");
+  if (gp) write_grid_outputs(d, *o.model, *gp, keys, out_dir, cfg.figures);
   write_file(out_dir / "README.txt", readme(d, *o.model, cfg, rep, files, cfg.figures));
   // 3. Translate internal labels at the boundary, in every text file.
   auto tr = PackageConfig::builtin_translations();
