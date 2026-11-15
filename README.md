@@ -2,9 +2,21 @@
 
 Stratonix is a general 2D/3D geomodelling toolkit written in C++. It builds structural models
 (horizons and fault planes) from a parametric design, checks them, and exports them in formats
-other software can load, Petrel first. Version 1 is a design-and-export tool; the architecture is
-set up to grow towards implicit modelling, grids and properties, uncertainty and a graphical
-application.
+other software can load, Petrel first.
+
+Release 2026.2 (version 2) adds:
+
+- fault systems: listric, ramp-flat and curved faults, splays, relays, drag, and oblique and
+  strike-slip movement;
+- fault-related folding: trishear, fault-bend and detachment folds;
+- stratigraphic architecture: unconformities, onlap, clinoforms, isochores and growth strata;
+- salt bodies and compaction;
+- a deformation history with sequential restoration;
+- faults as rock: Allan diagrams, shale gouge ratio, clay smear, seal capacity, slip and
+  dilation tendency, and horizon curvature with fracture trends.
+
+Next come data conditioning, grids and uncertainty (v3), applications (v4) and a graphical
+application with bindings (v5).
 
 - Library: `libstratonix` (namespace `stratonix`), one static library per layer.
 - Program: `stratonix` (`stratonix.exe` on Windows).
@@ -40,11 +52,12 @@ labelled DESIGN in every exported file.
 
 ## Documentation
 
-- `docs/user_guide.md`: installing, writing a description (three worked examples), running,
-  reading the checks report, exporting and packaging, limitations of the kinematics.
+- `docs/user_guide.md`: installing, writing a description (worked examples, and every version 2
+  feature in sections 2.6 to 2.11), running, reading the checks report, exporting and packaging,
+  known limitations. `examples/` holds 21 worked descriptions.
 - `docs/developer_guide.md`: architecture, model interface and suite, build, adding plugins.
 - `docs/api_reference.md` (generated from the headers; `doxygen docs/Doxyfile` for HTML).
-- `docs/roadmap.md`: v2 to v5. `docs/performance_and_threading.md`, `docs/package_config.md`.
+- `docs/roadmap.md`: v3 to v5, and what v1 and v2 taught. `docs/performance_and_threading.md`, `docs/package_config.md`.
 - C API: `capi/include/stratonix_c.h`, example `capi/examples/stratonix_example.c`.
 
 ## Building

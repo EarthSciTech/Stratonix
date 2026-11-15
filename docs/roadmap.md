@@ -1,83 +1,74 @@
 ---
-title: Stratonix roadmap v2 to v5
+title: Stratonix roadmap v3 to v5
 doc_id: STX-RM
-version: 1.1
-date: 2026-11-13
+version: 2.0
+date: 2026-11-15
 ---
 
-# Stratonix roadmap v2 to v5
+# Stratonix roadmap v3 to v5
 
-Updated at release 1.0 from what building v1 taught. Effort is not estimated here; each stage
-starts with its own specification.
+Updated at release 2026.2 from what building v1 and v2 taught. Effort is not estimated here; each
+stage starts with its own specification and its tests, written before the code.
 
-# 1. What v1 taught
+# 1. Releases so far
+
+| Release | Content |
+|---|---|
+| 2026.1 | v1: parametric design models with planar faults, checks C1-C9, the Petrel set and neutral exports, figures, delivery packages; the implicit builder opened (1.1) |
+| 2026.2 | v2: fault systems and curved faults (2A), fault-related folding (2B), stratigraphic architecture (2C), salt and burial (2D), deformation history and restoration (2E), faults as rock and the stress field (2F); checks C10-C20 |
+
+# 2. What v1 taught (kept from version 1.1 of this roadmap)
+
+| Lesson | Consequence |
+|---|---|
+| Restoration through several faults needs a well-posed inverse; a throw gradient of 1 m per metre of slip or more makes it non-unique (refused). | Every new mechanism states its inverse and admissible range, with an analytical test. Root finding stays bracketed. |
+| The checks found real defects every time the model grew. | Add checks before features. |
+| Golden hashes made byte identity testable. | Keep golden hashes for every format; new outputs are gated so older descriptions keep their bytes. |
+| An interpolator without faults is unusable near faults. | Data conditioning must be fault-aware (stage 3A). |
+
+# 3. What v2 taught
 
 | Lesson | Consequence for later stages |
 |---|---|
-| Restoration through several faults needs a well-posed inverse: the throw had to be read at the restored position, tips of younger faults had to be resolved on displaced stratigraphy, and a throw gradient of 1 m per metre of slip or more makes the inverse non-unique (now refused). A floating-point edge case at the end of the solver's bracket made a check fail at five positions. | Any new kinematics must state its inverse and its admissible range, and come with an analytical test case. Keep root finding bracketed. |
-| The checks found real defects every time the model grew (C4 throw, C6 unoffset base, the elliptical profile). | Each new engine plugs into the same checks; add checks before features. |
-| Optimised kernels gave 22 to 31 times on the full build, almost all in faulted grids and checks; parity tests caught nothing wrong but made the changes safe. | Keep the reference-and-parity rule; the implicit engine's solver is the next heavy kernel. |
-| Golden hashes made byte identity testable; the C++ number formatting (`to_chars`) is the only formatting used in files. GCC and Clang wrote identical bytes. | Keep golden hashes for every new format; run them on Windows in CI. |
-| The external cross-check showed that an interpolator without faults is unusable within about 500 m of the faults and that block-wise interpolation is good to 0.1 m away from faults and 0.5 m near them on the synthetic model. | v2 must be fault-aware from the start (per-block fields or fault-displacement functions), and its tests should use the same cross-check. |
-| The implicit builder showed that unit-gradient orientation constraints conflict with interface values where layer thickness varies, and that an isotropic kernel bends the surfaces between data; tangent constraints and a vertical stretch fixed both. | Keep orientation data as directions; expose anisotropy as a labelled parameter. |
-| No network, no Windows host: VTK, PROJ, Eigen, FESAPI, xtgeo, LoopStructural and Petrel were unavailable, so their parts were replaced by own code or deferred. | Before v2: one networked Windows and Linux build with vcpkg pinned; RESQML through FESAPI; Petrel import validated. |
+| Restoration-based evaluation scaled to every v2 mechanism: curved faults, shear and fault-parallel-flow hanging walls, trishear, series relations, salt, compaction and events. Each needed only an exact inverse and a restored-frame rule. | Grids (3B) and data conditioning (3A) read the model through the same two steps. A mechanism without an exact inverse is not admitted. |
+| Engine-specific queries from upper layers broke the layering twice (stratigraphy in 2C, the restored column in 2F). Model-layer capability interfaces solved both. | New cross-layer needs get a capability interface in the model layer, offered or not by each engine; callers report "missing" when it is absent. |
+| Timing rules unified growth strata, phases, inversion and backstripping: the part of an event after a horizon's deposition. | Ensembles (3C) can vary ages and phases like any parameter. |
+| Area balance in the restored frame flags growth strata, which are thicker in the hanging wall by deposition. | Balance tests apply to pre-kinematic units; syn-kinematic units need a partial restoration (open item). |
+| Several checks were first too strict at designed terminations (C1 near pinch-outs, C4 on trishear faults). | A check states the geometry it applies to and skips the rest explicitly, in the report. |
+| Missing inputs must never be defaulted (fault rock, stress). | Applications (4A) report every quantity with the inputs it depends on and "missing" when one is absent. |
+| Fault attributes are recomputed for each output (checks, figures, summary, exports). Builds of fault-rich models take tens of seconds. | Cache per-fault attribute surfaces in the export context before stage 3C multiplies builds. |
 
-# 2. v2: implicit modelling
+# 4. v3: data conditioning, grids and uncertainty
 
-**Adds.** A native implicit interpolator: horizons from points and orientations (well tops,
-interpreted points, dips), faults as interfaces from sticks or surfaces, with the fault network
-reused from v1.
+- **Stage 3A, data-conditioned modelling (Prompts 34 to 36).** A scalable implicit solver
+  (partition of unity or sparse) with series and faults taken from data. Hybrid conditioning of
+  parametric models to wells and points, with data uncertainty. It builds on the implicit builder
+  (1.1), the fault network, the `column` capability and the restoration-based evaluation.
+- **Stage 3B, grids and properties (Prompts 37 to 39).** Corner-point grids conforming to faults
+  and horizons, with their export (GRDECL, RESQML). Properties, fault transmissibility from SGR
+  and fault-zone thickness (stage 2F), and unstructured grids. It builds on the voxel extractor,
+  fault surfaces and cut-offs, and the porosity from compaction (stage 2D).
+- **Stage 3C, uncertainty (Prompts 40 and 41).** Parameter distributions on `Param`, ensembles
+  with every member's checks recorded, sensitivity and probability maps. Prompt R then releases
+  v3.
 
-**Builds on.** The `Model` interface (a scalar per horizon, unit, block); the fault network object;
-importers for points, grids, sticks, TSurf and tops; evidence classes on inputs; the model suite;
-checks C1-C9; the cross-check script as an acceptance test.
+# 5. v4: applications (stage 4A, Prompts 42 to 47)
 
-**Status (1.1.0).** Opened: the `implicit-rbf` builder (Hermite cubic RBF with tangent
-constraints, vertical stretch, iterated restoration through the v1 fault network, faults from
-sticks) passes the model suite, rebuilds the synthetic example from sampled data to 0.06-0.17 m
-away from faults and 0.4-0.5 m near them, and every v1 command works on its output (STX-TN-04).
+Shared tools (conditions at depth, traps, migration, volumes), then one application family per
+prompt:
 
-**Interface changes made.** Additive only: `ModelInfo::provenance`; the `DataMisfit` record and
-the `data_misfit` capability; `BuildInputs` carries data points and fault sticks; importers
-`csv_points` and `csv_orientations`; description section `implicit` and fault geometry type
-`sticks`; `Grid2D::sample_clamped` (imported and implicit surfaces hold their edge value outside
-the grid, which fault-tip resolution needs near the domain edge). The `Model` interface itself did
-not change.
+- petroleum, conventional and unconventional;
+- CO2 and hydrogen storage;
+- geothermal and groundwater.
 
-**Still to do in v2.** A sparse or partition-of-unity solver for large data sets; throws and tips
-estimated from data; per-point uncertainty on inputs; cross-check against LoopStructural itself.
+The stage ends with synthetic seismic and the model report. It builds on traps and closure (v1),
+fault seal and stress (2F), burial and porosity (2D) and grids (3B). Prompt R then releases v4.
 
-# 3. v3: grids and properties
+# 6. v5: platform and reach (stage 5A, Prompts 48 to 50)
 
-**Adds.** Corner-point and unstructured grids conforming to faults and horizons; properties;
-upscaling hooks.
+- **Browser viewer.**
+- **Desktop application.**
+- **Python bindings and the Petrel plug-in.**
 
-**Builds on.** The extractor plugin kind; the voxel extractor as the first grid extractor;
-structure-of-arrays storage; fault surfaces and cut-offs from `repr`.
-
-**Interface changes.** A grid representation type (`GridRepr`) and an `Extractor` plugin interface
-returning it; a property container keyed by grid cell with units and evidence; exporters for
-GRDECL and RESQML grids. The model interface stays as it is.
-
-# 4. v4: uncertainty
-
-**Adds.** Parameter sampling, ensembles, sensitivity of key numbers (closure, spill, throw at wells).
-
-**Builds on.** Every parameter is a typed `Param` with value, unit, evidence and source; builds are
-deterministic; a build is callable from the library and the C API without the command line;
-key numbers are already a table.
-
-**Interface changes.** A distribution on `Param` (optional; absent = fixed); an ensemble runner in
-the package layer; seeds recorded in the manifest. The C API gains functions to set a parameter on
-a loaded description before building (additive, minor C API version).
-
-# 5. v5: graphical application, Petrel plug-in, bindings
-
-**Adds.** A Qt application; a Petrel plug-in (Ocean); Python bindings.
-
-**Builds on.** The thin command-line layer; the stable C API with opaque handles and status codes;
-figures drawn on a display list (a GUI view is another backend).
-
-**Interface changes.** Python bindings over the C API (no C++ ABI exposure); a canvas backend for
-Qt; the Petrel plug-in calls the C API from .NET through P/Invoke. Event callbacks (progress,
-cancel) are added to the C API as additive functions.
+These build on the thin command line, the stable C API with opaque handles and the display-list
+figures. Prompt R then releases v5.

@@ -11,14 +11,20 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   One check outcome.
 - `class CheckContext`  
   Shared, lazily computed representations used by checks (and reused by exports/figures).
+- `bool timeline_checks = true;`  
+  False when checking a state of a timeline (C17 and C18 then belong to the full model).
 - `double tolerance(const std::string& key, std::string* source) const;`  
   Tolerance from the description or the built-in default; `source` receives where it came from.
 - `class Check : public registry::PluginBase`  
   Check plugin interface.
 - `CheckReport run_checks(CheckContext& ctx);`  
   Run every registered check (in name order) and return the report.
+- `struct BalanceRow`  
+  Line-length and area balance of a section (stage 2E, STX-TN-09 section 3): each horizon's bed length and each unit's area in the present section against the same material restored (faults undone by their own inverses). One row per horizon ("line length") and per unit ("area").
 - `void register_check_plugins();`  
   Register this layer's plugins.
+- `repr::FaultRockInput fault_rock_input(const desc::Description& d, const Model& m);`  
+  Fault-rock and stress inputs from a description (stage 2F, STX-TN-10), in SI units.
 
 ## include/stratonix/checks/manifest.hpp
 
@@ -118,7 +124,7 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 
 - `(file)`  
   Units accepted in model descriptions and their conversion to SI.
-- `enum class Dimension { Length, Angle, Dimensionless, Ordinal, Flag, Area, Any };`  
+- `enum class Dimension { Length, Angle, Dimensionless, Ordinal, Flag, Area, InverseLength, Time, Pressure, PressureGradient, Any };`  
   Physical dimension of a parameter.
 - `std::optional<UnitDef> find_unit(std::string_view name);`  
   Look up a unit by name ("m", "km", "ft", "deg", "rad", "fraction", "ratio", "percent", "ordinal", "flag"). Returns nullopt if unknown.
@@ -181,7 +187,19 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Plain-words description used in README files ("assumed by the modeller", ...).
 - `struct Param`  
   A labelled parameter: value(s), unit, evidence class and source.
-- `struct UnitDesc { std::string name, top, base, role, color, label; };`  
+- `struct SeriesDesc`  
+  Stratigraphic series (STX-TN-07 section 1): consecutive horizons, youngest first.
+- `struct GrowthDesc { std::string onset, end; bool present() const { return !onset.empty(); } };`  
+  Growth strata (STX-TN-07 section 4): movement between onset and end.
+- `struct EventDesc`  
+  Event of the timeline (STX-TN-09 section 1).
+- `struct FaultRockDesc`  
+  Fault rock and stress (STX-TN-10).
+- `struct SaltBodyDesc`  
+  Salt (STX-TN-08 section 1).
+- `struct CompactionUnitDesc`  
+  Compaction (STX-TN-08 section 3).
+- `struct UnitDesc { std::string name, top, base, role, color, label; Param clay_fraction; };`  
   A unit between consecutive horizons; top "model_top" / base "model_base" name the units above the first and below the last horizon.
 - `struct TipDesc { std::string rule; std::string horizon, unit; Param offset, fraction, depth; std::string stratigraphy = "fault_frame"; };`  
   Tip rule. stratigraphy: "fault_frame" (default) places the tip on the stratigraphy as displaced by older faults; "unfaulted" on the stratigraphy before any faulting.
@@ -191,6 +209,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Data-conditioned (implicit) structure: data inputs and interpolation settings.
 - `struct Description`  
   A complete, validated model description.
+- `std::vector<const EventDesc*> events_for(const std::string& type, const std::string& ref) const;`  
+  Events referring to a fault, primitive or body (stage 2E).
+- `int series_of(int h) const;`  
+  Series of horizon h (index into series), -1 when no series are given.
 - `std::vector<const Param*> all_params() const;`  
   Every parameter present in the description (for the parameters table and manifest).
 - `struct ValidationReport`  
@@ -254,10 +276,30 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Kinematics plugin: direction of hanging-wall displacement per unit (vertical) throw.
 - `virtual Vec3 slip_vector(const Vec3& dd, double dip) const = 0;`  
   dd: unit down-dip vector; dip in radians. Returned vector has vertical component -1.
+- `virtual Vec3 slip_vector(const Vec3& s, const Vec3& dd, double dip, double rake) const`  
+  Slip vector given the strike direction s and the rake (radians, Aki and Richards). Dip-slip kinematics ignore s and rake; oblique and strike-slip return a unit vector, and the fault's displacement magnitude is then its net slip.
 - `class HangingWallField : public registry::PluginBase`  
   Hanging-wall field plugin: scales the displacement with distance from the fault.
 - `virtual double scale(double sigma, double next, double influence) const = 0;`  
   sigma: distance from the plane on the moving side (>= 0); next: distance along the fault normal to the next fault plane (infinity if none); influence: influence distance.
+- `struct CurvedFault`  
+  Curved fault (listric or ramp-flat) with a vertical- or inclined-shear hanging wall (STX-TN-05 section 2). Coordinates in the dip plane: u, horizontal distance from the reference point along the dip direction; z, depth (positive down). Shear lines are u = xi + s z tan(alpha).
+- `bool fpf = false;`  
+  Fault-parallel flow (STX-TN-06 section 2): material moves along flow lines at constant offset d from the polyline (pu, pz), meeting on the bisectors of its bends.
+- `void fpf_coords(double u, double z, double& s, double& d) const;`  
+  Flow-line coordinates (s, d) of (u, z), and the inverse.
+- `double zf(double u) const;`  
+  Depth of the fault at u, and its slope dz/du (the dip is atan of it).
+- `double u_at(double z) const;`  
+  u where the fault reaches depth z.
+- `double G(double xi) const;`  
+  Depth where the shear line through xi meets the fault.
+- `void forward(double u, double z, double h, double& u1, double& z1) const;`  
+  Forward: material at (u, z) on the hanging-wall side, heave h -> present (u1, z1).
+- `void inverse(double u1, double z1, double h, double& u, double& z) const;`  
+  Inverse: present (u1, z1) on the hanging-wall side, heave h -> restored (u, z).
+- `struct TrishearFold`  
+  Trishear fold ahead of a propagating tip (STX-TN-06 section 1): symmetric linear velocity field of Zehnder and Allmendinger (2000).
 - `struct TipRule`  
   Rule placing a fault tip relative to the stratigraphy.
 - `struct Fault`  
@@ -266,6 +308,22 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Hanging wall "layer_rigid": every layer moves as a rigid slab by the throw where that layer meets the fault (in the fault's frame), so the displacement of a point depends on its stratigraphic level, not on its elevation.
 - `double layer_b(double s, double a) const;`  
   Down-dip position where stratigraphic level s (horizon index, fractional inside units; -1 domain top, nh domain base) meets the plane at strike position a.
+- `std::vector<double> growth_f;`  
+  Growth strata (STX-TN-07 section 4): fraction of the displacement each horizon carries (empty: 1 everywhere); between horizons linear in the level s.
+- `std::shared_ptr<const CurvedFault> curved;`  
+  Curved geometry (null for a planar fault). For a curved fault the down-dip coordinate b of at(), tips(), ab() and profile_coords() is the horizontal distance u along the dip direction.
+- `double slip_at(double a) const;`  
+  Slip along the fault at strike position a (trishear: constant behind the tip).
+- `double ra_one = 0, ra_zero = 0;`  
+  Relay window in this fault's strike coordinate: the strike factor of the throw is replaced by a linear ramp from 1 at ra_one to 0 at ra_zero (complementary on the partner).
+- `double drag_shape(double sigma) const`  
+  Drag shape at signed distance sigma: f (1 - |sigma| / W)^2 inside W, 0 beyond.
+- `double heave_at(double a) const;`  
+  Heave of a curved fault at strike position a (tapered by the strike profile).
+- `double sigma(const Vec3& p) const`  
+  Signed distance to the fault (+ hanging wall). Exact for a plane; for a curved fault the vertical separation times the cosine of the local dip (exact in sign, first order in size).
+- `Vec3 normal_at(double b) const`  
+  Unit normal (towards the hanging wall) at plane coordinates (a, b).
 - `void profile_coords(const Vec3& p, double& a, double& b) const`  
   Profile coordinates of a point: strike position, and the down-dip position of the fault point at the same elevation. A hanging-wall point therefore takes the displacement of the fault where its own elevation meets the fault (equal to ab() on the plane).
 - `void tips(double a, double& bu, double& bl) const;`  
@@ -290,6 +348,12 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   True when fault f provably cannot displace material whose present position is q (the restored position stays outside the active region for any displacement up to tmax). Then undo() would return q exactly, so skipping it changes nothing.
 - `Vec3 restore_from_frame(const Vec3& q, int f, bool hanging_wall) const;`  
   Restore a point given in fault f's frame, on the stated wall of f, through f and the faults older than it (used to measure throw in the fault's own frame).
+- `Vec3 drag_forward(int f, const Vec3& p1, bool hanging_wall) const;`  
+  Drag (STX-TN-05 section 3). Forward drag displacement of material at its pre-drag position p1 on the given wall, and its inverse for a present position q.
+- `Vec3 trishear_map(int f, const Vec3& q, bool forward) const;`  
+  Trishear: material position mapped through the slip history of fault f (forward from the restored state to the present, or back).
+- `Vec3 step(int f, const Vec3& q, bool side, bool fast) const;`  
+  One step of restoration through fault f: drag on either wall, then the fault itself when q is on the moving side.
 - `const std::vector<int>& young_to_old() const { return order_; }`  
   Ages, youngest first.
 - `double layer_displacement(int f, const Vec3& p, bool* active = nullptr) const;`  
@@ -302,8 +366,19 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Layer-rigid restoration of q through the faults of ranks [r0, r1) for material at level s. first: 0 evaluate the side of the first fault; +1 / -1 move it as hanging wall / footwall (undo semantics); +2 / -2 take its side as hanging wall / footwall and respect the frame.
 - `double solve_layer(const Vec3& q, std::size_t r0, const BlockCode* forced, int first) const;`  
   Level s of the material at q such that restoring it through ranks [r0, end) lands on level s.
+- `void resolve_curved(const desc::Description& d, const Structure& st, BuildLog& log, int k, std::size_t rank);`  
+  Curved fault k: tip tables spanning the model, and the per-horizon report (heave, throw, rollover width and dip) at the reference strike position.
 - `void register_fault_plugins();`  
   Register built-in kinematics and hanging-wall plugins (part of register_engine_plugins()).
+
+## include/stratonix/engines/history.hpp
+
+- `std::vector<double> event_ages(const desc::Description& d);`  
+  Ages (Ma) of the timeline's events, oldest first; empty for a description without events.
+- `desc::Description state_description(const desc::Description& d, const Model& full, double age);`  
+  The description of the model at time `age` (Ma): horizons deposited later removed, later events removed, events under way scaled to their completed part; reference depths taken from the full model `full` (STX-TN-09 section 2).
+- `ModelPtr build_state(const desc::Description& d, const Model& full, double age, BuildLog* log = nullptr);`  
+  The model at time `age`, built by the same builder as the full model.
 
 ## include/stratonix/engines/implicit.hpp
 
@@ -330,6 +405,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   "structure" -> const Structure*, "faults" -> const FaultNetwork*.
 - `void eval_point(const Vec3& p, BlockCode* block, Vec3* restored, double* scalars) const;`  
   Evaluate one point: restored position, block code and scalars (reference kernel).
+- `std::vector<std::size_t> post_erosion_;`  
+  Erosional surfaces that no fault displaces (stage 2E): they truncate the older horizons in the present geometry, after the faulting they postdate.
+- `bool above_post_erosion(const Vec3& p) const`  
+  True when p lies above an erosional surface no fault displaces: younger material that never moved (its restoration is the identity).
 
 ## include/stratonix/engines/structure.hpp
 
@@ -337,12 +416,16 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Unfaulted structure: stratigraphic column, fold primitives, imported surfaces with isochore stacking, and the well-correction field. z_h(x, y) is the elevation of horizon h in the restored (unfaulted) frame.
 - `struct FoldPrimitive`  
   A fold primitive. shape() is 1 at the crest and 0 at the edge; rim() is the rim-syncline shape (0..1).
+- `struct Offset`  
+  Parallel mechanics (STX-TN-06 section 4): per horizon, the offset of the anchor's surface at normal distance t below it, tabulated (1-D across a cylindrical axis, else a 2-D grid); null where the horizon takes relief * shape.
 - `static double bump(double t, double w);`  
   Raised-cosine bump g(t; w) = (1 + cos(pi t / w)) / 2 for |t| < w.
 - `double contribution(std::size_t h, double x, double y) const;`  
   Contribution to horizon h at (x, y).
-- `class Structure`  
+- `class Structure final : public StratigraphyQuery, public ColumnQuery`  
   Unfaulted horizon functions.
+- `bool has_stratigraphy() const { return has_rel_ || has_trend_; }`  
+  Whether series relations or thickness trends are in force (stratigraphy queries apply).
 - `Structure(const desc::Description& d, const BuildInputs& in, BuildLog& log);`  
   Build from a validated description and its input grids. Honours the reference well by construction and other control wells by a correction field (reported in the log).
 - `double z(std::size_t h, double x, double y) const;`  
@@ -353,8 +436,48 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Correction applied at a point (for reports).
 - `const std::vector<double>& max_correction() const { return max_corr_; }`  
   Maximum |correction| at the wells' neighbourhood per horizon (reported).
+- `void z_detail(double x, double y, double* raw, double* eff, unsigned char* flags) const;`  
+  Raw (before the series relations) and effective horizons at (x, y), with a flag per horizon: 1 lowered by an erosional surface, 2 raised by onlap (STX-TN-07 section 1).
+- `bool absent(std::size_t h, double x, double y) const;`  
+  True when horizon h is clamped by a relation at (x, y): it has no top there.
+- `bool has_relations() const { return has_rel_; }`  
+  Whether series relations, tilts or clinoforms are in force.
+- `const std::string& unit_termination(std::size_t u) const { return term_[u]; }`  
+  Termination of model unit u ("" when it does not terminate in the model).
+- `std::vector<std::size_t> erosional_surfaces() const`  
+  Horizons that are the base of an erosional series (unconformity surfaces), youngest first.
+- `int series_of(std::size_t h) const { return hseries_[h]; }`  
+  Series index of horizon h (0 when no series are given).
+- `bool trend_clamped(std::size_t h, double x, double y) const;`  
+  Whether a raw thickness below zero is a designed pinch-out (thickness trend clamped).
+- `double horizon_age(std::size_t h) const { return hage_[h]; }`  
+  Age (Ma) of horizon h; NaN without a timeline.
+- `double event_fraction(std::size_t h, double from, double to) const;`  
+  Fraction of an event active from `from` to `to` (Ma) that followed the deposition of horizon h: 1 - g(a_h), g the completed fraction (STX-TN-09 section 1).
+- `double growth_fraction(std::size_t h, int onset, int end) const;`  
+  Growth fraction of horizon h for a structure growing from `onset` to `end` (indices).
+- `double salt_thickness(double x, double y) const;`  
+  Salt thickness at (x, y) in the restored frame (0 without salt).
+- `double solid_thickness(int unit, double x, double y) const;`  
+  Solid (grain) thickness of model unit `unit` at (x, y); its present thickness for rigid units.
+- `double decompacted_thickness(int unit, double x, double y, double top_burial) const;`  
+  Thickness of model unit `unit` at (x, y) moved to top burial depth `top_burial`.
+- `double porosity(int unit, double x, double y) const;`  
+  Present-day mean porosity of model unit `unit` at (x, y) (0 for rigid units).
+- `struct BurialStep`  
+  Burial history at (x, y): one step per horizon of the compacting column reaching the surface (base first), then the present. Burial depths per horizon, NaN before deposition.
+- `double missing_section(int unit, double x, double y) const;`  
+  Missing (eroded) section of model unit `unit` (between horizons unit-1 and unit, both in one series) at (x, y) in the restored frame (STX-TN-07 section 1).
 - `const std::vector<double>& reference_depths() const { return ref_depth_; }`  
   Reference depths (positive down) at the reference location.
+- `double salt_net_volume() const { return salt_net_; }`  
+  Salt balance from the build (C15): net volume change and the bodies' volume (m3); weld area (m2).
+- `int compaction_mode() const { return comp_mode_; }`  
+  Compaction mode: 0 off, 1 present, 2 depositional; the law of model unit u (0 rigid).
+- `double depositional_solid(int u, double x, double y) const;`  
+  Depositional solid thickness of unit u at (x, y) (depositional mode), for C16.
+- `double compaction_round_trip(int u, double x, double y) const;`  
+  Present thickness after decompaction to the surface and compaction back (C16 round trip).
 
 ## include/stratonix/engines/wells.hpp
 
@@ -398,8 +521,26 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Figure set: sections along polylines, map views per horizon, 3D views, fence diagram. Built only from the Model interface and representations. Every figure is written as PNG (300 dpi), SVG (text as text), TIFF (300 dpi, LZW, RGB, no alpha) and PPTX (one 16:9 slide with title, caption and notes), named by the figure naming rule, with a footer stating the coordinate system, vertical datum and evidence basis.
 - `struct FigureContext`  
   Information every figure needs besides the model.
+- `struct Burial`  
+  Burial history at a location (stage 2D, STX-TN-08 section 4): burial depth of each horizon per step (NaN before deposition); ages in Ma when every horizon has one.
+- `bool fault_rock = false;`  
+  Fault rock and stress (stage 2F, STX-TN-10): Allan diagram and fault-surface attributes.
 - `std::string figure_basename(const FigureContext& c, const std::string& kind, const std::string& name);`  
   Naming rule: STX_<model>_v<version>_<kind>_<name> (letters, digits, '-', '_' only).
+- `Figure unfolded_figure(const FigureContext& c, const std::string& section, const std::vector<repr::UnfoldedHorizon>& beds);`  
+  Flexural-slip unfolded section (stage 2E): every bed straightened along its own length.
+- `Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b);`  
+  Burial-history curves at one location (stage 2D).
+- `Figure isopach_figure(const FigureContext& c, int unit, const Grid2D& thickness, const std::vector<repr::TerminationLine>& terminations);`  
+  Isopach map of a unit (stage 2C): vertical thickness per fault block, with its termination lines.
+- `struct StrikeThrowSeries`  
+  Throw along strike of a fault system: points (strike distance, throw) per series.
+- `Figure fault_attribute_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<double>& values, const std::vector<std::vector<repr::CutoffLine>>& cutoffs, const std::string& attribute, const std::string& unit, double vmin = kNaN, double vmax = kNaN);`  
+  Displacement on one fault surface (lattice of fault_surface) with the cut-offs of each horizon. Stage 2F (STX-TN-10): a fault-surface attribute (SGR, CSP, thickness, seal capacity, slip or dilation tendency, reactivation pressure) seen from the hanging wall, with the cut-offs. vmin/vmax NaN: the range of the values.
+- `Figure allan_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<repr::FaultRockPoint>& pts, const std::vector<std::vector<repr::CutoffLine>>& cutoffs);`  
+  Allan diagram: each cell of the fault surface split into its footwall (upper left) and hanging-wall (lower right) unit colours, with the cut-offs of every horizon.
+- `Figure curvature_figure(const FigureContext& c, int horizon, const repr::CurvatureGrids& cg);`  
+  Curvature map of a horizon: mean curvature (convex up red, concave blue) and fracture-trend ticks.
 - `WrittenFigure write_figure(const Figure& f, const std::filesystem::path& folder, const std::string& basename, const std::string& title, const std::string& caption, const std::string& notes);`  
   Write a figure in the four formats into `folder`.
 - `std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::vector<std::pair<std::string, Polyline>>& sections, const std::vector<std::vector<double>>& detail_windows, const std::filesystem::path& folder);`  
@@ -439,6 +580,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Points "x y z" per line (comment lines start with '#').
 - `class ExportContext`  
   What the exporters write from: the model, wells, grid and spacings, with lazily computed and cached representations so several formats share one evaluation.
+- `bool fault_rock = false;`  
+  Stage 2F (STX-TN-10): fault-surface attributes and curvature grids, written only when given.
 - `std::vector<std::string> comments() const;`  
   Lines written at the top of every file that takes comments (model, CRS, z convention).
 - `Grid2D block_surface(int h, BlockCode b, int dilate = 2);`  
@@ -487,14 +630,28 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Evidence basis of a whole model, written into every exported file.
 - `using BlockCode = std::uint64_t;`  
   Fault-block code: bit f set when the point is on the hanging-wall side of fault f.
+- `std::string termination;`  
+  Designed termination inside the model (stage 2C): "truncation", "onlap", "pinch-out", "clinoform", or empty.
 - `struct FaultInfo`  
   Approximate plane and extent of a fault, used by extractors to locate its surface.
+- `std::vector<std::pair<double, double>> profile;`  
+  Curved faults: the profile in the dip plane, (u, depth) with u the horizontal distance from the reference point along the dip direction; the plane fields above are then its chord.
+- `std::vector<std::string> relations;`  
+  Recorded relations with other faults: "abuts F", "splay of F" (abutting with transfer), "relays with F".
+- `bool overlapping = false;`  
+  True when the hanging wall can override the footwall (reverse sense, or slip with an upward component): a vertical can then meet the same horizon in two blocks.
 - `struct ModelInfo`  
   Description of a model, independent of the engine.
 - `std::vector<std::string> provenance;`  
   Data the model was conditioned on, one line per input with its evidence class and source (empty for purely parametric models). Carried into export READMEs and packages.
 - `struct DataMisfit`  
   Misfit of a data-conditioned model at one data point (capability "data_misfit" returns a const std::vector<DataMisfit>*).
+- `struct StratigraphyQuery`  
+  Stratigraphic queries a model may offer through capability("stratigraphy") (stage 2C, STX-TN-07): whether horizon h is clamped by a series relation at a restored-frame (x, y), so it has no top there.
+- `virtual std::string termination_at(int unit, double x, double y, double radius) const = 0;`  
+  Kind of termination of model unit `unit` near restored (x, y) within `radius`: "truncation", "onlap", "pinch-out", "clinoform", or empty where the unit is present.
+- `struct ColumnQuery`  
+  The restored-frame stratigraphic column a model may offer through capability("column") (stage 2F, STX-TN-10): the elevation of every horizon at restored (x, y), top first.
 - `enum EvalFields : unsigned { kEvalUnit = 1u, kEvalBlock = 2u, kEvalScalars = 4u, kEvalAll = 7u };`  
   Which fields evaluate() should fill.
 - `struct EvalResult`  
@@ -575,6 +732,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Write the figure set (sections from the description, maps, 3D views, fence) into a folder.
 - `BuildOutcome run_section(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::string& name, const Polyline& line, const BuildOptions& opt);`  
   Draw one section (named in the description, or along `line` when it is not empty) in the four figure formats; the model is built and checked first and nothing is drawn if a check fails.
+- `BuildOutcome run_state(const std::filesystem::path& description, const std::filesystem::path& out_dir, double age, const BuildOptions& opt);`  
+  Build the model at time `age` (Ma) of a description with events, and write its package (stage 2E, STX-TN-09 section 2).
+- `void write_restoration(const desc::Description& d, const Model& m, const std::filesystem::path& folder);`  
+  Restoration report of a timeline model into `folder`: a section and a map at every event, the sequence as one deck, the flexural-slip unfolded section, balance.csv and the checks of every state (STX-TN-09 sections 2 and 3). Nothing is written for a model without events.
 - `std::vector<std::string> resolve_export_ids(const desc::Description& d, const std::vector<std::string>& requested);`  
   Export ids from a request ("petrel" expands to the Petrel set; unknown ids are skipped with a warning); an empty request takes the description's outputs.exports.
 - `BuildOutcome run_export(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::vector<std::string>& formats, double grid_spacing, const BuildOptions& opt);`  
@@ -601,7 +762,20 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 - `struct Registrar`  
   Helper object whose constructor registers an entry (used by STRATONIX_REGISTER).
 - `#define STRATONIX_REGISTER(id, kind, name, version, description, factory)                       \`  
-  Self-registration. Use once per plugin in its .cpp file. `id` must be a unique C identifier; the macro also defines stratonix_plugin_anchor_<id>(), which the layer's register function calls so the linker keeps the object.
+  Self-registration. Use once per plugin in its .cpp file. `id` must be a unique C identifier; the macro also defines the C-linkage function stratonix_plugin_anchor_<id>(), which the layer's register function calls so the linker keeps the object. C linkage makes the anchor the same symbol whichever namespace declares or defines it (MSVC and GCC agree).
+- `#define STRATONIX_DECLARE_PLUGIN_ANCHOR(id) extern "C" void stratonix_plugin_anchor_##id()`  
+  Declares an anchor at file scope (outside any function) in the file that calls it.
+- `#define STRATONIX_PLUGIN_ANCHOR(id) ::stratonix_plugin_anchor_##id()`  
+  Calls an anchor declared with STRATONIX_DECLARE_PLUGIN_ANCHOR.
+
+## include/stratonix/repr/faultrock.hpp
+
+- `struct FaultRockPoint`  
+  Attributes at one point of a fault surface. Missing values are NaN, with the reasons in `missing`.
+- `std::vector<FaultRockPoint> fault_rock_surface(const Model& m, const FaultSurface& fs, const FaultRockInput& in, const StressInput& s, double max_extent = 1.0);`  
+  Attributes at every lattice node of a fault surface (invalid outside `max_extent` or the domain).
+- `struct CurvatureGrids`  
+  Curvature attributes of a horizon (Roberts 2001), 1/m, and the fracture-trend azimuth (deg; NaN where the curvature is below `fracture_threshold`).
 
 ## include/stratonix/repr/repr.hpp
 
@@ -613,6 +787,14 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Root of a horizon's scalar along verticals, as seen from one block (extended beyond it). Reference: bisection. Optimised: bracketed secant (Illinois). NaN if no root within the domain's elevation range extended by `margin`.
 - `FaultedSurface horizon_grid_faulted(const Model& m, int horizon, const GridSpec& g);`  
   Faulted horizon surface with fault gaps. Reference: candidate blocks from dense sampling of each column. Optimised: block iteration from the per-block root. Parity tested.
+- `Grid2D unit_thickness_grid(const Model& m, int unit, const GridSpec& g);`  
+  Vertical thickness of model unit `unit` (between horizons unit-1 and unit) in the present geometry, per node where both horizons are in one fault block; NaN in fault gaps.
+- `struct TerminationLine`  
+  Where a unit's thickness falls to zero, with the kind of termination from ModelInfo ("onlap", "truncation", "pinch-out", "clinoform"); empty for a unit that does not terminate.
+- `struct UnfoldedHorizon`  
+  Flexural-slip unfolding of a section: each horizon's trace straightened along its own length from a pin at the section's start, fault gaps closed, at its depth at the pin.
+- `std::vector<std::vector<Vec3>> horizon_segments(const Model& m, const Section& s, int horizon);`  
+  A horizon's trace along a section split into runs of one fault block (fault gaps between runs).
 - `FaultSurface fault_surface(const Model& m, int fault, double spacing, double extend = 0.0);`  
   Fault surface located by root-finding the fault distance along the approximate normal. `extend` enlarges the lattice beyond the tip line (fraction of the extent) so callers can sample just outside it; the mesh always covers only the region inside the tip line.
 - `std::vector<Polyline> fault_sticks(const FaultSurface& fs, double spacing);`  
@@ -623,6 +805,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Jump of each horizon's scalar across a surface at points with the given normal: the hanging-wall value minus the footwall value, each extrapolated linearly to the point from samples at eps and 2*eps on its side (exact for smooth linear fields). Result: [h * n + i].
 - `std::vector<WellTop> well_intersections(const Model& m, const WellPath& w, double step = 2.0);`  
   Horizon crossings along a well path (handles fault crossings: a horizon top is recorded only where the scalar changes sign inside one block).
+- `std::vector<std::vector<std::pair<BlockCode, std::vector<double>>>> horizon_block_z;`  
+  Sections where fault blocks overlap (reverse faults): per horizon, the horizon in each fault block along the section (NaN where that block does not hold it), so both sheets are drawn. Empty when no block overlaps another along the section.
 - `Closure closure_analysis(const Grid2D& z, bool faults_seal);`  
   Structural closure of a surface (elevation grid, NaN = gap). With faults_seal, gaps are barriers; otherwise reaching a gap counts as spilling.
 - `TriMesh grid_to_mesh(const Grid2D& g);`  

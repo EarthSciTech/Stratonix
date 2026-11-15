@@ -3,7 +3,35 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
-## [Unreleased] - v2 (2026.2) in progress
+## [2026.2] - 2026-11-15 - Version 2: structural geology in depth
+
+Version 2 adds:
+
+- fault systems and curved faults (stage 2A);
+- fault-related folding (2B);
+- stratigraphic architecture (2C);
+- salt and burial (2D);
+- deformation history and restoration (2E);
+- faults as rock and the stress field (2F).
+
+Checks C10-C20 and rules F18-F28 come with them.
+
+### Migration notes for description files
+- Nothing to change. The schema stays `stratonix_schema: 1`; every new key is optional. A
+  description written for 2026.1 builds unchanged, with the same checks, figures and exports.
+  Its files are byte-identical except where noted under Changed: the C10 lines and the
+  fault-plane maps from stage 2A, and the version in manifests and figure footers.
+- New top-level keys: `events` (stage 2E), `fault_rock` and `stress` (stage 2F).
+- New keys under `stratigraphy`: `series` and `compaction`, plus horizon `age`, `isochore` and
+  unit `clay_fraction`.
+- New keys under `structure`: `salt`, plus primitive `detachment_fold`, `mechanics`, `array` and
+  `growth`.
+- New fault keys: `drag`, `relay`, `abuts.transfer`, `rake`, `fold` and `growth`.
+- New outputs: `outputs.isopachs` and `outputs.curvature`.
+- New units: Ma, 1/m and 1/km, and pressures and pressure gradients (MPa, bar, psi, MPa/km,
+  bar/m, psi/ft).
+- Example models changed in this release are issued under a new model version (1.1.0); the
+  earlier example packages stay as issued.
 
 ### Added
 - Stage 2A specification (technical note STX-TN-05, kept with the project documents): curved
@@ -195,14 +223,20 @@ has its own version (`stratonix_schema`).
   checks them instead.
 - Check C4 measures faults whose slip has a strike component against the footwall horizon where
   the moving cut-off came from.
-- Tests: the LeakSanitizer suppressions (font library caches) now reach every test; tests
-  defined after them, such as `cli_implicit_section`, failed in the sanitiser job on exit.
+- Version 2026.2 (was 2026.1). The C API keeps its version (1.1); its functions are unchanged.
 - Golden package hashes: the checks report and summary gain the C10 lines and every figure's
   key numbers the new check count; the figure set gains the fault-plane maps. Exports are
   unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
   and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
   integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`); stage 2E (`test_v2_history`); stage 2F (`test_v2_faultrock`).
+- Documentation: user guide 2.0 (sections 2.6 to 2.11 and the checks C10 to C20), developer
+  guide 2.0 (capabilities, events and states, fault rock), API reference regenerated, roadmap
+  2.0 (v3 to v5 as now planned, what v2 taught).
+
+### Fixed
+- Tests: the LeakSanitizer suppressions (font library caches) now reach every test; tests
+  defined after them, such as `cli_implicit_section`, failed in the sanitiser job on exit.
 
 ## [2026.1] - 2026-11-14 - First public release
 

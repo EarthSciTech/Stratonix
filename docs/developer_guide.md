@@ -1,8 +1,8 @@
 ---
 title: Stratonix developer guide
 doc_id: STX-DG
-version: 1.3
-date: 2026-11-14
+version: 2.0
+date: 2026-11-15
 ---
 
 # Stratonix developer guide
@@ -20,9 +20,9 @@ check.
 | 1 | `stratonix_desc` | YAML/JSON reader, embedded JSON Schema and validator, typed description, semantic rules, migration |
 | 1 | `stratonix_registry` | plugin registry (kinds, entries, factories) and the plugin C ABI header |
 | 2 | `stratonix_model` | the `Model` interface, the flat-layers reference model, the interface conformance suite |
-| 3 | `stratonix_engines` | structure builder, structure field, fault network and kinematics, parametric model, wells |
-| 4 | `stratonix_repr` | grids with gaps, per-block grids, fault surfaces and sticks, cut-offs, throws, well tops, sections, voxels, closure, contours |
-| 5 | `stratonix_checks` | checks C1-C9, run manifest |
+| 3 | `stratonix_engines` | structure builder, structure field (series, salt, compaction), fault network and kinematics (curved faults, trishear, fault-parallel flow), event timeline and states (`history.hpp`), parametric model, wells |
+| 4 | `stratonix_repr` | grids with gaps, per-block grids, fault surfaces and sticks, cut-offs, throws, well tops, sections, voxels, closure, contours, thickness and termination lines, flexural unfolding, fault rock and curvature (`faultrock.hpp`) |
+| 5 | `stratonix_checks` | checks C1-C20, balance rows, fault-rock and stress inputs from a description, run manifest |
 | 5 | `stratonix_io` | file formats, exporters, importers |
 | 5 | `stratonix_figures` | display list, SVG, Cairo raster, PNG/TIFF encoders, PPTX, software 3D renderer, the figure set |
 | 6 | `stratonix_package` | build pipeline, exports, figures, benchmarks, delivery package |
@@ -47,6 +47,28 @@ ones. Models are immutable after building and every call is `const` and thread-s
 S3 unit from scalars, S4 no crossing, S5 per-block scalars, S6 block bits against fault distance,
 S7 thread and batch invariance, S8 fixed block unmoved, S9 scalar monotone down a vertical).
 `stratonix suite <description>` runs it on a description's model; every new engine must pass it.
+
+**Capabilities (2026.2).** Layers above the engines must not include engine headers to reach
+engine-specific queries. A model offers them through `capability(name)`, returning a pointer to an
+interface declared in the model layer, or null:
+
+| Name | Interface | Offered by | Used by |
+|---|---|---|---|
+| `structure` | `Structure` (engines) | parametric | checks C12-C17, exporters (porosity), history |
+| `faults` | `FaultNetwork` (engines) | parametric | checks C11, C12 |
+| `stratigraphy` | `StratigraphyQuery` (model) | parametric | termination lines, isopachs (repr) |
+| `column` | `ColumnQuery` (model) | parametric | fault rock: restored stratigraphic positions (repr) |
+| `data_misfit` | (engines) | implicit | reports |
+
+A new engine that cannot answer a capability returns null; the callers then report the dependent
+attribute as missing, never a default.
+
+**Restoration-based evaluation.** Every mechanism added in v2 (curved faults, shear and
+fault-parallel-flow hanging walls, trishear, series relations, salt, compaction) has an exact
+inverse. Evaluation restores a point through the fault network (`FaultNetwork::restore`). It then
+evaluates the stratigraphy in the restored frame (`Structure::z_all`). New mechanisms must keep
+both directions consistent; `test_engines`, the model suite (S8, S9) and the analytical tests
+check it.
 
 # 3. Build and dependencies
 
@@ -124,6 +146,37 @@ corner. A new key-number kind is a branch in `section_sheet` (value, text and ba
 a name in the description rules (`description.cpp`, rule O1) and the schema enum, a default
 rounding in `pipeline.cpp`, and a check in `test_sheet.cpp` against an independent calculation.
 
+### Events and states (2026.2)
+
+`engines/history.hpp`. `event_ages(d)` lists the ages of a description's events, oldest first.
+`state_description(d, full, t)` cuts a description at age t:
+
+- it removes the later horizons, units, series, compaction laws and events;
+- it scales the events under way;
+- it fixes the reference depths from the full model.
+
+`build_state` builds the result with the normal builder, so a state is a full model. A new
+mechanism that can be timed needs three things:
+
+- an event type (schema enum, `EventDesc`, rule F26);
+- a branch in `state_description` that scales it;
+- a test in `test_v2_history` that restates an untimed example as events and compares the
+  horizons.
+
+### Fault rock and stress (2026.2)
+
+`repr/faultrock.hpp` takes plain inputs (`FaultRockInput`, `StressInput`), never description
+types. `fault_rock_input` and `stress_input` (checks layer) convert a description; checks,
+figures and exports all use them, so they see the same values. Every attribute is NaN with a
+reason in `missing` when an input is absent. A new attribute is:
+
+- a field in `FaultRockPoint`;
+- its computation in `fault_rock_at`;
+- a figure call in `standard_figures`;
+- a column in the CSV exporter and a VTK array;
+- a summary row in `fault_rock_rows`;
+- an analytical case in `test_v2_faultrock`.
+
 ## 4.3 An importer
 
 Derive from `io::Importer`: `data_kind()` ("grid", "points", "lines", "meshes", "tops") and
@@ -154,7 +207,10 @@ tolerance, and a benchmark row in `bench.cpp`. See `docs/performance_and_threadi
 
 Derive from `Check` (`checks/checks.hpp`), return one `CheckResult` per subject with value,
 tolerance (and where it came from) and pass/fail; register with kind `Check`. Checks report; they
-never change the model.
+never change the model. A check that only applies to some descriptions (for example C17 to models with events,
+C19 to models with `fault_rock`) returns no results otherwise, so the checks report and the golden
+hashes of older descriptions do not change. Set `warn_only` for a check that reports a risk rather
+than an error (C10, C18).
 
 # 5. Conventions
 

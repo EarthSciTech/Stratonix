@@ -1,16 +1,27 @@
 ---
 title: Stratonix user guide
 doc_id: STX-UG
-version: 1.3
-date: 2026-11-14
+version: 2.0
+date: 2026-11-15
 ---
 
 # Stratonix user guide
 
 Stratonix builds parametric structural models (horizons and faults in 2D sections and 3D), checks
-them, draws them and exports them for other software, Petrel first. Version 1 builds **design**
-models: every number in a model is stated in its description with a unit, an evidence class and a
-source, and Stratonix refuses a description where one is missing.
+them, draws them and exports them for other software, Petrel first. It builds **design** models:
+every number in a model is stated in its description with a unit, an evidence class and a source,
+and Stratonix refuses a description where one is missing.
+
+Release 2026.2 (version 2) adds:
+
+- curved faults and fault systems;
+- folding mechanisms;
+- stratigraphic architecture;
+- salt and compaction;
+- deformation history and restoration;
+- faults as rock with the stress field.
+
+Sections 2.6 to 2.11 describe them. A description written for 2026.1 builds unchanged.
 
 # 1. Installing
 
@@ -196,6 +207,138 @@ implicit builder.
   table; text is set in DejaVu Sans (if the font is not installed the system substitutes another
   sans-serif font). Notes, if any, are drawn under the legend.
 
+## 2.6 Curved faults and fault systems (2026.2)
+
+- **Geometry.** `geometry.type` is `planar`, `listric` (`dip` at the reference depth flattening to
+  `detachment_depth`), `ramp_flat` (flats and ramps from a `profile`) or `sticks` (a curved
+  surface interpolated through fault sticks from `input`). `trace` gives a curved surface trace.
+- **Slip.** `slip_mode` is `dip_slip`, `vertical_offset`, `oblique` (with `rake`) or
+  `strike_slip`. `throw.sense` is `normal`, `reverse`, `left_lateral` or `right_lateral`.
+- **Hanging-wall fields.** Beside `rigid`, `decay`, `linear_between_faults` and `layer_rigid`:
+  - `vertical_shear` and `inclined_shear` (`shear_angle`, `shear_sense`), for rollover on
+    listric faults;
+  - `fault_parallel_flow`, for ramp-flat faults.
+- **Fault systems.**
+  - `abuts: {fault, side, transfer}` ends a fault against another; with `transfer` the throw
+    passes across the branch line (splays).
+  - `relay: {fault, breached}` hands throw to an overlapping fault across a relay ramp.
+  - `drag: {type, fraction, width}` bends the beds next to the fault.
+- **Checks.** C10 (displacement-length scaling, a warning) and C11 (throw continuous across
+  branch lines and relays).
+
+Examples: `listric_rollover`, `fault_system_relay_splay`, `thrust_repeated_section`,
+`strike_slip_offset`, `oblique_fault`.
+
+## 2.7 Folding mechanisms (2026.2)
+
+- **Trishear fault-propagation folds** (`fold: {type: trishear, apical_angle,
+  propagation_slip_ratio}` on a fault). The beds ahead of the tip fold in a triangular zone.
+- **Fault-bend folds** come from `ramp_flat` faults with `fault_parallel_flow` hanging walls.
+- **Detachment folds** (`type: detachment_fold`, with `shortening` above a `detachment` horizon).
+  Their relief comes from area balance.
+- **Fold primitives.**
+  - `mechanics`: `parallel` (constant bed thickness) or `similar`.
+  - `array: {count, step_along, step_across}`: en echelon fold trains.
+  - `growth: {onset, end}`: folds that grew during deposition.
+- **Check.** C12 (area conserved by the fold kinematics).
+
+Examples: `trishear_fold`, `fault_bend_fold`, `detachment_folds`.
+
+## 2.8 Stratigraphic architecture (2026.2)
+
+- **Series** (`stratigraphy.series`) group horizons. Each series' `base` is `conformable`,
+  `erosional` (truncates older series: unconformities) or `onlap` (younger beds end against it).
+  `tilt: {dip, azimuth}` tilts a series before the younger ones are laid on it.
+- **Clinoforms** (`clinoforms: {profile, height, width, direction, first_break, progradation}`)
+  build prograding sigmoidal or oblique surfaces that downlap and toplap.
+- **Isochores** (`isochore: {from, thickness, trend}`) place a horizon by its thickness from
+  another, with a `linear` or `radial` trend; the thickness never goes below zero (pinch-out).
+- **Growth strata.** `growth: {onset, end}` on a fault or a fold makes it move during the
+  deposition of the horizons between them, so the units thicken into the hanging wall.
+- **Outputs.**
+  - Stratal termination lines (truncation, onlap, downlap, toplap, pinch-out) on maps.
+  - Isopach maps of terminating units, and of those in `outputs.isopachs`.
+- **Checks.** C13 (no negative thickness after the series relations) and C14 (truncation
+  consistent with age order).
+
+Examples: `unconformity_onlap_pinchout`, `growth_fault`, `prograding_wedge`.
+
+## 2.9 Salt and burial (2026.2)
+
+- **Salt** (`structure.salt: {top, base, source_thickness, bodies}`). Bodies are `pillow`,
+  `diapir` or `wall`, each with a withdrawal rim that conserves the salt volume. Overburden over
+  a body is raised; strata older than the salt top's rise are clipped against it. Bodies may
+  grow (`growth`). Rule F24 refuses bodies the source layer cannot feed.
+- **Compaction** (`stratigraphy.compaction`).
+  - Laws per unit: `exponential` (`surface_porosity`, `decay`) or `table`.
+  - `geometry: present` treats the stated depths as present-day.
+  - `geometry: depositional` stacks the units from their solid thickness, so drape and
+    differential compaction appear over highs.
+- **Outputs.**
+  - Burial-history curves at the wells.
+  - Porosity grids per compacting unit (`exports/porosity/`).
+- **Checks.** C15 (salt volume conserved) and C16 (solid thickness conserved through compaction).
+
+Examples: `salt_pillow_withdrawal`, `salt_diapir_crestal_faults`, `compaction_drape`.
+
+## 2.10 Deformation history and restoration (2026.2)
+
+- **Events** (top-level `events`) put the model on a timeline in Ma. Types:
+  - `deposition` (a horizon at an `age`);
+  - `fault` (`from`, `to`, `throw`, `sense`);
+  - `fold` (a primitive);
+  - `salt` (a body).
+
+  A fault may have several phases: they sum into one signed throw, so inversion (normal, then
+  reverse) works. Rule F26 checks the timeline.
+- **The model at any event.** `stratonix state model.yaml --age 45 -o out/45Ma` builds and
+  packages the model as it was at that time.
+- **Restoration report.** `restoration/` in every build package of a model with events holds:
+  - a section and a map per event;
+  - the sequence as one deck;
+  - a flexural-slip unfolded section;
+  - `balance.csv` and `states_checks.csv`.
+- **Checks.** C17 (every state builds and the present state reproduces the model) and C18
+  (line-length and area balance, a warning).
+
+Example: `rift_inversion_history`.
+
+## 2.11 Faults as rock, stress and curvature (2026.2)
+
+A `fault_rock` block, with `clay_fraction` given on the units:
+
+```yaml
+fault_rock:
+  shale_threshold: "0.5 fraction | assumed | clay fraction of a smearing shale"
+  thickness_displacement_ratio: "0.01 ratio | literature_derived | Hull (1988)"
+  seal_calibration: {type: sgr_power, a: "27 ratio | literature_derived | ...", c: "0.5 ratio | literature_derived | ..."}
+```
+
+- **Juxtaposition and fault rock.** With the block above, every fault gets:
+  - an Allan diagram;
+  - shale gouge ratio (SGR), clay smear potential (CSP) and fault-zone thickness maps;
+  - with a calibration, seal capacity (bar). Without one, no seal capacity is reported.
+
+  An attribute whose inputs are missing is reported as missing, with the reason; it is never
+  defaulted.
+- **Stress** (`stress`). Give either a `regime` (`sv_gradient`, `shmax_ratio`, `shmin_ratio`,
+  `shmax_azimuth`) or a `tensor_gradient` (`[xx, yy, zz, xy, xz, yz]` in east, north, up), not
+  both (rule F28). Add `pore_pressure_gradient`, `friction` and, optionally, `cohesion`. Units
+  include MPa/km, kPa/m, bar/m and psi/ft. Every fault gets:
+  - slip tendency;
+  - dilation tendency;
+  - the pore-pressure increase to reactivation (MPa).
+- **Curvature** (`outputs.curvature: {horizons, fracture_threshold}`). Curvature maps with
+  fracture-trend ticks, and nine curvature grids per horizon (`exports/curvature/`). Curvature is
+  positive where the surface is convex upwards.
+- **Summary table.** It lists every fault-rock and stress input with its evidence and source.
+  Below them, each fault's attribute ranges and its self-juxtaposed and sand-on-sand shares.
+- **Checks.** C19 (juxtaposition consistent with the restored stratigraphy) and C20 (tendencies
+  within their bounds).
+
+Examples: `fault_system_relay_splay`, `trishear_fold`, `salt_diapir_crestal_faults`,
+`detachment_folds`.
+
 # 3. Running
 
 | Command | What it does |
@@ -205,6 +348,7 @@ implicit builder.
 | `stratonix section model.yaml -o out/s1 --line "x1,y1;x2,y2;..."` | one section along any polyline (or `--name` of a section in the description) |
 | `stratonix export model.yaml -o out/e1 --formats petrel,vtk` | exports only |
 | `stratonix package model.yaml -o out/delivery --config package.yaml --zip` | delivery package (section 6) |
+| `stratonix state model.yaml --age 45 -o out/45Ma` | the model at an event of its timeline, with its package (2026.2) |
 | `stratonix verify out/run1/manifest.json` | checks every file against its SHA-256 |
 | `stratonix plugins` | lists structure builders, kinematics, hanging-wall fields, exporters, importers, checks |
 | `stratonix bench --spacing 100,50` | timings of the kernels |
@@ -234,6 +378,17 @@ exports and figures.
 | C7 faults in domain | a fault plane leaves the domain or its mesh is degenerate |
 | C8 fault intersections | two faults intersect without an abutting rule |
 | C9 closure | INFO: crest, spill point, closure, area; FAIL only against targets you set |
+| C10 fault scaling | WARNING: a fault's displacement-length ratio is outside the stated range |
+| C11 fault system | throw jumps across a branch line or a relay |
+| C12 area | a fold mechanism changes a unit's area beyond the tolerance |
+| C13 thickness restored | a series relation leaves a negative thickness |
+| C14 truncation order | a truncation contradicts the age order |
+| C15 salt volume | salt is created or lost by the bodies and their withdrawal |
+| C16 solid thickness | compaction and decompaction change a unit's grain thickness |
+| C17 restorability | a state of the timeline does not build, or the present state differs from the model |
+| C18 balance | WARNING: line length or area differs between present and restored |
+| C19 juxtaposition | the units on a fault's walls disagree with the restored stratigraphy |
+| C20 tendencies | a slip or dilation tendency lies outside its bounds |
 
 Targets are reported, never used to tune the model.
 
@@ -256,6 +411,13 @@ for each file, the Petrel import option.
 | `obj`, `stl`, `csv`, `geojson` | neutral surfaces, nodes with depth and block, outlines |
 | `gempy`, `loopstructural` | input sets sampled from the model for those modellers |
 
+From 2026.2 the exports add, where the description asks for them:
+
+- `porosity/` (compacting units), `isopachs/` and `lines/` (stratal terminations), and
+  `curvature/` (nine grids per horizon), all IRAP classic;
+- fault attributes as VTK point data on the fault surfaces;
+- `csv/<fault>_fault_attributes.csv`, one row per surface node.
+
 Load into Petrel with the Petrel import checklist: it gives the dialog option for each file and
 what to look at to confirm a correct load.
 
@@ -270,17 +432,21 @@ and scans every text file and file name for banned patterns (register identifier
 numbers, local paths, and your own list); a hit rejects the package. Without approved terms of use
 the package is marked DRAFT. Settings: `docs/package_config.md`.
 
-# 7. Known limitations of the kinematics
+# 7. Known limitations
 
-- Faults are planar. Listric or curved faults are not in v1.
-- Throw follows the stated profiles; there is no strain-compatible restoration, no fault-zone width
-  and no drag.
+- Hanging-wall fields: phases and growth need `layer_rigid` hanging walls; rigid, shear and
+  fold-kinematic faults take one event, after all deposition.
+- Restoration is geometric (kinematic), not mechanical. Area balance of growth strata is reported
+  for the syn- and post-kinematic units, not tested.
+- Compaction is not carried across faults that moved during burial.
+- Fault rock needs a restored stratigraphic column: implicit models report SGR and CSP as
+  missing.
+- Stress and pore pressure are proportional to depth and laterally uniform; there is no
+  mechanical stratigraphy.
 - Dip-slip moves the hanging wall down the dip; vertical offset moves it straight down. They differ
-  by up to a few metres on dipping horizons (3.5 m on the synthetic example).
-- Hanging-wall fields are rigid, layer-rigid (1.2), linear decay to a distance, or linear decay to
-  the next fault. Layer-rigid fields need every fault of the model to use them.
+  by up to a few metres on dipping horizons.
 - A fault's throw must change by less than 1 m per metre of slip; elliptical dip profiles are
   refused for that reason.
-- Reverse faults are evaluated, but where a horizon occurs twice the upper occurrence is kept on
-  grids (reported as overlap nodes).
+- Where a reverse fault repeats a horizon, grids keep the upper occurrence (reported as overlap
+  nodes).
 - At most 64 faults per model.
