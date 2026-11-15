@@ -88,6 +88,9 @@ struct DataMisfit {
   std::string kind;       ///< "point", "orientation" or "well_top"
   Vec3 p;                 ///< present-day position
   double misfit = 0;      ///< points: vertical distance to the horizon (m, + above); orientations: angle (deg)
+  double sigma = kNaN;    ///< stated uncertainty (stage 3A); NaN = none (interpolated exactly)
+  double normalised = kNaN;  ///< misfit / sigma
+  double loo = kNaN;      ///< leave-one-out error (m), when data influence is computed
 };
 
 /// Stratigraphic queries a model may offer through capability("stratigraphy") (stage 2C,

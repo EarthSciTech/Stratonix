@@ -28,6 +28,7 @@ struct DataPoint {
   Vec3 n{0, 0, 0};
   bool oriented = false;
   std::string label;
+  double sigma = -1;  ///< stated uncertainty (m; degrees for orientations); < 0 = none (stage 3A)
 };
 
 /// Data read from description inputs, keyed by input id (filled by the pipeline's importers).

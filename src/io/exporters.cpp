@@ -484,10 +484,15 @@ std::vector<ExportedFile> export_set(ExportContext& c, const std::vector<std::st
     all.insert(all.end(), files.begin(), files.end());
   }
   if (auto* mis = static_cast<const std::vector<DataMisfit>*>(c.model().capability("data_misfit"))) {
-    std::string t = "input,evidence,horizon,kind,x,y,z,misfit,misfit_unit\n";
-    for (auto& r : *mis)
+    bool extra = std::any_of(mis->begin(), mis->end(), [](const DataMisfit& r) { return !std::isnan(r.sigma) || !std::isnan(r.loo); });
+    auto nm = [](double v, int dec) { return std::isnan(v) ? std::string() : fmt_fixed(v, dec); };
+    std::string t = std::string("input,evidence,horizon,kind,x,y,z,misfit,misfit_unit") + (extra ? ",sigma,normalised_misfit,leave_one_out_m" : "") + "\n";
+    for (auto& r : *mis) {
       t += r.input + "," + r.evidence + "," + r.label + "," + r.kind + "," + fmt_fixed(r.p.x, 2) + "," + fmt_fixed(r.p.y, 2) + "," +
-           fmt_fixed(r.p.z, 2) + "," + fmt_fixed(r.misfit, 4) + "," + (r.kind == "orientation" ? "deg" : "m") + "\n";
+           fmt_fixed(r.p.z, 2) + "," + fmt_fixed(r.misfit, 4) + "," + (r.kind == "orientation" ? "deg" : "m");
+      if (extra) t += "," + nm(r.sigma, 4) + "," + nm(r.normalised, 4) + "," + nm(r.loo, 4);
+      t += "\n";
+    }
     fs::create_directories(folder / "data");
     write_file(folder / "data/data_misfit.csv", t);
     all.push_back({"data/data_misfit.csv", "CSV", "-", "misfit of the model at every data point, with the evidence class of the input"});

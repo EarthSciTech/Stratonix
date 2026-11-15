@@ -226,6 +226,7 @@ void load_build_inputs(const desc::Description& d, BuildInputs& in) {
       dp.p = data.points[i];
       if (i < data.normals.size()) { dp.n = data.normals[i]; dp.oriented = true; }
       dp.label = !x.horizon.empty() ? x.horizon : (i < data.labels.size() ? data.labels[i] : std::string());
+      if (i < data.sigmas.size()) dp.sigma = data.sigmas[i];
       out.push_back(dp);
     }
     if (out.empty()) throw Error(ErrorCode::Build, "input '" + x.input + "' holds no data points");

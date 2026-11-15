@@ -42,6 +42,34 @@ void solve_dense_reference(std::vector<double>& A, std::vector<double>& b, std::
   }
 }
 
+void solve_dense_multi(std::vector<double>& A, std::vector<double>& B, std::size_t n, std::size_t m) {
+  for (std::size_t k = 0; k < n; ++k) {
+    std::size_t piv = k;
+    double best = std::fabs(A[k * n + k]);
+    for (std::size_t i = k + 1; i < n; ++i)
+      if (std::fabs(A[i * n + k]) > best) { best = std::fabs(A[i * n + k]); piv = i; }
+    if (!(best > 0)) singular(k);
+    if (piv != k) {
+      for (std::size_t j = 0; j < n; ++j) std::swap(A[k * n + j], A[piv * n + j]);
+      for (std::size_t j = 0; j < m; ++j) std::swap(B[k * m + j], B[piv * m + j]);
+    }
+    for (std::size_t i = k + 1; i < n; ++i) {
+      double f = A[i * n + k] / A[k * n + k];
+      if (f == 0) continue;
+      for (std::size_t j = k + 1; j < n; ++j) A[i * n + j] -= f * A[k * n + j];
+      for (std::size_t j = 0; j < m; ++j) B[i * m + j] -= f * B[k * m + j];
+    }
+  }
+  for (std::size_t k = n; k-- > 0;) {
+    const double d = A[k * n + k];
+    for (std::size_t j = 0; j < m; ++j) {
+      double s = B[k * m + j];
+      for (std::size_t i = k + 1; i < n; ++i) s -= A[k * n + i] * B[i * m + j];
+      B[k * m + j] = s / d;
+    }
+  }
+}
+
 void solve_dense_blocked(std::vector<double>& A, std::vector<double>& b, std::size_t n, std::size_t nb) {
   std::vector<std::size_t> perm(n);
   for (std::size_t i = 0; i < n; ++i) perm[i] = i;

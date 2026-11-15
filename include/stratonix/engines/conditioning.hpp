@@ -51,6 +51,8 @@ std::vector<ThrowEstimate> estimate_throws(const FittedPlane& plane, const std::
 /// the shallowest point of the mean profile and the RMS distance of the stick points.
 struct StickProfile {
   std::vector<double> depth, dip;
+  std::vector<double> u;           ///< m along the dip direction from the plane's centroid, per depth
+  Vec3 centroid{0, 0, 0};
   double strike = kNaN, rms = kNaN;
   Vec3 top_point{0, 0, 0};
 };

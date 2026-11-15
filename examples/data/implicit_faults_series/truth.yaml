@@ -1,0 +1,86 @@
+# Source model for the stage 3A example implicit_faults_series_from_data (not a worked example itself):
+# worked example 14 (unconformity, onlap and pinch-out) cut by a planar normal fault F1.
+# Original header of worked example 14:
+# An angular unconformity, an onlapping series and a pinch-out (stage 2C).
+# The oldest series (C1 to C3) was tilted 4 degrees up to the east; series B laps onto its rising top;
+# the flat erosional surface U then truncated everything older to the east. C3 thins northwards to a
+# pinch-out. DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: source_unconformity_faulted, version: "1.0.0", status: DESIGN,
+        title: "Angular unconformity, onlap and pinch-out, cut by a normal fault"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 2500] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, west"
+    tops:
+      T:  "900 m | user_instruction | worked example"
+      U:  "1100 m | user_instruction | worked example"
+      B1: "1200 m | user_instruction | worked example"
+      B2: "1300 m | user_instruction | worked example"
+      C1: "1450 m | user_instruction | worked example"
+      C2: "1650 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[7000, 5000] m | user_instruction | worked example: planned well east of the subcrop of C1"
+    total_depth: "2200 m | user_instruction | worked example"
+  - name: W3
+    role: planned
+    head: "[2000, 5000] m | user_instruction | worked example: planned well west of the onlap"
+    total_depth: "2200 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons:
+    - {name: T, intended_offset: true}
+    - {name: U}
+    - {name: B1}
+    - {name: B2}
+    - {name: C1}
+    - {name: C2}
+    - {name: C3, intended_offset: true, isochore: {from: C2, thickness: "200 m | user_instruction | worked example: at W1", trend: {type: linear, gradient: "[0, -0.03] ratio | user_instruction | worked example: thins 30 m per km northwards"}}}
+  units:
+    - {name: Cover, top: T, base: U}
+    - {name: B_upper, top: U, base: B1}
+    - {name: B_lower, top: B1, base: B2}
+    - {name: B_base, top: B2, base: C1}
+    - {name: C_upper, top: C1, base: C2}
+    - {name: C_lower, top: C2, base: C3}
+  series:
+    - {name: S3, horizons: [T, U], base: erosional}
+    - {name: S2, horizons: [B1, B2], base: onlap}
+    - {name: S1, horizons: [C1, C2, C3], base: conformable, tilt: {dip: "4 deg | user_instruction | worked example", azimuth: "270 deg | user_instruction | worked example: deepens westwards"}}
+structure:
+  regional: {type: flat}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | source model: one fault after the series"
+    geometry:
+      type: planar
+      reference_point: "[5000, 5000] m | user_instruction | source model"
+      reference_depth: "1300 m | user_instruction | source model"
+      strike: "20 deg | user_instruction | source model"
+      dip: "60 deg | user_instruction | source model"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "7000 m | user_instruction | source model"
+    throw:
+      max: "80 m | user_instruction | source model"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | source model"}
+      profile_strike: {type: elliptical}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[200, 5000], [9800, 5000]] m | user_instruction | worked example: across onlap and subcrop"
+    - name: XS_SN
+      polyline: "[[2000, 200], [2000, 9800]] m | user_instruction | worked example: across the pinch-out"
+  vertical_exaggeration: "4 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

@@ -122,6 +122,7 @@ class CsvDataImporter final : public Importer {
     };
     int cx = col({"x"}), cy = col({"y"}), cz = col({"z"}), cs = col({"surface", "formation", "feature_name"});
     int gx = col({"g_x", "gx", "nx"}), gy = col({"g_y", "gy", "ny"}), gz = col({"g_z", "gz", "nz"});
+    int csig = orient_ ? col({"sigma_deg"}) : col({"sigma"});
     if (cx < 0 || cy < 0 || cz < 0) throw Error(ErrorCode::Parse, "CSV data: columns X, Y and Z are required: " + f.string());
     if (orient_ && (gx < 0 || gy < 0 || gz < 0)) throw Error(ErrorCode::Parse, "CSV orientations: columns G_x, G_y and G_z are required: " + f.string());
     ImportedData d;
@@ -131,6 +132,11 @@ class CsvDataImporter final : public Importer {
       auto at = [&](int c) { return parse_double(r.at(static_cast<std::size_t>(c))); };
       d.points.push_back({at(cx), at(cy), at(cz)});
       d.labels.push_back(cs >= 0 ? r.at(static_cast<std::size_t>(cs)) : std::string());
+      if (csig >= 0) {
+        double sg = at(csig);
+        if (!(sg >= 0)) throw Error(ErrorCode::Parse, "CSV data: sigma must be zero or positive in " + f.string());
+        d.sigmas.push_back(sg);
+      }
       if (orient_) {
         Vec3 n{at(gx), at(gy), at(gz)};
         double l = norm(n);

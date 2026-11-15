@@ -229,8 +229,8 @@ TEST_CASE("V4 series from data: one field per series, an erosional base truncate
   CHECK(worst <= 2.0);
   auto* sq = static_cast<const StratigraphyQuery*>(m->capability("stratigraphy"));
   REQUIRE(sq != nullptr);
-  CHECK(sq->horizon_absent(1000, 5000, 2));   // H3 truncated in the west
-  CHECK(!sq->horizon_absent(8000, 5000, 2));
+  CHECK(sq->horizon_absent(2, 1000, 5000));   // H3 truncated in the west
+  CHECK(!sq->horizon_absent(2, 8000, 5000));
   CHECK(std::fabs(depth_faulted(*m, 1, 1000, 5000) - 1200.0) <= 2.0);
 }
 
@@ -460,6 +460,69 @@ TEST_CASE("V9 an implicit model with series and data-derived faults builds and p
   bool estimated = false;
   for (auto& [k, v] : log.values) estimated |= k.find("estimated_throw") != std::string::npos;
   CHECK(estimated);
+}
+
+namespace {
+/// Depth differences between an implicit model and its parametric source over a 100 m lattice,
+/// inside the data footprint (250 m from the edges): away from faults (more than 500 m from a gap
+/// of the source) and near them. Returns {p95 away, p95 near}.
+std::pair<double, double> rebuild_errors(const Model& src, const Model& imp) {
+  GridSpec g = GridSpec::covering(src.info().domain, 100);
+  std::vector<double> away, near;
+  const Domain& dm = src.info().domain;
+  for (std::size_t h = 0; h < src.info().horizons.size(); ++h) {
+    auto a = repr::horizon_grid_faulted(src, static_cast<int>(h), g), b = repr::horizon_grid_faulted(imp, static_cast<int>(h), g);
+    std::vector<int> dist(g.size(), 1 << 20);  // chamfer distance (nodes) to a gap of the source
+    for (std::size_t k = 0; k < g.size(); ++k)
+      if (std::isnan(a.z.v[k])) dist[k] = 0;
+    for (int pass = 0; pass < 2; ++pass)
+      for (std::size_t jj = 0; jj < g.ny; ++jj)
+        for (std::size_t ii = 0; ii < g.nx; ++ii) {
+          std::size_t i = pass ? g.nx - 1 - ii : ii, j = pass ? g.ny - 1 - jj : jj;
+          int& d = dist[g.index(i, j)];
+          long ni = static_cast<long>(i) + (pass ? 1 : -1), nj = static_cast<long>(j) + (pass ? 1 : -1);
+          if (ni >= 0 && ni < static_cast<long>(g.nx)) d = std::min(d, dist[g.index(static_cast<std::size_t>(ni), j)] + 1);
+          if (nj >= 0 && nj < static_cast<long>(g.ny)) d = std::min(d, dist[g.index(i, static_cast<std::size_t>(nj))] + 1);
+        }
+    for (std::size_t k = 0; k < g.size(); ++k) {
+      double x = g.x(k % g.nx), y = g.y(k / g.nx);
+      if (x < dm.x0 + 250 || x > dm.x0 + dm.sx - 250 || y < dm.y0 + 250 || y > dm.y0 + dm.sy - 250) continue;
+      if (std::isnan(a.z.v[k]) || std::isnan(b.z.v[k])) continue;
+      (dist[k] > 5 ? away : near).push_back(std::fabs(a.z.v[k] - b.z.v[k]));
+    }
+  }
+  return {percentile95(away), near.empty() ? 0.0 : percentile95(near)};
+}
+}  // namespace
+
+TEST_CASE("V10 synthetic v2 examples sampled into data are rebuilt within the stated tolerances; throws within max(15 %, 5 m)") {
+  register_all_plugins();
+  struct Case { const char* implicit; const char* source; std::vector<std::pair<std::string, double>> throws; };
+  const std::vector<Case> cases = {
+      {"implicit_unconformity_from_samples", "unconformity_onlap_pinchout", {}},
+      {"implicit_relay_splay_from_samples", "fault_system_relay_splay", {{"F1", 120.0}, {"F3", 120.0}}},
+      {"implicit_detachment_folds_from_samples", "detachment_folds", {}},
+      {"implicit_faults_series_from_data", "data/implicit_faults_series/truth", {{"F1", 80.0}}},
+  };
+  for (auto& c : cases) {
+    auto ds = desc::load_description(fs::path(STX_SOURCE_DIR) / "examples" / (std::string(c.source) + ".yaml"));
+    auto di = desc::load_description(fs::path(STX_SOURCE_DIR) / "examples" / (std::string(c.implicit) + ".yaml"));
+    BuildInputs ins, ini;
+    io::load_build_inputs(ds, ins);
+    io::load_build_inputs(di, ini);
+    BuildLog ls, li;
+    auto ms = build_model(ds, ins, ls);
+    auto mi = build_model(di, ini, li);
+    auto [away, near] = rebuild_errors(*ms, *mi);
+    std::printf("  %s: p95 away from faults %.3f m, near faults %.3f m\n", c.implicit, away, near);
+    CHECK(away <= 10.0);
+    CHECK(near <= 30.0);
+    for (auto& [f, truth] : c.throws) {
+      double t = log_value(li, "implicit.fault." + f + ".estimated_throw");
+      std::printf("    %s estimated throw %.2f m (source %.1f m)\n", f.c_str(), t, truth);
+      CHECK(std::fabs(t - truth) <= std::max(0.15 * truth, 5.0));
+    }
+  }
 }
 
 STX_TEST_MAIN()

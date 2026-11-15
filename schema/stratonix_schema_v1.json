@@ -216,6 +216,9 @@
                 }
               }
             }
+          },
+          "top_uncertainty": {
+            "$ref": "#/$defs/param"
           }
         }
       }
@@ -783,7 +786,6 @@
           "name",
           "age",
           "geometry",
-          "extent",
           "throw",
           "slip_mode",
           "hanging_wall"
@@ -852,16 +854,18 @@
               },
               "profile": {
                 "$ref": "#/$defs/param"
+              },
+              "fit": {
+                "enum": [
+                  "plane",
+                  "profile"
+                ]
               }
             }
           },
           "extent": {
             "type": "object",
-            "required": [
-              "upper_tip",
-              "lower_tip",
-              "length"
-            ],
+            "required": [],
             "additionalProperties": false,
             "properties": {
               "upper_tip": {
@@ -907,6 +911,22 @@
                   "left_lateral",
                   "right_lateral"
                 ]
+              },
+              "estimate": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "band",
+                  "station_spacing"
+                ],
+                "properties": {
+                  "band": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "station_spacing": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
               }
             }
           },
@@ -1208,6 +1228,9 @@
               },
               "horizon": {
                 "type": "string"
+              },
+              "uncertainty": {
+                "$ref": "#/$defs/param"
               }
             }
           }
@@ -1231,6 +1254,34 @@
         },
         "vertical_stretch": {
           "$ref": "#/$defs/param"
+        },
+        "solver": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "enum": [
+                "auto",
+                "dense",
+                "partition_of_unity"
+              ]
+            },
+            "points_per_patch": {
+              "$ref": "#/$defs/param"
+            },
+            "overlap": {
+              "$ref": "#/$defs/param"
+            }
+          }
+        },
+        "data_influence": {
+          "type": "boolean"
+        },
+        "isochore_horizons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

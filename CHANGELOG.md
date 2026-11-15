@@ -13,7 +13,43 @@ has its own version (`stratonix_schema`).
   leave-one-out errors. Interfaces, additive and not yet built: `SolverOptions`, `PuField`,
   `rippa_loo` (engines/implicit.hpp); `estimate_throws`, `profile_from_sticks` and
   `condition_to_data` (engines/conditioning.hpp); `RbfField::Value::sigma`.
-- Tests: `test_v3_data` (nine cases), expected to fail until Prompts 35 and 36.
+- Tests: `test_v3_data` (ten cases), expected to fail until Prompts 35 and 36.
+- Large-data implicit solver (Prompt 35, decision 11). It is a partition of unity of Hermite RBF
+  fields on overlapping columns, blended with Wendland weights, and keeps exact interpolation.
+  - `implicit.solver: {type: auto | dense | partition_of_unity, points_per_patch, overlap}`;
+    auto selects dense up to 3000 interface data.
+  - The benchmark `bench_implicit_100k` (release builds) builds 100 000 points and 10 000
+    orientations in 12 s on 2 threads (limit 300 s).
+- One field per stratigraphic series in the implicit builder; the stage 2C relations (erosional,
+  onlap) combine them. `implicit.isochore_horizons`: a horizon that thins out within its series
+  is built from the horizon above minus a thickness from its own data (thin-plate spline, clamped
+  at zero).
+- Faults from data:
+  - `throw.estimate: {band, station_spacing}` estimates throw, length, centre and vertical tips
+    from horizon cut-offs, labelled calibrated;
+  - `geometry: {type: sticks, fit: profile}` fits a listric or ramp-flat dip profile to the
+    sticks.
+- Per-point data uncertainty: `implicit.data[].uncertainty`, CSV columns `sigma` and `sigma_deg`,
+  and `wells[].top_uncertainty`. Each acts as that point's nugget. `implicit.data_influence: true`
+  computes leave-one-out errors (Rippa 1999) and lists the ten most influential data.
+  `data_misfit.csv` gains sigma, normalised misfit and leave-one-out columns when they apply.
+- Rules F29 (solver, uncertainties, isochore horizons) and F30 (throw estimates). Coincident data
+  of different horizons are refused with their positions, not left to a singular system.
+- Examples `implicit_unconformity_from_samples`, `implicit_relay_splay_from_samples`,
+  `implicit_detachment_folds_from_samples` and `implicit_faults_series_from_data`, with
+  `tools/make_implicit_examples.py` to regenerate their data from the parametric sources. Rebuilt
+  against their sources (95th percentile of the depth differences):
+  - away from faults: 0.05 to 2.2 m;
+  - near faults: up to 3.3 m;
+  - estimated throws within 4.5 %.
+
+### Changed
+- GemPy and LoopStructural input sets: no pick where a series relation removes a horizon
+  (truncation, onlap), and none where it coincides with a shallower horizon's pick (zero
+  thickness). Models without series are unchanged.
+- Fault `extent` keys are required by validation, not by the schema, so that estimated faults may
+  omit them (rule F10 states the requirement).
+- The implicit builder accepts curved faults from sticks (F14).
 
 ## [2026.2] - 2026-11-15 - Version 2: structural geology in depth
 

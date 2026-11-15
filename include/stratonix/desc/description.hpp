@@ -48,6 +48,7 @@ struct WellDesc {
   std::string name, role;
   Param head, datum_elevation, total_depth, stations;
   std::vector<std::pair<std::string, Param>> tops;  ///< horizon name -> depth (positive down)
+  Param top_uncertainty;           ///< stage 3A: uncertainty of the tops (m)
   std::vector<CompletionDesc> completions;
 };
 struct HorizonDesc {
@@ -160,7 +161,11 @@ struct FaultDesc {
   Param heave;                     ///< curved faults: heave (displacement parallel to the regional)
   Param shear_angle;               ///< inclined_shear: angle of the shear lines from vertical
   std::string shear_sense;         ///< inclined_shear: antithetic | synthetic
-  bool curved() const { return geom_type == "listric" || geom_type == "ramp_flat"; }
+  bool curved() const { return geom_type == "listric" || geom_type == "ramp_flat" || (geom_type == "sticks" && sticks_fit == "profile"); }
+  // Faults from data (stage 3A, STX-TN-11 section 3).
+  std::string sticks_fit = "plane";  ///< geometry.fit for sticks: plane | profile
+  bool throw_estimate = false;       ///< throw.estimate: throw, length and tips from horizon cut-offs
+  Param estimate_band, estimate_spacing;
   // Interaction (STX-TN-05 sections 3 and 4).
   bool abuts_transfer = false;     ///< abuts.transfer: a linked splay of the abutted fault
   std::string drag_type;           ///< normal | reverse (empty: no drag)
@@ -203,13 +208,18 @@ struct SheetDesc {
   std::vector<SheetKeyDesc> keys;
 };
 /// Data-conditioned (implicit) structure: data inputs and interpolation settings.
-struct ImplicitData { std::string input, kind, format, horizon; };
+struct ImplicitData { std::string input, kind, format, horizon; Param uncertainty; };
 struct ImplicitDesc {
   bool present = false;
   std::vector<ImplicitData> data;
   bool use_well_tops = true;
   std::string kernel = "cubic";
   Param nugget, surface_spacing, iterations, vertical_stretch;
+  // Stage 3A (STX-TN-11): large-data solver and data influence.
+  std::string solver_type = "auto";  ///< auto | dense | partition_of_unity
+  Param points_per_patch, overlap;
+  bool data_influence = false;
+  std::vector<std::string> isochore_horizons;  ///< built from the horizon above minus a thickness from their data
 };
 
 /// A complete, validated model description.

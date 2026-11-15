@@ -115,16 +115,17 @@ std::vector<const Param*> Description::all_params() const {
                   &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &tol_area, &tol_salt_volume, &tol_solid_thickness, &tol_restoration, &tol_balance, &scaling_min_ratio, &scaling_max_ratio,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
                   &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
-                  &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch})
+                  &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch, &implicit.points_per_patch, &implicit.overlap})
     add(*p);
   for (auto& w : wells) {
-    add(w.head); add(w.datum_elevation); add(w.total_depth); add(w.stations);
+    add(w.head); add(w.datum_elevation); add(w.total_depth); add(w.stations); add(w.top_uncertainty);
     for (auto& [h, p] : w.tops) add(p);
     for (auto& c : w.completions) { add(c.top); add(c.base); }
   }
   for (auto& h : horizons) { add(h.depth); add(h.thickness_above); add(h.iso_thickness); add(h.iso_gradient); add(h.iso_centre); }
   for (auto& h : horizons) add(h.age);
   for (auto& u : units) add(u.clay_fraction);
+  for (auto& x : implicit.data) add(x.uncertainty);
   for (auto* q : {&fault_rock.shale_threshold, &fault_rock.thickness_ratio, &fault_rock.seal_a, &fault_rock.seal_c, &stress.sv_gradient,
                   &stress.shmax_ratio, &stress.shmin_ratio, &stress.shmax_azimuth, &stress.tensor_gradient, &stress.pore_pressure_gradient,
                   &stress.friction, &stress.cohesion, &fracture_threshold})
@@ -154,7 +155,7 @@ std::vector<const Param*> Description::all_params() const {
                     &f.lower.offset, &f.lower.fraction, &f.lower.depth, &f.length, &f.throw_max,
                     &f.profile_dip.taper, &f.profile_strike.taper, &f.influence_distance, &f.detachment_depth,
                     &f.profile, &f.heave, &f.shear_angle, &f.drag_fraction, &f.drag_width, &f.net_slip,
-                    &f.rake, &f.fold_apical_angle, &f.fold_ps_ratio})
+                    &f.rake, &f.fold_apical_angle, &f.fold_ps_ratio, &f.estimate_band, &f.estimate_spacing})
       add(*q);
   }
   for (auto& s : sections) { add(s.polyline); add(s.detail_window); }
@@ -338,6 +339,7 @@ struct Typer {
         wd.head = P(&w, "head", b, Dimension::Length, true, 2);
         wd.datum_elevation = P(&w, "datum_elevation", b, Dimension::Length, false, 1);
         wd.total_depth = P(&w, "total_depth", b, Dimension::Length, false, 1);
+        wd.top_uncertainty = P(&w, "top_uncertainty", b, Dimension::Length, false, 1);
         if (const Node* tr = w.get("trajectory")) wd.stations = P(tr, "stations", b + ".trajectory", Dimension::Any, true, 2, 3);
         if (const Node* cs = w.get("completions"))
           for (std::size_t q = 0; q < cs->seq.size(); ++q) {
@@ -531,6 +533,7 @@ struct Typer {
         fd.geom_type = S(g, "type", "planar");
         bool by_trace = g && g->get("trace");
         bool by_sticks = fd.geom_type == "sticks";
+        fd.sticks_fit = S(g, "fit", "plane");
         const bool curved = fd.curved(), ramp = fd.geom_type == "ramp_flat";
         fd.geom_input = S(g, "input");
         fd.geom_input_format = S(g, "input_format", "irap_lines");
@@ -558,13 +561,20 @@ struct Typer {
         };
         tip("upper_tip", fd.upper);
         tip("lower_tip", fd.lower);
-        fd.length = P(e, "length", b + ".extent", Dimension::Length, true, 1);
+        const Node* th0 = f.get("throw");
+        const Node* est = th0 ? th0->get("estimate") : nullptr;
+        fd.throw_estimate = est != nullptr;
+        if (est) {
+          fd.estimate_band = P(est, "band", b + ".throw.estimate", Dimension::Length, true, 1);
+          fd.estimate_spacing = P(est, "station_spacing", b + ".throw.estimate", Dimension::Length, true, 1);
+        }
+        fd.length = P(e, "length", b + ".extent", Dimension::Length, !fd.throw_estimate, 1);
         fd.tip_line_shape = S(e, "tip_line_shape", "rectangular");
         const Node* th = f.get("throw");
         fd.slip_mode = S(&f, "slip_mode");
         const bool fpf_hw = f.get("hanging_wall") && S(f.get("hanging_wall"), "type") == "fault_parallel_flow";
         const bool by_slip = fd.strike_component() || (curved && fpf_hw);
-        fd.throw_max = P(th, "max", b + ".throw", Dimension::Length, !curved && !by_slip, 1);
+        fd.throw_max = P(th, "max", b + ".throw", Dimension::Length, !curved && !by_slip && !fd.throw_estimate, 1);
         fd.net_slip = P(th, "slip", b + ".throw", Dimension::Length, by_slip, 1);
         fd.sense = S(th, "sense");
         fd.rake = P(&f, "rake", b, Dimension::Angle, fd.slip_mode == "oblique", 1);
@@ -673,13 +683,26 @@ struct Typer {
     if (const Node* im = root.get("implicit")) {
       d.implicit.present = true;
       if (const Node* data = im->get("data"))
-        for (auto& x : data->seq) d.implicit.data.push_back({S(&x, "input"), S(&x, "kind"), S(&x, "format"), S(&x, "horizon")});
+        for (std::size_t k = 0; k < data->seq.size(); ++k) {
+          const Node& x = data->seq[k];
+          d.implicit.data.push_back({S(&x, "input"), S(&x, "kind"), S(&x, "format"), S(&x, "horizon"),
+                                     P(&x, "uncertainty", "implicit.data[" + std::to_string(k) + "]",
+                                       S(&x, "kind") == "orientations" ? Dimension::Angle : Dimension::Length, false, 1)});
+        }
       if (const Node* u = im->get("use_well_tops")) d.implicit.use_well_tops = u->boolean || u->str == "true";
       d.implicit.kernel = S(im, "kernel", "cubic");
       d.implicit.nugget = P(im, "nugget", "implicit", Dimension::Length, false, 1);
       d.implicit.surface_spacing = P(im, "surface_spacing", "implicit", Dimension::Length, false, 1);
       d.implicit.iterations = P(im, "iterations", "implicit", Dimension::Ordinal, false, 1);
       d.implicit.vertical_stretch = P(im, "vertical_stretch", "implicit", Dimension::Dimensionless, false, 1);
+      if (const Node* so = im->get("solver")) {
+        d.implicit.solver_type = S(so, "type", "auto");
+        d.implicit.points_per_patch = P(so, "points_per_patch", "implicit.solver", Dimension::Ordinal, false, 1);
+        d.implicit.overlap = P(so, "overlap", "implicit.solver", Dimension::Dimensionless, false, 1);
+      }
+      if (const Node* u = im->get("data_influence")) d.implicit.data_influence = u->boolean || u->str == "true";
+      if (const Node* ih = im->get("isochore_horizons"))
+        for (auto& x : ih->seq) d.implicit.isochore_horizons.push_back(x.str);
     }
     if (const Node* o = root.get("outputs")) {
       if (const Node* ss = o->get("sections"))
@@ -1097,7 +1120,7 @@ struct Typer {
               "horizon '" + h.name + "' follows from " + (h.name == d.salt.top ? "the salt thickness above base salt" : "the clinoform formula") +
                   ": give no depth, thickness, isochore or reference-well top");
       else if (clino) {
-      } else if (!from_well && defs == 0)
+      } else if (!from_well && defs == 0 && !d.implicit.present)  // implicit models: the data define the horizons (STX-TN-11)
         c.err(b, "S3", "horizon '" + h.name + "' has no definition (reference-well top, depth, thickness_above, surface or isochore)");
       else if (defs > 1)
         c.err(b, "S3", "horizon '" + h.name + "' is defined more than once");
@@ -1236,6 +1259,53 @@ struct Typer {
       if (d.implicit.iterations.present && (d.implicit.iterations.si() < 1 || d.implicit.iterations.si() > 10))
         c.err("implicit.iterations", "I3", "iterations must be between 1 and 10");
     }
+    // STX-TN-11 (F29): solver and uncertainties
+    if (d.implicit.present) {
+      const auto& im = d.implicit;
+      if (im.solver_type != "auto" && im.solver_type != "dense" && im.solver_type != "partition_of_unity")
+        c.err("implicit.solver.type", "F29", "solver type must be auto, dense or partition_of_unity");
+      if (im.points_per_patch.present && !(im.points_per_patch.si() >= 30))
+        c.err("implicit.solver.points_per_patch", "F29", "a patch needs at least 30 interface data");
+      if (im.overlap.present && !(im.overlap.si() > 1 && im.overlap.si() <= 3))
+        c.err("implicit.solver.overlap", "F29", "overlap must be in (1, 3]: at 1 or below the patches leave gaps");
+      for (auto& hn : im.isochore_horizons) {
+        int h = d.horizon_index(hn);
+        if (h < 0) { c.err("implicit.isochore_horizons", "F29", "unknown horizon '" + hn + "'"); continue; }
+        int sr = d.series.empty() ? -1 : d.series_of(h);
+        bool above = false;  // a shallower horizon of the same series, itself from the field
+        for (int a = h - 1; a >= 0 && !above; --a)
+          above = (d.series.empty() ? -1 : d.series_of(a)) == sr &&
+                  std::find(im.isochore_horizons.begin(), im.isochore_horizons.end(), d.horizons[static_cast<std::size_t>(a)].name) == im.isochore_horizons.end();
+        if (!above) c.err("implicit.isochore_horizons", "F29", "horizon '" + hn + "' needs a shallower horizon of its series that comes from the field");
+      }
+      for (std::size_t k = 0; k < im.data.size(); ++k)
+        if (im.data[k].uncertainty.present && im.data[k].uncertainty.si() < 0)
+          c.err("implicit.data[" + std::to_string(k) + "].uncertainty", "F29", "an uncertainty must be zero or positive");
+    }
+    for (std::size_t k = 0; k < d.wells.size(); ++k)
+      if (d.wells[k].top_uncertainty.present && d.wells[k].top_uncertainty.si() < 0)
+        c.err("wells[" + std::to_string(k) + "].top_uncertainty", "F29", "an uncertainty must be zero or positive");
+    // STX-TN-11 (F30): throws, length and tips estimated from data; tips stated otherwise
+    for (std::size_t k = 0; k < d.faults.size(); ++k) {
+      auto& f = d.faults[k];
+      std::string b = "faults[" + std::to_string(k) + "]";
+      if (!f.throw_estimate) {
+        if (f.upper.rule.empty()) c.err(b + ".extent.upper_tip", "F10", "upper_tip is required (or estimate the throw from data)");
+        if (f.lower.rule.empty()) c.err(b + ".extent.lower_tip", "F10", "lower_tip is required (or estimate the throw from data)");
+        continue;
+      }
+      if (!d.implicit.present) c.err(b + ".throw.estimate", "F30", "throws are estimated from data by the implicit builder: add an implicit section");
+      if (f.geom_type != "sticks" && f.geom_type != "planar") c.err(b + ".throw.estimate", "F30", "throws are estimated on planar faults");
+      if (f.geom_type == "sticks" && f.sticks_fit != "plane") c.err(b + ".throw.estimate", "F30", "throws are estimated on planar faults (fit: plane)");
+      if (f.throw_max.present) c.err(b + ".throw.max", "F30", "give either throw.max or throw.estimate, not both");
+      if (f.estimate_band.present && !(f.estimate_band.si() > 0)) c.err(b + ".throw.estimate.band", "F30", "band must be positive");
+      if (f.estimate_spacing.present && !(f.estimate_spacing.si() > 0))
+        c.err(b + ".throw.estimate.station_spacing", "F30", "station spacing must be positive");
+      const auto& pt = f.profile_strike.type;
+      if (pt != "elliptical" && pt != "flat_topped" && pt != "sine" && pt != "linear")
+        c.err(b + ".throw.profile_strike", "F30", "the strike profile must be elliptical, flat_topped, sine or linear");
+      if (f.strike_component()) c.err(b + ".slip_mode", "F30", "throws are estimated for dip-slip faults");
+    }
     // faults
     std::map<double, std::vector<std::size_t>> ages;
     double base_depth = d.depth_range.present && d.depth_range.values.size() == 2 ? d.depth_range.si(1) : kNaN;
@@ -1252,15 +1322,15 @@ struct Typer {
       const bool shear_hw = f.hw_type == "vertical_shear" || f.hw_type == "inclined_shear" || fpf;
       if (f.curved()) {
         // STX-TN-05 section 2.3: the admissible range of the shear construction.
-        if (d.implicit.present)
-          c.err(b + ".geometry.type", "F14", "curved faults are built by the parametric engine; the implicit builder takes planar faults");
+        if (d.implicit.present && f.geom_type != "sticks")
+          c.err(b + ".geometry.type", "F14", "the implicit builder takes faults from sticks (geometry.type: sticks, fit: profile for a curved fault)");
         if (!shear_hw)
           c.err(b + ".hanging_wall.type", "F14", "a curved fault needs a shear or flow hanging wall (vertical_shear, inclined_shear or "
                                                  "fault_parallel_flow): "
                                                  "a rigid hanging wall would open a void above the curved fault");
         if (f.slip_mode != "dip_slip")
           c.err(b + ".slip_mode", "F14", "a curved fault moves by dip_slip");
-        if (f.upper.rule != "free" || f.lower.rule != "free")
+        if ((f.upper.rule != "free" || f.lower.rule != "free") && f.geom_type != "sticks")
           c.err(b + ".extent", "F10", "a curved fault cuts from the model top to its detachment: both tips must be free "
                                       "(an upper tip inside the section would need the displacement to fall to zero)");
         if (f.trace.present)

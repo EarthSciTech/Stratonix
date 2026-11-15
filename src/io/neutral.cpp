@@ -553,10 +553,29 @@ Samples sample_horizons(ExportContext& c, int d) {
         if (std::isnan(fsu.z.v[kk]) || fsu.block[kk] != fsu.block[k]) return false;
       return true;
     };
+    // Where a series relation removes the horizon (truncation, onlap: stage 2C) there is no pick.
+    auto* sq = static_cast<const StratigraphyQuery*>(c.model().capability("stratigraphy"));
+    auto present = [&](std::size_t i, std::size_t j) {
+      if (!sq) return true;
+      std::size_t k = gs.index(i, j);
+      Vec3 p{gs.x(i), gs.y(j), fsu.z.v[k]}, r;
+      c.model().restore(std::span<const Vec3>(&p, 1), std::span<Vec3>(&r, 1));
+      return !sq->horizon_absent(static_cast<int>(h), r.x, r.y);
+    };
+    // Where the unit above has zero thickness the pick would coincide with a shallower horizon's
+    // pick at another value: a contradiction for an interpolator. Only the shallower is written.
+    auto coincides = [&](std::size_t i, std::size_t j) {
+      std::size_t k = gs.index(i, j);
+      for (std::size_t a = 0; a < h; ++a) {
+        double za = c.faulted(static_cast<int>(a)).z.v[k];
+        if (!std::isnan(za) && std::fabs(za - fsu.z.v[k]) < 1e-6) return true;
+      }
+      return false;
+    };
     std::string hn = petrel_name(inf.horizons[h].name);
     for (std::size_t j = step / 2; j < gs.ny; j += step)
       for (std::size_t i = step / 2; i < gs.nx; i += step) {
-        if (!ok(i, j)) continue;
+        if (!ok(i, j) || !present(i, j) || coincides(i, j)) continue;
         std::size_t k = gs.index(i, j);
         s.points.rows.push_back({num(gs.x(i), 2), num(gs.y(j), 2), num(fsu.z.v[k], d), hn, std::to_string(fsu.block[k])});
         if ((i / step + j / step) % 2 != 0) continue;  // orientations at every other sample

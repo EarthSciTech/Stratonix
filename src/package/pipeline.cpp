@@ -91,10 +91,16 @@ std::vector<std::pair<std::string, std::string>> key_numbers(const desc::Descrip
 std::string data_misfit_csv(const Model& m) {
   auto* mis = static_cast<const std::vector<DataMisfit>*>(m.capability("data_misfit"));
   if (!mis) return {};
-  std::string s = "input,evidence,horizon,kind,x,y,z,misfit,misfit_unit\n";
-  for (auto& r : *mis)
+  // stage 3A columns (STX-TN-11 section 5) only when some datum has an uncertainty or a leave-one-out error
+  bool extra = std::any_of(mis->begin(), mis->end(), [](const DataMisfit& r) { return !std::isnan(r.sigma) || !std::isnan(r.loo); });
+  auto num = [](double v, int dec) { return std::isnan(v) ? std::string() : fmt_fixed(v, dec); };
+  std::string s = std::string("input,evidence,horizon,kind,x,y,z,misfit,misfit_unit") + (extra ? ",sigma,normalised_misfit,leave_one_out_m" : "") + "\n";
+  for (auto& r : *mis) {
     s += r.input + "," + r.evidence + "," + r.label + "," + r.kind + "," + fmt_fixed(r.p.x, 2) + "," + fmt_fixed(r.p.y, 2) + "," + fmt_fixed(r.p.z, 2) +
-         "," + fmt_fixed(r.misfit, 4) + "," + (r.kind == "orientation" ? "deg" : "m") + "\n";
+         "," + fmt_fixed(r.misfit, 4) + "," + (r.kind == "orientation" ? "deg" : "m");
+    if (extra) s += "," + num(r.sigma, 4) + "," + num(r.normalised, 4) + "," + num(r.loo, 4);
+    s += "\n";
+  }
   return s;
 }
 

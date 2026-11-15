@@ -1,0 +1,52 @@
+# Stage 3A example (STX-TN-11): Detachment folds rebuilt from sampled data (implicit builder).
+# The data were sampled from the parametric example detachment_folds.yaml (model example_detachment_folds v1.1.0) with
+#   stratonix export detachment_folds.yaml -o out --formats gempy,fault_sticks_irap
+# by tools/make_implicit_examples.py, and are rebuilt here from data alone.
+stratonix_schema: 1
+model: {name: implicit_detachment_folds_from_samples, version: "1.0.0", status: DESIGN,
+        title: "Detachment folds rebuilt from sampled data (implicit builder)"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+inputs:
+  - {id: POINTS, path: data/implicit_detachment_folds/surface_points.csv, role: surface points, sharing: shareable, source: "sampled from detachment_folds.yaml (example_detachment_folds v1.1.0) every 250 m", evidence: user_instruction}
+  - {id: ORIENT, path: data/implicit_detachment_folds/orientations.csv, role: orientations, sharing: shareable, source: "sampled from detachment_folds.yaml (example_detachment_folds v1.1.0) every 250 m", evidence: user_instruction}
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, fixed block"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+      H4: "1600 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[3000, 5000] m | user_instruction | worked example: planned well on the detachment fold crest"
+    total_depth: "2000 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}, {name: H4}]
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+implicit:
+  data:
+    - {input: POINTS, kind: points, format: csv_points}
+    - {input: ORIENT, kind: orientations, format: csv_orientations}
+  use_well_tops: true
+  kernel: cubic
+  nugget: "0 m | assumed | exact interpolation of the data"
+  surface_spacing: "100 m | assumed | twice the grid spacing"
+  iterations: "10 ordinal | assumed | maximum restoration passes"
+  vertical_stretch: "5 ratio | assumed | anisotropy: horizons vary slowly laterally compared with their spacing"
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[500, 5000], [9500, 5000]] m | user_instruction | worked example: across both folds"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

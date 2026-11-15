@@ -25,7 +25,13 @@ stx_test(test_v2_faultrock stratonix_package)
 # Stage 3A analytical tests (STX-TN-11), written before the features (Prompt 34) and made to pass
 # by Prompts 35 and 36.
 stx_test(test_v3_data stratonix_package)
-set_tests_properties(test_v3_data PROPERTIES WILL_FAIL TRUE)
+set_tests_properties(test_v3_data PROPERTIES WILL_FAIL TRUE TIMEOUT 5400)
+# Stage 3A benchmark: 100 000 points within 300 s (release builds; others skip with code 77).
+stx_test(bench_implicit_100k stratonix_package)
+set_tests_properties(bench_implicit_100k PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
+if(STRATONIX_SANITIZE)
+  target_compile_definitions(bench_implicit_100k PRIVATE STX_SANITIZE=1)
+endif()
 # Independent check of the figure files (Python: Pillow, tifffile, python-pptx); skipped if absent.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
@@ -48,10 +54,13 @@ add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:str
          -DDESC=${PROJECT_SOURCE_DIR}/examples/synthetic_fold_two_faults.yaml -DOUT=${STX_TEST_TMP}/cli_build_example
          -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
 # The worked examples of the user guide build with every check passing.
-foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history)
+foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
+endforeach()
+foreach(ex implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data)
+  set_tests_properties(cli_build_${ex} PROPERTIES TIMEOUT 3600)
 endforeach()
 # Every v1 command works unchanged on a data-conditioned (implicit) model.
 set(_imp ${PROJECT_SOURCE_DIR}/examples/implicit_from_samples.yaml)
@@ -62,6 +71,13 @@ add_test(NAME cli_implicit_export COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:s
 add_test(NAME cli_implicit_package COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_implicit_package
          "-DARGS=package;${_imp};--formats;petrel;--no-figures;--zip" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
 add_test(NAME cli_implicit_suite COMMAND stratonix suite ${_imp})
+# Stage 3A: the same commands on an implicit model with series and a fault whose throw comes from the data.
+set(_imp3 ${PROJECT_SOURCE_DIR}/examples/implicit_faults_series_from_data.yaml)
+add_test(NAME cli_implicit3_section COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_implicit3_section
+         "-DARGS=section;${_imp3};--line;200,5000\;9800,5000" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
+add_test(NAME cli_implicit3_export COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_implicit3_export
+         "-DARGS=export;${_imp3};--formats;petrel,vtk,csv,gempy,loopstructural" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
+set_tests_properties(cli_implicit3_section cli_implicit3_export PROPERTIES TIMEOUT 3600)
 # LeakSanitizer: ignore process-lifetime caches of fontconfig/Cairo (see lsan.supp). Last, so it
 # reaches every test defined above.
 get_property(_stx_tests DIRECTORY PROPERTY TESTS)
