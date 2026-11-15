@@ -54,6 +54,17 @@ struct TerminationLine {
 };
 std::vector<TerminationLine> termination_lines(const Model& m, int unit, const GridSpec& g);
 
+// ---- restoration (stage 2E, STX-TN-09 section 3) --------------------------------------------
+struct Section;
+/// Flexural-slip unfolding of a section: each horizon's trace straightened along its own length
+/// from a pin at the section's start, fault gaps closed, at its depth at the pin.
+struct UnfoldedHorizon {
+  int horizon = -1;
+  double traced_length = 0;  ///< bed length along the section, fault gaps closed
+  Polyline restored;         ///< (along-section distance, 0, elevation) points of the straightened bed
+};
+std::vector<UnfoldedHorizon> unfold_flexural(const Model& m, const Section& s);
+
 // ---- faults --------------------------------------------------------------------------------
 struct FaultSurface {
   int fault = -1;

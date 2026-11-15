@@ -129,6 +129,12 @@ has its own version (`stratonix_schema`).
 - Worked examples `salt_pillow_withdrawal.yaml`, `salt_diapir_crestal_faults.yaml` and
   `compaction_drape.yaml`.
 
+- Stage 2E specification (technical note STX-TN-09): event timeline with ages, phases and
+  inversion, the model at any event, sequential restoration, flexural-slip unfolding,
+  line-length and area balancing, backstripping; checks C17 and C18; rule F26. New interfaces,
+  additive: `event_ages`, `state_description`, `build_state` (engines/history.hpp) and
+  `repr::unfold_flexural`.
+
 ### Changed
 - The well-correction field measures control-well residuals against the effective horizons
   (after series relations, the salt response and compaction) when these are in force.
@@ -145,7 +151,7 @@ has its own version (`stratonix_schema`).
   unchanged.
 - Analytical tests for stage 2A (`test_v2_curved`, `test_v2_interaction`, `test_v2_movement`)
   and stage 2B (`test_v2_folding`, against independent trishear and fault-parallel-flow
-  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`).
+  integrations); stage 2C (`test_v2_strat`); stage 2D (`test_v2_salt`); stage 2E (`test_v2_history`), expected to fail until its features are built.
 
 ## [2026.1] - 2026-11-14 - First public release
 

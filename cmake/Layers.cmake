@@ -4,6 +4,7 @@
 add_library(stratonix_engines STATIC
   src/engines/builder.cpp
   src/engines/structure.cpp
+  src/engines/history.cpp
   src/engines/faults.cpp
   src/engines/parametric.cpp
   src/engines/implicit.cpp

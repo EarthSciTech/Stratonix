@@ -396,4 +396,7 @@ std::vector<TerminationLine> termination_lines(const Model& m, int unit, const G
   return out;
 }
 
+// Stage 2E (STX-TN-09 section 3): implemented in Prompt 30.
+std::vector<UnfoldedHorizon> unfold_flexural(const Model&, const Section&) { return {}; }
+
 }  // namespace stratonix::repr
