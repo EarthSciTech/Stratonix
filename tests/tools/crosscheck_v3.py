@@ -128,32 +128,43 @@ def loopstructural_surfaces(root, setup, rows, horizons, grids, variant=None):  
                 model.add_unconformity(feat, setup["strati_values"][base])
     model.update()
     feature_of = {h: s["name"] for s in series for h in s["horizons"]}
+    zs = np.linspace(setup["maximum"][2], setup["origin"][2], 251)
+    # an older series lies below the erosional bases of the younger ones: its field is searched
+    # only below them (above, it is an extrapolation with no data)
+    ceilings = {}
+    bases = []
+    for s_ in series:
+        for h in s_["horizons"]:
+            ceilings[h] = list(bases)
+        if s_["base"] == "erosional":
+            bases.append(s_["horizons"][-1])
+    iso_f = {}
+
+    def zfun(h, P):
+        P = np.asarray(P, dtype=float).reshape(-1, 2)
+        if h in iso:
+            above = horizons[horizons.index(h) - 1]
+            return zfun(above, P) - np.maximum(0.0, iso_f[h](P))
+        pts = np.c_[np.repeat(P[:, 0], len(zs)), np.repeat(P[:, 1], len(zs)), np.tile(zs, len(P))]
+        v = model.evaluate_feature_value(feature_of[h], pts).reshape(len(P), len(zs))
+        if ceilings.get(h):
+            ceil = np.min(np.vstack([zfun(b, P) for b in ceilings[h]]), axis=0)
+            v = np.where(zs[None, :] > np.nan_to_num(ceil, nan=1e300)[:, None] + 1e-6, np.nan, v)
+        return first_crossing(v, zs, setup["strati_values"][h])
+
+    # isochore horizons: the horizon above minus the thicknesses at the picks (thin-plate spline, >= 0)
+    from scipy.interpolate import RBFInterpolator
+    for h in iso:
+        above = horizons[horizons.index(h) - 1]
+        picks = np.array([[float(r["X"]), float(r["Y"]), float(r["Z"])] for r in rows if r["stx_horizon"] == h and r["val"]])
+        t = zfun(above, picks[:, :2]) - picks[:, 2]
+        ok = np.isfinite(t)
+        iso_f[h] = RBFInterpolator(picks[ok, :2], t[ok], kernel="thin_plate_spline", neighbors=None if ok.sum() <= 5000 else 400)
     out = {}
     for h in horizons:
         X, Y, z, dx = grids[h]
-        zs = np.linspace(setup["maximum"][2], setup["origin"][2], 251)
-        pts = np.c_[np.repeat(X.ravel(), len(zs)), np.repeat(Y.ravel(), len(zs)), np.tile(zs, X.size)]
-        if h in iso:
-            continue
-        v = model.evaluate_feature_value(feature_of[h], pts).reshape(X.size, len(zs))
-        out[h] = first_crossing(v, zs, setup["strati_values"][h]).reshape(X.shape)
-    # isochore horizons: the horizon above minus the thicknesses at the picks (thin-plate spline, >= 0)
-    from scipy.interpolate import RBFInterpolator
-    order_ = [h for h in horizons]
-    for h in iso:
-        above = order_[order_.index(h) - 1]
-        X, Y, z, dx = grids[h]
-        picks = np.array([[float(r["X"]), float(r["Y"]), float(r["Z"])] for r in rows if r["stx_horizon"] == h and r["val"]])
-        za = out[above]
-        xa, ya = X[0, 0], Y[0, 0]
-        def at(px, py):
-            i, j = int(round((px - xa) / dx)), int(round((py - ya) / dx))
-            return za[j, i] if 0 <= i < za.shape[1] and 0 <= j < za.shape[0] else np.nan
-        t = np.array([at(p[0], p[1]) - p[2] for p in picks])
-        ok = np.isfinite(t)
-        f = RBFInterpolator(picks[ok, :2], t[ok], kernel="thin_plate_spline", neighbors=None if ok.sum() <= 5000 else 400)
-        out[h] = za - np.maximum(0.0, f(np.c_[X.ravel(), Y.ravel()]).reshape(X.shape))
-    return out
+        out[h] = zfun(h, np.c_[X.ravel(), Y.ravel()]).reshape(X.shape)
+    return out, zfun
 
 
 def substitute_surfaces(rows, horizons, grids, root):
@@ -182,19 +193,37 @@ def substitute_surfaces(rows, horizons, grids, root):
                 from scipy.interpolate import NearestNDInterpolator
                 s[m] = NearestNDInterpolator(pts[sel, :2], pts[sel, 2])(np.c_[X[m], Y[m]])
         out[h] = s
-    return out
+    return out, grid_sampler(grids, out)
 
 
-BRANCH = 500.0  # m: a fault that abuts another is measured where that fault is beyond the 400 m sampling either side
+def grid_sampler(grids, surfaces):
+    """z of a horizon at points from gridded surfaces (nearest node)."""
+    def zfun(h, P):
+        P = np.asarray(P, dtype=float).reshape(-1, 2)
+        X, Y, _, dx = grids[h]
+        z = surfaces[h]
+        i = np.rint((P[:, 0] - X[0, 0]) / dx).astype(int)
+        j = np.rint((P[:, 1] - Y[0, 0]) / dx).astype(int)
+        ok = (i >= 0) & (i < z.shape[1]) & (j >= 0) & (j < z.shape[0])
+        r = np.full(len(P), np.nan)
+        r[ok] = z[j[ok], i[ok]]
+        return r
+    return zfun
 
 
-def fault_throws(rows, horizons, surfaces, fault, feet, abuts=None):
-    """Median throw at stations along a fault, measured on the given horizon surfaces where the
-    horizon has data (feet): the vertical separation of each horizon 400 m either side of the
-    fault trace at that horizon's level."""
+OFFSET = 400.0        # m: horizon sampled this far either side of a fault's trace
+OFFSET_SPLAY = 150.0  # m: for a fault that abuts another (a splay), closer, to stay off the other fault
+
+
+def fault_throws(rows, horizons, zfun, fault, abuts=None):
+    """Median throw at stations along a fault: the vertical separation of each horizon a fixed
+    distance either side of the fault trace at that horizon's level, where the horizon has data
+    within FOOTPRINT. For a fault that abuts another the distance is OFFSET_SPLAY and stations
+    where the other fault lies within that distance plus 100 m are skipped."""
     fp = np.array([[float(r["X"]), float(r["Y"]), float(r["Z"])] for r in rows if r["stx_horizon"] == "" and r.get("feature_name") == fault])
     if len(fp) < 3:
         return float("nan")
+    from scipy.spatial import cKDTree
     c = fp.mean(axis=0)
     _, _, vt = np.linalg.svd(fp - c)
     n = vt[2] if vt[2][2] > 0 else -vt[2]
@@ -202,31 +231,36 @@ def fault_throws(rows, horizons, surfaces, fault, feet, abuts=None):
     sdir = np.array([-dipdir[1], dipdir[0]])
     tan_dip = np.hypot(n[0], n[1]) / max(1e-9, n[2])
     s_lo, s_hi = np.percentile((fp[:, :2] - c[:2]) @ sdir, [10, 90])
+    d = OFFSET_SPLAY if abuts else OFFSET
     other = np.array([[float(r["X"]), float(r["Y"]), float(r["Z"])] for r in rows if r["stx_horizon"] == "" and r.get("feature_name") == abuts]) if abuts else None
+    P = np.array([c[:2] + sdir * t for t in np.linspace(s_lo, s_hi, 25 if abuts else 15)])
     throws = []
     for h in horizons:
-        X, Y, z = surfaces[h]
-        x0, y0, dx = X[0, 0], Y[0, 0], X[0, 1] - X[0, 0]
+        picks = np.array([[float(r["X"]), float(r["Y"])] for r in rows if r["stx_horizon"] == h and r["val"]])
+        if len(picks) == 0:
+            continue
+        tree = cKDTree(picks)
 
-        foot = feet[h]
+        def at(Q):
+            z = zfun(h, Q)
+            dist, _ = tree.query(Q)
+            return np.where(dist <= FOOTPRINT, z, np.nan)
 
-        def at(x, y):
-            i, j = int(round((x - x0) / dx)), int(round((y - y0) / dx))
-            return z[j, i] if 0 <= i < z.shape[1] and 0 <= j < z.shape[0] and foot[j, i] else np.nan
-
-        for s in np.linspace(s_lo, s_hi, 15):
-            p = c[:2] + sdir * s
-            zl = np.nanmedian([at(*(p - dipdir * 400)), at(*(p + dipdir * 400))])
-            if not np.isfinite(zl):
-                continue
-            q = p + dipdir * (c[2] - zl) / max(tan_dip, 1e-9)  # the trace at the horizon's level
-            if other is not None and len(other):
-                lvl = other[np.abs(other[:, 2] - zl) < 150.0]  # the abutted fault's trace near that level
-                if len(lvl) and np.min(np.hypot(lvl[:, 0] - q[0], lvl[:, 1] - q[1])) < BRANCH:
-                    continue  # near the branch line the offset is shared with the fault it abuts
-            fw, hw = at(*(q - dipdir * 400)), at(*(q + dipdir * 400))
-            if np.isfinite(fw) and np.isfinite(hw):
-                throws.append(fw - hw)
+        with np.errstate(all="ignore"):
+            zl = np.nanmedian(np.vstack([at(P - dipdir * d), at(P + dipdir * d)]), axis=0)
+        Q = P + np.outer((c[2] - zl) / max(tan_dip, 1e-9), dipdir)  # the trace at the horizon's level
+        keep = np.isfinite(zl)
+        if other is not None and len(other):
+            for k in np.nonzero(keep)[0]:
+                lvl = other[np.abs(other[:, 2] - zl[k]) < 150.0]
+                if len(lvl) and np.min(np.hypot(lvl[:, 0] - Q[k, 0], lvl[:, 1] - Q[k, 1])) < d + 100.0:
+                    keep[k] = False  # near the branch line the offset is shared with the other fault
+        if not keep.any():
+            continue
+        Qk = Q[keep]
+        fw, hw = at(Qk - dipdir * d), at(Qk + dipdir * d)
+        t = fw - hw
+        throws.extend(t[np.isfinite(t)].tolist())
     return float(np.median(throws)) if throws else float("nan")
 
 
@@ -242,18 +276,20 @@ def diagnose(exe, exdir):  # pragma: no cover - needs LoopStructural
             setup = json.loads((root / "loopstructural/model_setup.json").read_text())
             rows = list(csv.DictReader(io.StringIO((root / "loopstructural/data.csv").read_text())))
             horizons = [h for h in setup["strati_values"]]
-            grids, feet = {}, {}
+            grids, feet, full = {}, {}, {}
             for h in horizons:
                 X, Y, z, dx = read_irap(root / "horizons" / f"{h}_faulted.irap")
+                full[h] = (X, Y, z, dx)
                 grids[h] = (X[::STRIDE, ::STRIDE], Y[::STRIDE, ::STRIDE], z[::STRIDE, ::STRIDE], dx * STRIDE)
                 px = [float(r["X"]) for r in rows if r["stx_horizon"] == h and r["val"]]
                 py = [float(r["Y"]) for r in rows if r["stx_horizon"] == h and r["val"]]
                 feet[h] = near_data(grids[h][0], grids[h][1], px, py, FOOTPRINT)
+            szf = grid_sampler(full, {h: full[h][2] for h in horizons})
             for v in VARIANTS:
-                if not setup.get("isochore_horizons") and v["iso"] != "exclude":
+                if (not setup.get("isochore_horizons") and v["iso"] != "exclude") or v["nel"] != 100000:
                     continue
                 try:
-                    other = loopstructural_surfaces(root, setup, rows, horizons, grids, v)
+                    other, ozf = loopstructural_surfaces(root, setup, rows, horizons, grids, v)
                 except Exception as e:  # noqa: BLE001
                     print("DIAG %s %s: failed: %s" % (ex, v, e))
                     continue
@@ -265,8 +301,8 @@ def diagnose(exe, exdir):  # pragma: no cover - needs LoopStructural
                     parts.append("%s %.1f/%.1f" % (h, stats(d[m])["mean"], stats(d[m])["p95"]))
                 th = []
                 for f in setup["faults_oldest_first"]:
-                    t_s = fault_throws(rows, horizons, {h: grids[h][:3] for h in horizons}, f["name"], feet, f.get("abuts"))
-                    t_o = fault_throws(rows, horizons, {h: (grids[h][0], grids[h][1], other[h]) for h in horizons}, f["name"], feet, f.get("abuts"))
+                    t_s = fault_throws(rows, horizons, szf, f["name"], f.get("abuts"))
+                    t_o = fault_throws(rows, horizons, ozf, f["name"], f.get("abuts"))
                     th.append("%s %.1f/%.1f" % (f["name"], t_s, t_o))
                 print("DIAG %s iso=%s nel=%d: away mean/p95 %s; throws stx/ls %s" % (ex, v["iso"], v["nel"], ", ".join(parts), ", ".join(th)))
     return 0
@@ -298,11 +334,13 @@ def main(argv):
             setup = json.loads((root / "loopstructural/model_setup.json").read_text())
             rows = list(csv.DictReader(io.StringIO((root / "loopstructural/data.csv").read_text())))
             horizons = [h for h in setup["strati_values"]]
-            grids = {}
+            grids, full = {}, {}
             for h in horizons:
                 X, Y, z, dx = read_irap(root / "horizons" / f"{h}_faulted.irap")
+                full[h] = (X, Y, z, dx)
                 grids[h] = (X[::STRIDE, ::STRIDE], Y[::STRIDE, ::STRIDE], z[::STRIDE, ::STRIDE], dx * STRIDE)
-            other = loopstructural_surfaces(root, setup, rows, horizons, grids) if have_ls else substitute_surfaces(rows, horizons, grids, root)
+            szf = grid_sampler(full, {h: full[h][2] for h in horizons})
+            other, ozf = loopstructural_surfaces(root, setup, rows, horizons, grids) if have_ls else substitute_surfaces(rows, horizons, grids, root)
             ok = True
             feet = {}
             for h in horizons:
@@ -320,8 +358,8 @@ def main(argv):
                 table.append([ex, h, sa["n"], sa["mean"], sa["p95"], sa["max"], sn["n"], sn["mean"], sn["p95"], sn["max"], "pass" if passed else "FAIL"])
             for f in setup["faults_oldest_first"]:
                 fn = f["name"]
-                t_stx = fault_throws(rows, horizons, {h: grids[h][:3] for h in horizons}, fn, feet, f.get("abuts"))
-                t_oth = fault_throws(rows, horizons, {h: (grids[h][0], grids[h][1], other[h]) for h in horizons}, fn, feet, f.get("abuts"))
+                t_stx = fault_throws(rows, horizons, szf, fn, f.get("abuts"))
+                t_oth = fault_throws(rows, horizons, ozf, fn, f.get("abuts"))
                 rel = abs(t_oth - t_stx) / max(abs(t_stx), 1e-9) if np.isfinite(t_stx) and np.isfinite(t_oth) else float("nan")
                 passed = bool(np.isfinite(rel) and rel <= TOL["throw_rel"])
                 ok &= passed

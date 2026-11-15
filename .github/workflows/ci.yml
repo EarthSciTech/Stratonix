@@ -56,8 +56,6 @@ jobs:
         run: cmake --preset linux-gcc-release && cmake --build build/linux-gcc-release --target stratonix
       - name: Install LoopStructural
         run: python3 -m pip install --upgrade pip && python3 -m pip install "LoopStructural>=1.5,<2" pandas scipy numpy
-      - name: LoopStructural set-ups compared (for the log)
-        run: python3 tests/tools/crosscheck_v3.py build/linux-gcc-release/apps/stratonix/stratonix examples crosscheck_report --require-loopstructural --diagnose || true
       - name: Cross-check
         run: python3 tests/tools/crosscheck_v3.py build/linux-gcc-release/apps/stratonix/stratonix examples crosscheck_report --require-loopstructural
       - uses: actions/upload-artifact@v4
