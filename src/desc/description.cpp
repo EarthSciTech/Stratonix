@@ -115,7 +115,8 @@ std::vector<const Param*> Description::all_params() const {
                   &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &tol_area, &tol_salt_volume, &tol_solid_thickness, &tol_restoration, &tol_balance, &scaling_min_ratio, &scaling_max_ratio,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
                   &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
-                  &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch, &implicit.points_per_patch, &implicit.overlap})
+                  &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch, &implicit.points_per_patch, &implicit.overlap,
+                  &implicit.discrete_spacing, &implicit.discrete_vertical_spacing, &implicit.discrete_regularisation, &implicit.discrete_orientation_weight, &implicit.discrete_max_iterations})
     add(*p);
   for (auto& w : wells) {
     add(w.head); add(w.datum_elevation); add(w.total_depth); add(w.stations); add(w.top_uncertainty);
@@ -742,6 +743,14 @@ struct Typer {
       if (const Node* u = im->get("data_influence")) d.implicit.data_influence = u->boolean || u->str == "true";
       if (const Node* ih = im->get("isochore_horizons"))
         for (auto& x : ih->seq) d.implicit.isochore_horizons.push_back(x.str);
+      d.implicit.horizon_values = S(im, "horizon_values", "fixed");
+      if (const Node* dz = im->get("discrete")) {
+        d.implicit.discrete_spacing = P(dz, "spacing", "implicit.discrete", Dimension::Length, false, 1);
+        d.implicit.discrete_vertical_spacing = P(dz, "vertical_spacing", "implicit.discrete", Dimension::Length, false, 1);
+        d.implicit.discrete_regularisation = P(dz, "regularisation", "implicit.discrete", Dimension::Dimensionless, false, 1);
+        d.implicit.discrete_orientation_weight = P(dz, "orientation_weight", "implicit.discrete", Dimension::Dimensionless, false, 1);
+        d.implicit.discrete_max_iterations = P(dz, "max_iterations", "implicit.discrete", Dimension::Ordinal, false, 1);
+      }
     }
     if (const Node* o = root.get("outputs")) {
       if (const Node* ss = o->get("sections"))
@@ -1558,8 +1567,21 @@ struct Typer {
     // STX-TN-11 (F29): solver and uncertainties
     if (d.implicit.present) {
       const auto& im = d.implicit;
-      if (im.solver_type != "auto" && im.solver_type != "dense" && im.solver_type != "partition_of_unity")
-        c.err("implicit.solver.type", "F29", "solver type must be auto, dense or partition_of_unity");
+      if (im.solver_type != "auto" && im.solver_type != "dense" && im.solver_type != "partition_of_unity" && im.solver_type != "discrete")
+        c.err("implicit.solver.type", "F29", "solver type must be auto, dense, partition_of_unity or discrete");
+      // STX-TN-14 (F35): free horizon values are solved on the discrete grid
+      if (im.horizon_values == "free" && im.solver_type != "auto" && im.solver_type != "discrete")
+        c.err("implicit.horizon_values", "F35", "free horizon values need the discrete solver (implicit.solver.type: discrete or auto)");
+      if (im.horizon_values == "free" && !im.isochore_horizons.empty())
+        c.err("implicit.isochore_horizons", "F35", "isochore horizons are not needed with free horizon values: remove them or use fixed values");
+      for (auto* p : {&im.discrete_spacing, &im.discrete_vertical_spacing})
+        if (p->present && !(p->si() > 0)) c.err("implicit.discrete", "F35", "a discrete grid spacing must be positive");
+      if (im.discrete_regularisation.present && !(im.discrete_regularisation.si() > 0))
+        c.err("implicit.discrete.regularisation", "F35", "the regularisation weight must be positive");
+      if (im.discrete_orientation_weight.present && !(im.discrete_orientation_weight.si() > 0))
+        c.err("implicit.discrete.orientation_weight", "F35", "the orientation weight must be positive");
+      if (im.discrete_max_iterations.present && !(im.discrete_max_iterations.si() >= 10))
+        c.err("implicit.discrete.max_iterations", "F35", "at least 10 iterations per level");
       if (im.points_per_patch.present && !(im.points_per_patch.si() >= 30))
         c.err("implicit.solver.points_per_patch", "F29", "a patch needs at least 30 interface data");
       if (im.overlap.present && !(im.overlap.si() > 1 && im.overlap.si() <= 3))

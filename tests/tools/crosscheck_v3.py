@@ -409,6 +409,45 @@ def main(argv):
         w.writerow(["example", "fault", "throw_stratonix_m", "throw_other_m", "relative_difference", "verdict"])
         for r in ftable:
             w.writerow([r[0], r[1], f"{r[2]:.2f}", f"{r[3]:.2f}", f"{r[4]:.3f}", r[5]])
+    # Stage 4A (STX-TN-14 section 10): the examples that declare isochore horizons, rebuilt by
+    # Stratonix with free horizon values instead, against the source model (open item I-040)
+    free_rows = []
+    for ex in EXAMPLES:
+        text = (exdir / f"{ex}.yaml").read_text()
+        if "isochore_horizons:" not in text or ex not in SOURCES:
+            continue
+        lines_ = [ln for ln in text.splitlines() if not ln.strip().startswith("isochore_horizons:")]
+        k = next(i for i, ln in enumerate(lines_) if ln.startswith("implicit:"))
+        lines_.insert(k + 1, "  horizon_values: free")
+        tmp = exdir / f".{ex}_free_values.yaml"
+        tmp.write_text("\n".join(lines_) + "\n")
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                out, src = pathlib.Path(td) / "free", pathlib.Path(td) / "src"
+                subprocess.run([exe, "export", str(tmp), "-o", str(out), "--formats", "irap_ascii"], check=True, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+                subprocess.run([exe, "export", str(exdir / f"{SOURCES[ex]}.yaml"), "-o", str(src), "--formats", "irap_ascii"], check=True,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                for f_ in sorted((out / "exports" / "horizons").glob("*_faulted.irap")):
+                    h = f_.name[:-len("_faulted.irap")]
+                    g_ = src / "exports" / "horizons" / f_.name
+                    if not g_.exists():
+                        continue
+                    _, _, zf, dx = read_irap(f_)
+                    _, _, zt, _ = read_irap(g_)
+                    if zf.shape != zt.shape:
+                        continue
+                    d = zf - zt
+                    dist = distance_to_gaps(zt, dx)
+                    sa = stats(d[np.isfinite(d) & (dist > NEAR)])
+                    free_rows.append([ex, h, sa["n"], sa["mean"], sa["p95"], sa["max"]])
+        finally:
+            tmp.unlink(missing_ok=True)
+    with open(report / "crosscheck_free_values.csv", "w", newline="\n") as fh:
+        w = csv.writer(fh, lineterminator="\n")
+        w.writerow(["example", "horizon", "away_n", "stratonix_free_vs_source_away_mean_m", "away_p95_m", "away_max_m"])
+        for r in free_rows:
+            w.writerow([r[0], r[1], r[2]] + [f"{v:.3f}" for v in r[3:6]])
     allok = all(ok for _, ok in verdicts)
     lines = [f"Stratonix stage 3A external cross-check (STX-TN-11 section 11)", f"Interpolator: {engine}",
              "Acceptance: " + ("yes (LoopStructural)" if have_ls else "NO - substitute interpolator, not the acceptance"),
@@ -422,6 +461,8 @@ def main(argv):
     # the tables too, so the log carries the numbers
     print("\n" + (report / "crosscheck_horizons.csv").read_text())
     print((report / "crosscheck_faults.csv").read_text())
+    print("Stratonix with free horizon values (stage 4A), against the source models:")
+    print((report / "crosscheck_free_values.csv").read_text())
     if have_ls:
         return 0 if allok else 1
     return 0

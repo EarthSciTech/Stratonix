@@ -23,9 +23,9 @@ struct DiscreteOptions {
   double spacing = 0;           ///< m, horizontal node spacing; 0 = 1/80 of the largest horizontal extent
   double vertical_spacing = 0;  ///< m; 0 = 1/40 of the vertical extent
   double regularisation = 0.2;  ///< weight of the second-difference rows
-  double orientation_weight = 1.0;  ///< weight of the gradient rows relative to interface rows
+  double orientation_weight = 10.0;  ///< weight of the gradient rows relative to interface rows
   int max_iterations = 5000;    ///< CGLS iterations per level
-  double tolerance = 1e-8;      ///< relative residual of the normal equations
+  double tolerance = 1e-6;      ///< relative residual of the (scaled) normal equations
   int levels = 0;               ///< coarse-to-fine levels; 0 = automatic
   int threads = 0;              ///< 0 = hardware concurrency
 };

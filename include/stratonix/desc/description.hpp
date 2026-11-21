@@ -220,6 +220,9 @@ struct ImplicitDesc {
   Param points_per_patch, overlap;
   bool data_influence = false;
   std::vector<std::string> isochore_horizons;  ///< built from the horizon above minus a thickness from their data
+  // Stage 4A (STX-TN-14 section 1): free horizon values on the discrete solver.
+  std::string horizon_values = "fixed";  ///< fixed | free
+  Param discrete_spacing, discrete_vertical_spacing, discrete_regularisation, discrete_orientation_weight, discrete_max_iterations;
 };
 
 /// Hybrid conditioning (stage 3A, STX-TN-11 section 4): parameters of the description fitted to data.

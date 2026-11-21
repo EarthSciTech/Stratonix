@@ -4,6 +4,7 @@
 // time, topology and watertightness, gravity and magnetics, and joint inversion.
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +18,8 @@
 #include "stratonix/engines/implicit.hpp"
 #include "stratonix/engines/posterior.hpp"
 #include "stratonix/io/io.hpp"
+#include "stratonix/model/model_suite.hpp"
+#include "stratonix/repr/repr.hpp"
 #include "stratonix/repr/geotime.hpp"
 #include "stratonix/repr/topology.hpp"
 
@@ -166,8 +169,8 @@ TEST_CASE("E2 free horizon values out of stratigraphic order are refused (F34); 
                        "domain:\n  origin: ") + qq("[0, 0] m") + "\n  size: " + qq("[10000, 10000] m") + "\n  depth_range: " +
            qq("[0, 3000] m") + "\n  grid_spacing: " + qq("100 m") +
            "\ninputs:\n  - {id: P, path: points.csv, role: surface points, sharing: shareable, source: test, evidence: user_instruction}\n"
-           "stratigraphy:\n  horizons: [{name: H1}, {name: H2}]\n  units: [{name: U1, top: H1, base: H2}]\n"
-           "structure:\n  builder: implicit-rbf\n"
+           "wells:\n  - {name: W1, role: check, head: " + qq("[5000, 5000] m") + "}\n"
+           "stratigraphy:\n  reference: {well: W1}\n  horizons: [{name: H1}, {name: H2}]\n  units: [{name: U1, top: H1, base: H2}]\n"
            "implicit:\n  data:\n    - {input: P, kind: points, format: csv_points}\n  horizon_values: free\n  solver: {type: partition_of_unity}\n";
   auto dir = tmpdir("f35");
   write_text(dir / "points.csv", "X,Y,Z,surface\n1000,1000,-1000,H1\n2000,1000,-1000,H1\n1000,2000,-1200,H2\n3000,3000,-1200,H2\n");
@@ -591,6 +594,96 @@ TEST_CASE("E13 joint inversion: a fold relief is recovered from its own gravity 
               r.parameters.size() < 2 ? kNaN : r.parameters[1].value);
   REQUIRE(r.converged);
   CHECK(std::fabs(r.parameters[0].value - 250) <= 0.05 * 250);
+}
+#endif
+
+// ---- E14: the stage 3A examples with free horizon values, without isochore declarations -----------
+namespace {
+std::pair<double, double> rebuild_errors(const Model& src, const Model& imp) {
+  GridSpec g = GridSpec::covering(src.info().domain, 100);
+  std::vector<double> away, near;
+  const Domain& dm = src.info().domain;
+  for (std::size_t h = 0; h < src.info().horizons.size(); ++h) {
+    auto a = repr::horizon_grid_faulted(src, static_cast<int>(h), g), b = repr::horizon_grid_faulted(imp, static_cast<int>(h), g);
+    std::vector<int> dist(g.size(), 1 << 20);  // chamfer distance (nodes) to a gap of the source
+    for (std::size_t k = 0; k < g.size(); ++k)
+      if (std::isnan(a.z.v[k])) dist[k] = 0;
+    for (int pass = 0; pass < 2; ++pass)
+      for (std::size_t jj = 0; jj < g.ny; ++jj)
+        for (std::size_t ii = 0; ii < g.nx; ++ii) {
+          std::size_t i = pass ? g.nx - 1 - ii : ii, j = pass ? g.ny - 1 - jj : jj;
+          int& d = dist[g.index(i, j)];
+          long ni = static_cast<long>(i) + (pass ? 1 : -1), nj = static_cast<long>(j) + (pass ? 1 : -1);
+          if (ni >= 0 && ni < static_cast<long>(g.nx)) d = std::min(d, dist[g.index(static_cast<std::size_t>(ni), j)] + 1);
+          if (nj >= 0 && nj < static_cast<long>(g.ny)) d = std::min(d, dist[g.index(i, static_cast<std::size_t>(nj))] + 1);
+        }
+    for (std::size_t k = 0; k < g.size(); ++k) {
+      double x = g.x(k % g.nx), y = g.y(k / g.nx);
+      if (x < dm.x0 + 250 || x > dm.x0 + dm.sx - 250 || y < dm.y0 + 250 || y > dm.y0 + dm.sy - 250) continue;
+      if (std::isnan(a.z.v[k]) || std::isnan(b.z.v[k])) continue;
+      (dist[k] > 5 ? away : near).push_back(std::fabs(a.z.v[k] - b.z.v[k]));
+    }
+  }
+  return {percentile95(away), near.empty() ? 0.0 : percentile95(near)};
+}
+
+std::string replace_all(std::string s, const std::string& a, const std::string& b) {
+  for (std::size_t p = s.find(a); p != std::string::npos; p = s.find(a, p + b.size())) s.replace(p, a.size(), b);
+  return s;
+}
+}  // namespace
+
+#if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__)
+TEST_CASE("E14 the stage 3A examples with isochore declarations rebuild with free horizon values within the 3A tolerances (release builds)") {
+  register_all_plugins();
+  struct Case { const char* implicit; const char* source; };
+  for (auto c : {Case{"implicit_unconformity_from_samples", "unconformity_onlap_pinchout"},
+                 Case{"implicit_faults_series_from_data", "data/implicit_faults_series/truth"}}) {
+    fs::path ex = fs::path(STX_SOURCE_DIR) / "examples";
+    std::ifstream f(ex / (std::string(c.implicit) + ".yaml"));
+    std::string y((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    REQUIRE(y.find("  isochore_horizons: [C3]\n") != std::string::npos);
+    y = replace_all(y, "  isochore_horizons: [C3]\n", "  horizon_values: free\n");
+    desc::Description di;
+    auto rep = desc::validate_description_text(y, ex, &di);
+    if (!rep.ok()) std::cerr << rep.text();
+    REQUIRE(rep.ok());
+    auto ds = desc::load_description(ex / (std::string(c.source) + ".yaml"));
+    BuildInputs ins, ini;
+    io::load_build_inputs(ds, ins);
+    io::load_build_inputs(di, ini);
+    BuildLog ls, li;
+    auto ms = build_model(ds, ins, ls);
+    auto mi = build_model(di, ini, li);
+    auto [away, near] = rebuild_errors(*ms, *mi);
+    {  // per horizon: everywhere, and where the source horizon is present
+      GridSpec gg = GridSpec::covering(ms->info().domain, 100);
+      for (std::size_t h = 0; h < ms->info().horizons.size(); ++h) {
+        auto a = repr::horizon_grid_faulted(*ms, static_cast<int>(h), gg), b = repr::horizon_grid_faulted(*mi, static_cast<int>(h), gg);
+        std::vector<double> e, ep;
+        std::size_t onlyone = 0;
+        auto* sq = static_cast<const StratigraphyQuery*>(ms->capability("stratigraphy"));
+        for (std::size_t k = 0; k < gg.size(); ++k) {
+          if (std::isnan(a.z.v[k]) != std::isnan(b.z.v[k])) ++onlyone;
+          if (!std::isnan(a.z.v[k]) && !std::isnan(b.z.v[k])) {
+            e.push_back(std::fabs(a.z.v[k] - b.z.v[k]));
+            if (!sq || !sq->horizon_absent(static_cast<int>(h), gg.x(k % gg.nx), gg.y(k / gg.nx))) ep.push_back(e.back());
+          }
+        }
+        std::printf("    horizon %zu: p95 %.2f m over %zu nodes, where present %.2f m over %zu, %zu nodes present in one model only\n", h,
+                    percentile95(e), e.size(), percentile95(ep), ep.size(), onlyone);
+      }
+      for (auto& kv : li.values)
+        if (kv.first.find("discrete_correction") != std::string::npos || kv.first.find("horizon_value") != std::string::npos)
+          std::printf("    %s: %s\n", kv.first.c_str(), kv.second.c_str());
+    }
+    std::string solver;
+    for (auto& kv : li.values)
+      if (kv.first == "implicit.solver") solver = kv.second;
+    std::printf("  %s with free values: p95 away from faults %.3f m, near faults %.3f m\n    %s\n", c.implicit, away, near, solver.c_str());
+    CHECK(away <= 10.0);
+    CHECK(near <= 30.0);
+  }
 }
 #endif
 

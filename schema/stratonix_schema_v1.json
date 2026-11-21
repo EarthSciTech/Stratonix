@@ -1263,7 +1263,8 @@
               "enum": [
                 "auto",
                 "dense",
-                "partition_of_unity"
+                "partition_of_unity",
+                "discrete"
               ]
             },
             "points_per_patch": {
@@ -1281,6 +1282,33 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "horizon_values": {
+          "enum": [
+            "fixed",
+            "free"
+          ]
+        },
+        "discrete": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "spacing": {
+              "$ref": "#/$defs/param"
+            },
+            "vertical_spacing": {
+              "$ref": "#/$defs/param"
+            },
+            "regularisation": {
+              "$ref": "#/$defs/param"
+            },
+            "max_iterations": {
+              "$ref": "#/$defs/param"
+            },
+            "orientation_weight": {
+              "$ref": "#/$defs/param"
+            }
           }
         }
       }

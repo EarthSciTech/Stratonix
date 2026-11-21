@@ -17,6 +17,7 @@
 #include "stratonix/core/roots.hpp"
 #include "stratonix/core/util.hpp"
 #include "stratonix/engines/conditioning.hpp"
+#include "stratonix/engines/fields.hpp"
 #include "stratonix/engines/wells.hpp"
 
 namespace stratonix {
@@ -400,7 +401,8 @@ struct Datum {
 struct SeriesField {
   std::unique_ptr<RbfField> dense;
   std::unique_ptr<PuField> pu;
-  double value(const Vec3& x) const { return dense ? dense->value(x) : pu->value(x); }
+  std::unique_ptr<DiscreteField> disc;  ///< stage 4A (STX-TN-14 section 1)
+  double value(const Vec3& x) const { return dense ? dense->value(x) : (pu ? pu->value(x) : disc->value(x)); }
 };
 
 /// Surfaces of the field (s = value_h) on a grid in the restored frame, by scanning each column
@@ -653,7 +655,9 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
     if (std::isnan(vals[h]) && cnt[h]) vals[h] = sum[h] / static_cast<double>(cnt[h]);
     if (std::isnan(vals[h])) throw Error(ErrorCode::Build, "implicit: horizon " + d.horizons[h].name + " has no data point and no reference-well top");
   }
+  const bool free_values = d.implicit.horizon_values == "free";  // stage 4A: fitted on the discrete grid
   for (auto g : groups) {
+    if (free_values) break;
     g.erase(std::remove_if(g.begin(), g.end(), [&](int h) { return iso[static_cast<std::size_t>(h)]; }), g.end());
     for (std::size_t k = 1; k < g.size(); ++k) {
       auto h0 = static_cast<std::size_t>(g[k - 1]), h1 = static_cast<std::size_t>(g[k]);
@@ -882,9 +886,58 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
       if (vs.size() < 4)
         throw Error(ErrorCode::Build, "implicit: series " + group_names[gi] + " has " + std::to_string(vs.size()) +
                                           " interface data; at least four are needed for its field");
-      const bool use_pu = so.type == "partition_of_unity" || (so.type == "auto" && vs.size() > so.dense_limit);
+      const bool use_disc = free_values || so.type == "discrete";
+      const bool use_pu = !use_disc && (so.type == "partition_of_unity" || (so.type == "auto" && vs.size() > so.dense_limit));
       SeriesField sf;
-      if (use_pu) {
+      if (use_disc) {
+        // stage 4A (STX-TN-14 section 1): the series' horizons indexed locally; the anchor is the
+        // shallowest horizon with data; free values are fitted, fixed values are known rows
+        std::vector<int> loc(nh, -1), hs;
+        for (int h : groups[gi])
+          if (!iso[static_cast<std::size_t>(h)]) { loc[static_cast<std::size_t>(h)] = static_cast<int>(hs.size()); hs.push_back(h); }
+        std::vector<HorizonDatum> hd;
+        std::vector<std::size_t> nper(hs.size(), 0);
+        for (auto& dt : data) {
+          if (dt.oriented || group_of[static_cast<std::size_t>(dt.horizon)] != static_cast<int>(gi)) continue;
+          int lk = loc[static_cast<std::size_t>(dt.horizon)];
+          if (lk < 0) continue;
+          hd.push_back({dt.restored, lk, dt.sigma});
+          ++nper[static_cast<std::size_t>(lk)];
+        }
+        int anchor = -1;
+        for (std::size_t k = 0; k < hs.size() && anchor < 0; ++k)
+          if (nper[k]) anchor = static_cast<int>(k);
+        if (anchor < 0) throw Error(ErrorCode::Build, "implicit: series " + group_names[gi] + " has no interface data for its discrete field");
+        std::vector<double> fixed(hs.size(), kNaN);
+        if (!free_values)
+          for (std::size_t k = 0; k < hs.size(); ++k) fixed[k] = vals[static_cast<std::size_t>(hs[k])];
+        DiscreteOptions dopt;
+        if (d.implicit.discrete_spacing.present) dopt.spacing = d.implicit.discrete_spacing.si();
+        if (d.implicit.discrete_vertical_spacing.present) dopt.vertical_spacing = d.implicit.discrete_vertical_spacing.si();
+        if (d.implicit.discrete_regularisation.present) dopt.regularisation = d.implicit.discrete_regularisation.si();
+        if (d.implicit.discrete_max_iterations.present) dopt.max_iterations = static_cast<int>(d.implicit.discrete_max_iterations.si());
+        if (d.implicit.discrete_orientation_weight.present) dopt.orientation_weight = d.implicit.discrete_orientation_weight.si();
+        const double vext = dom.z_top - dom.z_base;
+        BBox box;
+        box.add({dom.x0, dom.y0, dom.z_base - 0.05 * vext});
+        box.add({dom.x0 + dom.sx, dom.y0 + dom.sy, dom.z_top + 0.05 * vext});
+        sf.disc = std::make_unique<DiscreteField>(hd, gs, anchor, vals[static_cast<std::size_t>(hs[static_cast<std::size_t>(anchor)])], box, dopt, fixed);
+        if (free_values) {
+          auto& fv = sf.disc->horizon_values();
+          std::vector<std::string> names;
+          for (std::size_t k = 0; k < hs.size(); ++k) {
+            names.push_back(d.horizons[static_cast<std::size_t>(hs[k])].name);
+            if (!std::isfinite(fv[k]))
+              throw Error(ErrorCode::Build, "implicit: free horizon values: " + names.back() + " has no interface data in series " + group_names[gi]);
+            vals[static_cast<std::size_t>(hs[k])] = fv[k];
+          }
+          auto problem = horizon_order_problem(fv, names);
+          if (!problem.empty()) throw Error(ErrorCode::Build, "implicit (rule F34): " + problem + " (check the data labels)");
+        }
+        solver_txt[gi] = group_names[gi] + ": " + sf.disc->summary() + ", " + std::to_string(hd.size()) + " interface data" +
+                         (free_values ? ", free horizon values" : "");
+        unknowns = std::max(unknowns, sf.disc->unknowns());
+      } else if (use_pu) {
         sf.pu = std::make_unique<PuField>(vs, gs, nugget, centre, scale, stretch, dom.x0, dom.x0 + dom.sx, dom.y0, dom.y0 + dom.sy, so);
         solver_txt[gi] = group_names[gi] + ": partition of unity, " + std::to_string(sf.pu->patches()) + " patches, largest system " +
                          std::to_string(sf.pu->largest_patch()) + " unknowns, " + std::to_string(vs.size()) + " interface data";
@@ -901,6 +954,33 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
       std::size_t cl = 0;
       auto surfs = extract_surfaces(sf, gv, g, dom.z_top, dom.z_base, cl);
       clamped += cl;
+      if (sf.disc) {
+        // stage 4A (STX-TN-14 section 1): the discrete field is a least-squares fit; its surfaces are
+        // corrected by a thin-plate spline of their residuals at the horizon's own data, so the data
+        // are honoured as by the stage 3A interpolants, and the series order is kept
+        for (std::size_t k = 0; k < fh.size(); ++k) {
+          std::vector<std::array<double, 3>> res;
+          double ss = 0, mx = 0;
+          for (auto& dt : data)
+            if (!dt.oriented && dt.horizon == fh[k]) {
+              double r = dt.restored.z - surfs[k].sample(dt.restored.x, dt.restored.y);
+              if (!std::isfinite(r)) continue;
+              res.push_back({dt.restored.x, dt.restored.y, r});
+              ss += r * r;
+              mx = std::max(mx, std::fabs(r));
+            }
+          if (res.size() < 3) continue;
+          Tps2D tps(res, 2 * sp);
+          for (std::size_t j = 0; j < g.ny; ++j)
+            for (std::size_t i = 0; i < g.nx; ++i) surfs[k].at(i, j) += tps(g.x(i), g.y(j));
+          log.value("implicit.discrete_correction." + d.horizons[static_cast<std::size_t>(fh[k])].name,
+                    "residuals of the discrete field at " + std::to_string(res.size()) + " data: rms " +
+                        fmt_fixed(std::sqrt(ss / static_cast<double>(res.size())), 2) + " m, max " + fmt_fixed(mx, 2) +
+                        " m; corrected by a thin-plate spline");
+        }
+        for (std::size_t k = 1; k < fh.size(); ++k)
+          for (std::size_t q = 0; q < surfs[k].v.size(); ++q) surfs[k].v[q] = std::min(surfs[k].v[q], surfs[k - 1].v[q]);
+      }
       std::map<int, Grid2D> made;
       for (std::size_t k = 0; k < fh.size(); ++k) made.emplace(fh[k], std::move(surfs[k]));
       // isochore horizons: reference surface minus the interpolated thickness, never above it
@@ -978,6 +1058,10 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
         if (dt.oriented) gs.push_back({dt.restored, dt.normal_restored});
         else { vs.push_back({dt.restored, vals[static_cast<std::size_t>(dt.horizon)], dt.sigma}); idx.push_back(i); }
       }
+      if (fields[gi].disc) {  // a least-squares fit: leave-one-out errors are not computed (STX-TN-14 section 1)
+        log.note("implicit: data influence (leave-one-out errors) is not computed for the discrete field of series " + group_names[gi]);
+        continue;
+      }
       auto e = fields[gi].pu ? fields[gi].pu->leave_one_out() : rippa_loo(vs, gs, nugget, centre, scale, stretch);
       for (std::size_t k = 0; k < idx.size() && k < e.size(); ++k) loo[idx[k]] = e[k];
     }
@@ -1025,6 +1109,9 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
   std::string st;
   for (auto& t : solver_txt) st += (st.empty() ? "" : "; ") + t;
   log.value("implicit.solver", st + "; " + std::to_string(passes) + " pass(es)");
+  if (free_values)
+    for (std::size_t h = 0; h < nh; ++h)
+      if (!iso[h]) log.value("implicit.horizon_value." + d.horizons[h].name, fmt_fixed(vals[h], 3) + " (fitted, free horizon values)");
   if (passes == iters && iters > 1 && moved >= converged)
     log.note("implicit: data restoration not converged after " + std::to_string(iters) + " passes (last shift " + fmt_fixed(moved, 3) + " m)");
   log.value("implicit.surface_spacing_m", fmt_shortest(sp));
