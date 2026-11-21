@@ -3,6 +3,14 @@
 All notable changes to Stratonix. Versions follow semantic versioning; the description schema
 has its own version (`stratonix_schema`).
 
+## [Unreleased]
+
+### Changed
+- Roadmap 3.1 (`docs/roadmap.md`): a new v4, geological engine and real data (stages 4A to 4D), comes
+  before the applications, which move to v5, and the platform, which moves to v6.
+- CI: after a release is published by the release job, the citation and container workflows are
+  started explicitly, since a release made with the workflow token raises no release event.
+
 ## [2026.3] - 2026-11-15 - Version 3: data, grids and uncertainty
 
 Version 3 adds:

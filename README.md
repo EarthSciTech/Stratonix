@@ -68,7 +68,7 @@ labelled DESIGN in every exported file.
   known limitations. `examples/` holds 21 worked descriptions.
 - `docs/developer_guide.md`: architecture, model interface and suite, build, adding plugins.
 - `docs/api_reference.md` (generated from the headers; `doxygen docs/Doxyfile` for HTML).
-- `docs/roadmap.md`: v3 to v5, and what v1 and v2 taught. `docs/performance_and_threading.md`, `docs/package_config.md`.
+- `docs/roadmap.md`: v4 to v6, and what v1, v2 and v3 taught. `docs/performance_and_threading.md`, `docs/package_config.md`.
 - C API: `capi/include/stratonix_c.h`, example `capi/examples/stratonix_example.c`.
 
 ## Building

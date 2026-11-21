@@ -1,13 +1,15 @@
 ---
-title: Stratonix roadmap v3 to v5
+title: Stratonix roadmap v4 to v6
 doc_id: STX-RM
-version: 3.0
-date: 2026-11-15
+version: 3.1
+date: 2026-11-21
 ---
 
-# Stratonix roadmap v3 to v5
+# Stratonix roadmap v4 to v6
 
-Updated at release 2026.3 from what building v1, v2 and v3 taught. Effort is not estimated here; each
+Updated at release 2026.3 from what building v1, v2 and v3 taught, and re-planned on 2026-11-21: a new v4
+(geological engine and real data) comes before the applications, which move to v5, and the platform, which
+moves to v6. Effort is not estimated here; each
 stage starts with its own specification and its tests, written before the code.
 
 # 1. Releases so far
@@ -36,7 +38,7 @@ stage starts with its own specification and its tests, written before the code.
 | Timing rules unified growth strata, phases, inversion and backstripping: the part of an event after a horizon's deposition. | Ensembles (3C) can vary ages and phases like any parameter. |
 | Area balance in the restored frame flags growth strata, which are thicker in the hanging wall by deposition. | Balance tests apply to pre-kinematic units; syn-kinematic units need a partial restoration (open item). |
 | Several checks were first too strict at designed terminations (C1 near pinch-outs, C4 on trishear faults). | A check states the geometry it applies to and skips the rest explicitly, in the report. |
-| Missing inputs must never be defaulted (fault rock, stress). | Applications (4A) report every quantity with the inputs it depends on and "missing" when one is absent. |
+| Missing inputs must never be defaulted (fault rock, stress). | Applications (5A) report every quantity with the inputs it depends on and "missing" when one is absent. |
 | Fault attributes are recomputed for each output (checks, figures, summary, exports). Builds of fault-rich models take tens of seconds. | Cache per-fault attribute surfaces in the export context before stage 3C multiplies builds. |
 
 # 4. What v3 taught
@@ -44,29 +46,61 @@ stage starts with its own specification and its tests, written before the code.
 | Lesson | Consequence for later stages |
 |---|---|
 | One field per series was not enough: a unit that thins out within a series distorts a single field by up to 200 m, in Stratonix and in LoopStructural alike. Declared isochore horizons fixed it. | A potential-field formulation with free horizon values (open item) would remove the declaration. External cross-checks state how each code is set up for such units. |
-| Fault rock read at a grid face had to be read on the fault, not at the face centre; corner-point stair steps put faces up to a cell away. | Applications (4A) that read fault properties at grid faces use the projection onto the fault. |
-| Description documents edited by path (values, scenario options) and validated again made ensembles, C API parameter setting and hybrid conditioning one mechanism. | v4 parameters, and v5 bindings, set values through the same paths. |
+| Fault rock read at a grid face had to be read on the fault, not at the face centre; corner-point stair steps put faces up to a cell away. | Applications (5A) that read fault properties at grid faces use the projection onto the fault. |
+| Description documents edited by path (values, scenario options) and validated again made ensembles, C API parameter setting and hybrid conditioning one mechanism. | v4 parameters, v5 applications and v6 bindings set values through the same paths. |
 | Byte-identical ensembles needed a generator and inverse CDFs written out in integer and IEEE arithmetic, and results written in member order, never in completion order. | Every parallel output keeps a fixed order; tests compare files from 1 and 4 threads. |
-| Optional heavy dependencies (FESAPI, LoopStructural) are best built and exercised in their own CI jobs, with their interface printed in the log. | v4 and v5 dependencies (SEG-Y readers, MODFLOW writers, viewers) follow the same pattern. |
-| Ensembles multiply build cost: about 1 s per member of a three-fault model. | Cache per-fault attribute surfaces and checks' lattices before v4 ensembles of application models. |
+| Optional heavy dependencies (FESAPI, LoopStructural) are best built and exercised in their own CI jobs, with their interface printed in the log. | v4 to v6 dependencies (well-log and SEG-Y readers, PROJ, MODFLOW and simulator decks, viewers) follow the same pattern. |
+| Ensembles multiply build cost: about 1 s per member of a three-fault model. | Cache per-fault attribute surfaces and checks' lattices in stage 4D, before v5 ensembles of application models. |
 
-# 5. v4: applications (stage 4A, Prompts 42 to 47)
+# 5. v4: geological engine and real data (stages 4A to 4D, Prompts 42 to 61)
 
-Shared tools (conditions at depth, traps, migration, volumes), then one application family per
-prompt:
+- **4A, core engine:** one potential field per series with free horizon values, at field scale (closes the
+  isochore declaration, open item I-037); folds and faults learnt from data (fold frames, fault displacement
+  fields, fault networks); Bayesian conditioning with model gradients and a sampler (closes I-039);
+  geological-time coordinates and Wheeler diagrams; topology and watertightness checks; gravity and
+  magnetics with joint inversion.
+- **4B, geological completeness:** salt overhangs and sheets (I-028); sills, dykes and sand injectites;
+  polygonal faults, flower structures and thrust duplexes; breached relays (I-023), trishear on curved
+  faults (I-025) and growth on every hanging wall (I-027, I-030); onlap, downlap and toplap, clinoform sets,
+  channel and lobe geobodies; flexural-slip and 3D volumetric restoration with strain (I-026, I-020);
+  compaction across moving faults (I-029); flexural backstripping and eroded section; fractures, mechanical
+  stratigraphy and lateral stress (I-033), fault rock for implicit models (I-032); temperature and
+  overpressure through time.
+- **4C, data real projects start from:** well logs, surveys, tops and ages; seismic picks and SEG-Y;
+  time-to-depth conversion calibrated to wells; real coordinates through PROJ; geological maps, outcrop
+  data and elevation models; pick and velocity uncertainty carried into depth; RESQML schema validation
+  (I-034) and RESQML in the release builds.
+- **4D, properties, uncertainty and scale:** variograms, sequential Gaussian and indicator simulation and
+  object-based facies in geological time; grids that follow fault traces (I-035); total-effect sensitivity
+  (I-036); caching, grids larger than memory and parallel builds; Python bindings on PyPI.
+
+Prompt R then releases v4.
+
+# 6. v5: applications (stage 5A, Prompts 62 to 68)
+
+Shared tools (conditions at depth from the 4B histories, traps, migration, volumes), then one application
+family per prompt:
 
 - petroleum, conventional and unconventional;
 - CO2 and hydrogen storage;
 - geothermal and groundwater.
 
-The stage ends with synthetic seismic and the model report. It builds on traps and closure (v1),
-fault seal and stress (2F), burial and porosity (2D) and grids (3B). Prompt R then releases v4.
+Then a simulation link (decks for OPM Flow, run as an external program, and history matching by ensemble
+smoother), synthetic seismic, the model report and a geological validation report for any model. Prompt R
+then releases v5.
 
-# 6. v5: platform and reach (stage 5A, Prompts 48 to 50)
+# 7. v6: platform and reach (stage 6A, Prompts 69 to 72)
 
 - **Browser viewer.**
-- **Desktop application.**
-- **Python bindings and the Petrel plug-in.**
+- **Desktop application that edits models:** every edit is written back as a labelled change to the
+  description.
+- **Full Python API and the Petrel plug-in,** including validating Petrel models from inside Petrel.
+- **Model provenance:** comparing model versions, a decision record, and checks run on every model change.
 
-These build on the thin command line, the stable C API with opaque handles and the display-list
-figures. Prompt R then releases v5.
+These build on the thin command line, the stable C API with opaque handles and the display-list figures.
+Prompt R then releases v6.
+
+# 8. After v6
+
+A benchmark against GemPy and LoopStructural on their public example models; a real-data case study if the
+data owners agree; and a software paper.

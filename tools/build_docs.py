@@ -7,7 +7,7 @@ Writes: user guide, developer guide, roadmap and API reference (regenerated from
 import subprocess, sys, pathlib
 
 DOCS = [("user_guide.md", "STX-UG_user_guide"), ("developer_guide.md", "STX-DG_developer_guide"),
-        ("roadmap.md", "STX-RM_roadmap_v3-v5"), ("api_reference.md", "STX-API_reference")]
+        ("roadmap.md", "STX-RM_roadmap_v4-v6"), ("api_reference.md", "STX-API_reference")]
 
 def main(root, out, tag):
     root, out = pathlib.Path(root), pathlib.Path(out)
