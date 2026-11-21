@@ -9,6 +9,10 @@ add_library(stratonix_engines STATIC
   src/engines/parametric.cpp
   src/engines/implicit.cpp
   src/engines/conditioning.cpp
+  src/engines/fields.cpp
+  src/engines/foldframe.cpp
+  src/engines/posterior.cpp
+  src/engines/geophysics.cpp
   src/engines/wells.cpp
   src/engines/register.cpp)
 target_link_libraries(stratonix_engines PUBLIC stratonix_model stratonix_desc stratonix_registry)
@@ -20,7 +24,9 @@ add_library(stratonix_repr STATIC
   src/repr/faultrock.cpp
   src/repr/faults_wells.cpp
   src/repr/closure.cpp
-  src/repr/grid.cpp)
+  src/repr/grid.cpp
+  src/repr/geotime.cpp
+  src/repr/topology.cpp)
 target_link_libraries(stratonix_repr PUBLIC stratonix_model stratonix_registry)
 stx_layer(stratonix_repr 4)
 

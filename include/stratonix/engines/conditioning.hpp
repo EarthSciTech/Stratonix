@@ -61,6 +61,42 @@ struct StickProfile {
 };
 StickProfile profile_from_sticks(const std::vector<Polyline>& sticks);
 
+/// Displacement field over a fault surface (stage 4A, STX-TN-14 section 3.1):
+/// T(s, d) = T_max f_s(2 (s - s0) / Ls) f_d(2 (d - d0) / Ld), fitted to the cut-off separations of
+/// every horizon. s along strike from the plane's centroid, d down dip (m) from the centroid.
+struct DisplacementObservation { double s = 0, d = 0, throw_m = 0; int horizon = -1; };
+struct DisplacementOptions {
+  std::string shape_strike = "elliptical", shape_dip = "elliptical";  ///< stage 2A shapes
+  double taper = 0.3;
+};
+struct DisplacementField {
+  bool ok = false;
+  std::string reason;
+  double max_throw = kNaN, s0 = kNaN, d0 = kNaN, length = kNaN, height = kNaN, rms = kNaN;
+  std::size_t observations = 0;
+  double at(double s, double d) const;  ///< T(s, d), 0 outside the tips
+};
+/// Observations from the stage 3A stations of every horizon (station s, the cut-off's down-dip
+/// position from its depth and the plane's dip).
+std::vector<DisplacementObservation> displacement_observations(const FittedPlane& plane, const std::vector<ThrowEstimate>& est,
+                                                              const std::vector<HorizonPoint>& pts);
+DisplacementField fit_displacement_field(const std::vector<DisplacementObservation>& obs, const DisplacementOptions& o);
+
+/// Fault relations inferred from data and rules (STX-TN-14 section 3.2).
+struct FaultDataSet {
+  std::string name;
+  FittedPlane plane;
+  std::vector<Vec3> points;  ///< stick points and cut-off points
+  double tip_extent = kNaN;  ///< m along strike either side of the centroid, from the fitted field
+};
+struct FaultRelation {
+  std::string a, b;          ///< a <kind> b
+  std::string kind;          ///< abuts | splay | crosses
+  std::string rule;          ///< the rule and the data it rests on, in words
+  double distance = kNaN;    ///< m: closest approach of a's data to b's surface
+};
+std::vector<FaultRelation> infer_fault_relations(const std::vector<FaultDataSet>& faults, double relation_distance);
+
 /// Hybrid conditioning (STX-TN-11 section 4).
 struct FittedParameter {
   std::string path, unit;
@@ -78,6 +114,8 @@ struct ConditioningResult {
   std::vector<DataMisfit> residuals;  ///< at the fitted values; sigma and normalised filled
   std::vector<double> leverage;
   desc::Description fitted;           ///< the description with the fitted values (calibrated)
+  long builds = 0;                    ///< model evaluations used (stage 4A: Broyden updates)
+  int jacobians = 0;                  ///< full finite-difference Jacobians computed
 };
 /// Fit the parameters named in d.conditioning to the data. Never throws for a failed fit: the
 /// result says why (converged = false).

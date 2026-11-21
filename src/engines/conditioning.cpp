@@ -501,6 +501,13 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
   return R;
 }
 
+// ---- stage 4A (STX-TN-14 section 3): interfaces only until Prompt 44 ------------------------------
+double DisplacementField::at(double, double) const { throw Error(ErrorCode::NotImplemented, "stage 4A: faults from data (Prompt 44)"); }
+std::vector<DisplacementObservation> displacement_observations(const FittedPlane&, const std::vector<ThrowEstimate>&,
+                                                              const std::vector<HorizonPoint>&) { throw Error(ErrorCode::NotImplemented, "stage 4A: faults from data (Prompt 44)"); }
+DisplacementField fit_displacement_field(const std::vector<DisplacementObservation>&, const DisplacementOptions&) { throw Error(ErrorCode::NotImplemented, "stage 4A: faults from data (Prompt 44)"); }
+std::vector<FaultRelation> infer_fault_relations(const std::vector<FaultDataSet>&, double) { throw Error(ErrorCode::NotImplemented, "stage 4A: faults from data (Prompt 44)"); }
+
 ConditionedModel::ConditionedModel(std::shared_ptr<ParametricModel> inner, ConditioningResult r)
     : inner_(std::move(inner)), r_(std::move(r)), info_(inner_->info()) {}
 const ModelInfo& ConditionedModel::info() const { return info_; }
