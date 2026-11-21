@@ -134,4 +134,4 @@ Amirsaman Rezaeyan
 
 How to cite:
 
-Amirsaman Rezaeyan, 2026, Stratonix v.2026.2. https://github.com/EarthSciTech/Stratonix
+Amirsaman Rezaeyan, 2026, Stratonix v.2026.3. https://github.com/EarthSciTech/Stratonix
