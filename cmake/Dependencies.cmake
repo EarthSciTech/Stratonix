@@ -125,5 +125,17 @@ if(STRATONIX_WITH_FESAPI)
 endif()
 
 if(STRATONIX_WITH_PROJ)
-  find_package(PROJ CONFIG REQUIRED)
+  # PROJ's CMake package (vcpkg, PROJ >= 7 built with CMake); distributions that ship only the
+  # header and library (Ubuntu 22.04 libproj-dev) are found directly
+  find_package(PROJ CONFIG QUIET)
+  if(NOT TARGET PROJ::proj)
+    find_path(STX_PROJ_INC proj.h)
+    find_library(STX_PROJ_LIB NAMES proj)
+    if(NOT STX_PROJ_INC OR NOT STX_PROJ_LIB)
+      message(FATAL_ERROR "STRATONIX_WITH_PROJ: PROJ not found (no CMake package, no proj.h and libproj)")
+    endif()
+    add_library(PROJ::proj UNKNOWN IMPORTED)
+    set_target_properties(PROJ::proj PROPERTIES IMPORTED_LOCATION ${STX_PROJ_LIB} INTERFACE_INCLUDE_DIRECTORIES ${STX_PROJ_INC})
+  endif()
+  message(STATUS "PROJ: found")
 endif()
