@@ -43,6 +43,12 @@ has its own version (`stratonix_schema`).
     properties `P32` and `P32_DFN` (realised network intensity per cell), and temperature and
     overpressure are drawn over the burial curves at each well.
 
+- Fault-following grids and total-effect sensitivity (stage 4D, Prompt 60): `grid.pillars:
+  fault_following` puts one pillar column per fault on its trace in every row (I-035; stair-step
+  fall-backs reported by C25); Saltelli designs with first-order and total-effect indices and
+  bootstrap intervals (`uncertainty.sensitivity`, F50, I-036), shown together in the sensitivity
+  figure; the Ishigami function's indices fall within their intervals (test S10); examples
+  `fault_following_grid` and `sensitivity_one_fault`.
 - Geostatistical properties (stage 4D, Prompt 59): variograms (experimental, models, weighted
   least-squares fit), normal scores with declustering, sequential Gaussian and indicator
   simulation (multiple-grid path, servosystem) and object-based channels and lobes, in

@@ -841,6 +841,25 @@ warning for one realisation) and the share of cells outside the geological-time 
 --bandwidth 100] -o variogram.csv` computes an experimental variogram as GSLIB `gamv` does.
 Example: `geostat_properties`.
 
+## 2.25 Fault-following grids and total-effect sensitivity (2026.4)
+
+**Grids that follow fault traces.** `grid.pillars: fault_following` moves one column of pillars
+per fault onto the fault's trace in every row it crosses (the column nearest the trace on
+average), tilted along the fault's dip, and spreads the shift linearly over the rest of the row,
+so an oblique fault is a chain of cell faces instead of a staircase. Where two faults would share
+a pillar, or come closer than 0.3 cell, the line keeps the stair step; C25 lists how many lines
+did. Every stage 3B grid check applies, and transmissibility multipliers are computed on the new
+faces. The default (`fault_conforming`) is unchanged. Example: `fault_following_grid`.
+
+**Total-effect sensitivity.** `uncertainty.sensitivity: {method: saltelli, base_samples,
+bootstrap, confidence}` (rule F50) runs a Saltelli design instead of random members: N (k + 2)
+runs for k parameters and scenarios (the `members` value is replaced and reported). For every key
+number, `sensitivity_total.csv` gives the first-order index (Saltelli et al. 2010) and the total
+effect (Jansen 1999) of each parameter with bootstrap intervals at the stated confidence, the
+number of base samples and runs; the sensitivity figure shows both together. A key number is not
+computed when a run fails (the design needs every run), and says so. Parameters must be
+independent (no `correlations`). Example: `sensitivity_one_fault`.
+
 # 3. Running
 
 | Command | What it does |

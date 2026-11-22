@@ -201,6 +201,11 @@ Figure histogram_figure(const FigureContext& c, const std::string& key, const st
 Figure sobol_figure(const FigureContext& c, const std::string& key, const std::vector<std::pair<std::string, double>>& indices, double threshold,
                     const EnsembleLabel& l);
 /// Probability map (fraction of the ok members) on a regular lattice.
+/// Stage 4D (STX-TN-17 section 3.2): first-order and total-effect indices together, with their
+/// bootstrap intervals, for one key number.
+struct EffectBar { std::string parameter; double s1 = 0, s1_lo = 0, s1_hi = 0, st = 0, st_lo = 0, st_hi = 0; };
+Figure total_effect_figure(const FigureContext& c, const std::string& key, const std::vector<EffectBar>& bars, double level, std::size_t base_samples,
+                           std::size_t runs, const EnsembleLabel& l);
 Figure probability_map_figure(const FigureContext& c, const std::string& what, const Grid2D& p, const EnsembleLabel& l);
 /// Stage 4B: a scalar map over the domain (grey where undefined), with a colour bar from vmin to vmax.
 Figure scalar_map_figure(const FigureContext& c, const std::string& title, const std::string& subtitle, const std::string& bar_label, const Grid2D& g,

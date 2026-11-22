@@ -1,0 +1,72 @@
+# Stage 4D example (STX-TN-17 section 3): first-order and total-effect indices of the one_fault
+# model by a Saltelli design. The key number "Max throw F1" is the fault's maximum throw, so its
+# variance comes from faults.F1.throw.max alone: the indices of the fault's dip and of the
+# regional dip are 0 within their intervals (analytical expectation, checked in CI).
+# The base description follows (one_fault.yaml).
+# Worked example 1: a gently dipping layer stack cut by one normal fault that reaches the top
+# horizon. DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: sensitivity_one_fault, version: "1.0.0", status: DESIGN,
+        title: "Total-effect sensitivity of one normal fault"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[6000, 4000] m | user_instruction | worked example"
+  depth_range: "[0, 2000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 2000] m | user_instruction | worked example"
+    tops:
+      Top_A: "900 m | user_instruction | worked example"
+      Top_B: "1050 m | user_instruction | worked example"
+      Top_C: "1250 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: Top_A, intended_offset: true}, {name: Top_B}, {name: Top_C, intended_offset: true}]   # the fault cuts top and base on purpose
+  units:
+    - {name: Unit_A, top: Top_A, base: Top_B}
+    - {name: Unit_B, top: Top_B, base: Top_C}
+structure:
+  regional: {type: planar, dip: "2 deg | user_instruction | worked example", dip_azimuth: "90 deg | user_instruction | worked example"}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry:
+      type: planar
+      reference_point: "[3000, 2000] m | user_instruction | worked example"
+      reference_depth: "1050 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: horizon, horizon: Top_A, offset: "-50 m | user_instruction | worked example: tip 50 m above Top_A"}
+      lower_tip: {rule: horizon, horizon: Top_C, offset: "100 m | user_instruction | worked example: tip 100 m below Top_C"}
+      length: "3000 m | user_instruction | worked example"
+      tip_line_shape: elliptical
+    throw:
+      max: "30 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.3 fraction | user_instruction | worked example"}
+      profile_strike: {type: elliptical}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_1
+      polyline: "[[500, 2000], [5500, 2000]] m | user_instruction | worked example: dip section"
+  vertical_exaggeration: "4 ratio | user_instruction | worked example"
+  exports: [petrel]
+uncertainty:
+  members: "2 ordinal | user_instruction | worked example: set by the design (64 x 5 runs)"
+  seed: "20261123 ordinal | user_instruction | worked example: recorded in the manifest"
+  parameters:
+    - {path: faults.F1.throw.max, distribution: uniform, min: "20 m | assumed | worked example", max: "40 m | assumed | worked example"}
+    - {path: faults.F1.geometry.dip, distribution: uniform, min: "50 deg | assumed | worked example", max: "70 deg | assumed | worked example"}
+    - {path: structure.regional.dip, distribution: uniform, min: "1 deg | assumed | worked example", max: "3 deg | assumed | worked example"}
+  sensitivity:
+    method: saltelli
+    base_samples: "64 ordinal | user_instruction | worked example: 320 runs"
+    bootstrap: "500 ordinal | user_instruction | worked example"
+    confidence: "0.95 fraction | user_instruction | worked example"
+  key_numbers: ["Max throw F1"]

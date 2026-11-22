@@ -393,6 +393,8 @@ struct UncertaintyDesc {
   bool present = false;
   std::vector<PickUncertaintyDesc> picks;
   std::vector<VelocityUncertaintyDesc> velocity;
+  /// stage 4D (STX-TN-17 section 3): total-effect sensitivity by a Saltelli design
+  struct Sensitivity { bool present = false; std::string method; Param base_samples, bootstrap, confidence; } sensitivity;
   Param members, seed;
   std::vector<UncertainParamDesc> parameters;
   std::vector<CorrelationDesc> correlations;

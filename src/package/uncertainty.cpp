@@ -191,6 +191,14 @@ EnsembleSpec ensemble_spec(const desc::Description& d) {
     return -1;
   };
   for (auto& c : u.correlations) s.correlations.push_back({{index_of(c.a), index_of(c.b)}, c.rho.si()});
+  if (u.sensitivity.present) {
+    s.saltelli = true;
+    s.base_samples = static_cast<std::size_t>(std::llround(u.sensitivity.base_samples.si()));
+    s.bootstrap = static_cast<std::size_t>(std::llround(u.sensitivity.bootstrap.si()));
+    s.confidence = u.sensitivity.confidence.si();
+    // the design sets the number of runs: N (k + 2) for k parameters and scenarios
+    s.members = static_cast<int>(s.base_samples * (s.parameters.size() + s.scenarios.size() + 2));
+  }
   for (std::size_t k = 0; k < u.picks.size(); ++k) s.interpretation.push_back({"picks", u.picks[k].horizon, k});
   for (std::size_t k = 0; k < u.velocity.size(); ++k) s.interpretation.push_back({"velocity", u.velocity[k].layer, k});
   for (auto& sc : u.scenarios) {
@@ -259,6 +267,30 @@ std::vector<MemberSample> sample_members(const EnsembleSpec& s) {
   for (auto& p : s.parameters) base.values.push_back(p.base);
   base.options.assign(s.scenarios.size(), 0);
   out.push_back(base);
+  if (s.saltelli) {
+    // stage 4D: rows of the Saltelli design; parameters by their quantiles, scenarios by the
+    // cumulative weights of their options
+    const std::size_t kp = s.parameters.size(), ks = s.scenarios.size();
+    const auto d = saltelli_design(kp + ks, s.base_samples, s.seed);
+    for (std::size_t r = 0; r < d.rows.size(); ++r) {
+      MemberSample m;
+      m.index = static_cast<int>(r + 1);
+      m.seed = member_seed(s.seed, static_cast<std::uint64_t>(m.index));
+      for (std::size_t i = 0; i < kp; ++i) m.values.push_back(s.parameters[i].dist.quantile(d.rows[r][i]));
+      for (std::size_t q = 0; q < ks; ++q) {
+        const double v = d.rows[r][kp + q];
+        double cum = 0;
+        int pick = static_cast<int>(s.scenarios[q].options.size()) - 1;
+        for (std::size_t o = 0; o < s.scenarios[q].options.size(); ++o) {
+          cum += s.scenarios[q].options[o].weight;
+          if (v <= cum) { pick = static_cast<int>(o); break; }
+        }
+        m.options.push_back(pick);
+      }
+      out.push_back(std::move(m));
+    }
+    return out;
+  }
   for (int k = 1; k <= s.members; ++k) {
     MemberSample m;
     m.index = k;
@@ -934,6 +966,29 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
       double si = first_order_index(x, y);
       res.sobol.push_back({"scenario " + s.scenarios[q].name, k, si, std::isfinite(si) && si >= 2.0 / std::sqrt(static_cast<double>(std::max<std::size_t>(1, x.size())))});
     }
+  // stage 4D (STX-TN-17 section 3): first-order and total-effect indices of the Saltelli design
+  if (s.saltelli) {
+    const auto des = saltelli_design(s.parameters.size() + s.scenarios.size(), s.base_samples, s.seed);
+    std::vector<std::string> names;
+    for (auto& p : s.parameters) names.push_back(p.path);
+    for (auto& q : s.scenarios) names.push_back("scenario " + q.name);
+    for (auto& k : keys) {
+      std::vector<double> y;
+      std::size_t failed_runs = 0;
+      for (std::size_t r = 1; r < res.members.size(); ++r) {
+        const double v = res.members[r].status == "ok" ? value_of(res.members[r], k) : kNaN;
+        failed_runs += !std::isfinite(v);
+        y.push_back(v);
+      }
+      if (failed_runs) {
+        res.total_effect_notes.push_back(k + ": not computed - " + std::to_string(failed_runs) + " of " + std::to_string(y.size()) +
+                                         " runs failed or gave no value (a Saltelli design needs every run)");
+        continue;
+      }
+      auto rows = total_effect_indices(des, y, names, k, s.bootstrap, s.confidence, s.seed ^ 0xB5297A4D3F84D5B5ull);
+      res.total_effects.insert(res.total_effects.end(), rows.begin(), rows.end());
+    }
+  }
   // probability maps
   std::size_t nok = res.ok();
   for (std::size_t q = 0; q < s.maps.size(); ++q) {
@@ -990,6 +1045,15 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
       t += r.parameter + "," + csv_text(r.key) + "," + fmt_fixed(r.index, 6) + "," + (r.distinguishable ? "yes" : "no") + "," + std::to_string(nok) + "," + seed + "\n";
     write_file(e / "sensitivity_sobol.csv", t);
   }
+  if (s.saltelli) {
+    std::string t = "parameter,key,first_order,first_order_low,first_order_high,total_effect,total_effect_low,total_effect_high,confidence,base_samples,runs,bootstrap,seed\n";
+    for (auto& r : res.total_effects)
+      t += csv_text(r.parameter) + "," + csv_text(r.key) + "," + fmt_fixed(r.s1, 5) + "," + fmt_fixed(r.s1_lo, 5) + "," + fmt_fixed(r.s1_hi, 5) + "," +
+           fmt_fixed(r.st, 5) + "," + fmt_fixed(r.st_lo, 5) + "," + fmt_fixed(r.st_hi, 5) + "," + fmt_shortest(r.level) + "," + std::to_string(r.base) + "," +
+           std::to_string(r.runs) + "," + std::to_string(r.bootstrap) + "," + seed + "\n";
+    for (auto& n : res.total_effect_notes) t += "# " + n + "\n";
+    write_file(e / "sensitivity_total.csv", t);
+  }
   if (!res.variance_split.empty()) {
     std::string t = "horizon,members,nodes,conversion_variance_m2,structural_variance_m2,covariance_m2,total_variance_m2,conversion_sd_m,structural_sd_m,total_sd_m,seed\n";
     for (auto& v : res.variance_split)
@@ -1020,6 +1084,10 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
                        (bayes ? std::string("posterior_*.csv      posterior of the Bayesian conditioning: retained samples, priors, diagnostics (members = these samples; base = least-squares fit)\n") : std::string()) +
                        "statistics.csv       per key number over the ok members: n, mean, sd, P10, P50, P90, min, max (with N and seed)\n" +
                        "sensitivity_sobol.csv first-order variance-based indices from the ensemble (given data, sqrt(N) bins)\n" +
+                       (s.saltelli ? "sensitivity_total.csv first-order (Saltelli 2010) and total-effect (Jansen 1999) indices of a Saltelli design of " +
+                                         std::to_string(s.base_samples) + " base samples, with " + fmt_shortest(100 * s.confidence) + " % bootstrap intervals (" +
+                                         std::to_string(s.bootstrap) + " resamples)\n"
+                                   : std::string()) +
                        (res.variance_split.empty() ? std::string()
                                                    : std::string("depth_variance_split.csv per velocity-model horizon: depth variance from the conversion (picks and velocity) and from the structure, reported separately (STX-TN-16 section 3)\n")) +
                        (s.interpretation.empty() ? std::string()
@@ -1049,7 +1117,14 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
       std::vector<std::pair<std::string, double>> idx;
       for (auto& r : res.sobol)
         if (r.key == ks.key) idx.push_back({r.parameter, r.index});
-      if (!idx.empty())
+      if (s.saltelli) {
+        std::vector<fig::EffectBar> eb;
+        for (auto& r : res.total_effects)
+          if (r.key == ks.key) eb.push_back({r.parameter, r.s1, r.s1_lo, r.s1_hi, r.st, r.st_lo, r.st_hi});
+        if (!eb.empty())
+          put(fig::total_effect_figure(c, ks.key, eb, s.confidence, s.base_samples, res.members.size() - 1, lab), "sensitivity_total", nm,
+              "first-order and total effects on " + ks.key, "First-order and total-effect indices of " + ks.key + " with their intervals.");
+      } else if (!idx.empty())
         put(fig::sobol_figure(c, ks.key, idx, 2.0 / std::sqrt(static_cast<double>(std::max<std::size_t>(1, nok))), lab), "sensitivity", nm,
             "first-order indices of " + ks.key, "First-order variance-based indices of " + ks.key + ".");
       std::vector<fig::TornadoBar> bars;
@@ -1084,13 +1159,103 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
 
 }  // namespace stratonix::unc
 
-// ---- total-effect sensitivity (stage 4D, STX-TN-17 section 3): built in Prompt 60 --------------
+// ---- total-effect sensitivity (stage 4D, STX-TN-17 section 3) -----------------------------------
 namespace stratonix::unc {
-SensitivityDesign saltelli_design(std::size_t, std::size_t, std::uint64_t) {
-  throw Error(ErrorCode::NotImplemented, "saltelli_design: not implemented (stage 4D, Prompt 60)");
+SensitivityDesign saltelli_design(std::size_t k, std::size_t base, std::uint64_t seed) {
+  if (k == 0 || base < 2) throw Error(ErrorCode::InvalidArgument, "saltelli_design: at least one parameter and two base samples");
+  SensitivityDesign d;
+  d.k = k;
+  d.base = base;
+  Rng r(seed);
+  std::vector<std::vector<double>> A(base, std::vector<double>(k)), B(base, std::vector<double>(k));
+  for (std::size_t n = 0; n < base; ++n)
+    for (std::size_t i = 0; i < k; ++i) {
+      A[n][i] = r.uniform();
+      B[n][i] = r.uniform();
+    }
+  d.rows = A;
+  d.rows.insert(d.rows.end(), B.begin(), B.end());
+  for (std::size_t i = 0; i < k; ++i)
+    for (std::size_t n = 0; n < base; ++n) {
+      auto row = A[n];
+      row[i] = B[n][i];
+      d.rows.push_back(std::move(row));
+    }
+  return d;
 }
-std::vector<TotalEffectRow> total_effect_indices(const SensitivityDesign&, const std::vector<double>&, const std::vector<std::string>&, const std::string&,
-                                                 std::size_t, double, std::uint64_t) {
-  throw Error(ErrorCode::NotImplemented, "total_effect_indices: not implemented (stage 4D, Prompt 60)");
+
+namespace {
+/// S1 (Saltelli et al. 2010, eq. b) and ST (Jansen 1999) of parameter i over the base rows `idx`.
+void indices(const SensitivityDesign& d, const std::vector<double>& y, std::size_t i, const std::vector<std::size_t>& idx, double& s1, double& st) {
+  const std::size_t N = d.base;
+  double m = 0;
+  for (std::size_t n : idx) m += y[n] + y[N + n];
+  m /= 2.0 * static_cast<double>(idx.size());
+  double v = 0;
+  for (std::size_t n : idx) v += (y[n] - m) * (y[n] - m) + (y[N + n] - m) * (y[N + n] - m);
+  v /= 2.0 * static_cast<double>(idx.size()) - 1.0;
+  // outputs centred on their mean: the same expectation, a much smaller variance of the
+  // first-order estimator when the mean is large against the spread
+  double a = 0, b = 0;
+  for (std::size_t n : idx) {
+    const double fa = y[n] - m, fb = y[N + n] - m, fab = y[(2 + i) * N + n] - m;
+    a += fb * (fab - fa);
+    b += (fa - fab) * (fa - fab);
+  }
+  a /= static_cast<double>(idx.size());
+  b /= 2.0 * static_cast<double>(idx.size());
+  s1 = v > 0 ? a / v : 0.0;
+  st = v > 0 ? b / v : 0.0;
+}
+double percentile(std::vector<double> v, double p) {
+  std::sort(v.begin(), v.end());
+  const double h = (static_cast<double>(v.size()) - 1) * p;
+  const std::size_t lo = static_cast<std::size_t>(std::floor(h));
+  const std::size_t hi = std::min(lo + 1, v.size() - 1);
+  return v[lo] + (h - static_cast<double>(lo)) * (v[hi] - v[lo]);
+}
+}  // namespace
+
+std::vector<TotalEffectRow> total_effect_indices(const SensitivityDesign& d, const std::vector<double>& y, const std::vector<std::string>& names,
+                                                 const std::string& key, std::size_t bootstrap, double level, std::uint64_t seed) {
+  if (y.size() != d.rows.size()) throw Error(ErrorCode::InvalidArgument, "total_effect_indices: one value per design row");
+  if (names.size() != d.k) throw Error(ErrorCode::InvalidArgument, "total_effect_indices: one name per parameter");
+  std::vector<std::size_t> all(d.base);
+  for (std::size_t n = 0; n < d.base; ++n) all[n] = n;
+  std::vector<TotalEffectRow> out;
+  Rng r(seed);
+  // the same bootstrap resamples for every parameter
+  std::vector<std::vector<std::size_t>> res(bootstrap, std::vector<std::size_t>(d.base));
+  for (auto& b : res)
+    for (auto& n : b) n = static_cast<std::size_t>(r.uniform() * static_cast<double>(d.base)) % d.base;
+  for (std::size_t i = 0; i < d.k; ++i) {
+    TotalEffectRow row;
+    row.parameter = names[i];
+    row.key = key;
+    row.runs = d.rows.size();
+    row.base = d.base;
+    row.bootstrap = bootstrap;
+    row.level = level;
+    indices(d, y, i, all, row.s1, row.st);
+    std::vector<double> b1, bt;
+    for (auto& b : res) {
+      double s1 = 0, st = 0;
+      indices(d, y, i, b, s1, st);
+      b1.push_back(s1);
+      bt.push_back(st);
+    }
+    if (!b1.empty()) {
+      const double lo = 0.5 * (1 - level), hi = 1 - lo;
+      row.s1_lo = percentile(b1, lo);
+      row.s1_hi = percentile(b1, hi);
+      row.st_lo = percentile(bt, lo);
+      row.st_hi = percentile(bt, hi);
+    } else {
+      row.s1_lo = row.s1_hi = row.s1;
+      row.st_lo = row.st_hi = row.st;
+    }
+    out.push_back(row);
+  }
+  return out;
 }
 }  // namespace stratonix::unc

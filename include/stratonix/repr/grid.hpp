@@ -53,6 +53,7 @@ struct CornerPointGrid {
   std::vector<std::int32_t> layer_unit;    ///< per layer k: model unit index
   std::vector<std::int32_t> pillar_fault;  ///< per pillar: fault index it lies on, or -1
   std::vector<std::string> inactive_reason; ///< per cell: why it is inactive (empty if active)
+  std::size_t trace_fallbacks = 0;          ///< stage 4D: lines where a fault-following grid kept the stair step
 
   std::size_t ncell() const { return static_cast<std::size_t>(nx) * ny * nz; }
   std::size_t cell(int i, int j, int k) const {

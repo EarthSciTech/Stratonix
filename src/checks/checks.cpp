@@ -1671,8 +1671,11 @@ class C23 final : public Check {
     r3.tolerance = gp->fault_tolerance;
     r3.tolerance_source = "Stratonix default: 1 % of the areal cell size (plus the chord of a curved fault)";
     r3.passed = gp->defects.fault_face_off == 0;
-    r3.detail = r3.passed ? "largest distance of a fault-face corner from its fault " + fmt_fixed(gp->defects.worst_fault_distance, 4) + " m"
-                          : std::to_string(gp->defects.fault_face_off) + " faces off; first: " + gp->defects.first_fault_off;
+    r3.detail = (r3.passed ? "largest distance of a fault-face corner from its fault " + fmt_fixed(gp->defects.worst_fault_distance, 4) + " m"
+                           : std::to_string(gp->defects.fault_face_off) + " faces off; first: " + gp->defects.first_fault_off) +
+                (gp->options.follow_fault_traces ? "; pillars follow the fault traces, " + std::to_string(gp->defects.fallback_faces) +
+                                                       " line" + (gp->defects.fallback_faces == 1 ? "" : "s") + " left as stair steps (two faults on one pillar, or too close)"
+                                                 : std::string());
     out.push_back(r3);
     return out;
   }
@@ -1852,6 +1855,7 @@ repr::GridOptions grid_options(const desc::Description& d, const Model& m) {
   if (g.margin.present) o.margin = g.margin.si();
   if (g.min_thickness.present) o.min_thickness = g.min_thickness.si();
   o.snap_to_faults = g.pillars != "vertical";
+  o.follow_fault_traces = g.pillars == "fault_following";
   if (g.zones.empty()) {
     const auto& mu = m.info().units;
     for (std::size_t k = 0; k < mu.size(); ++k)

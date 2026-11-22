@@ -79,6 +79,10 @@ struct EnsembleSpec {
   std::vector<ProbabilityMapSpec> maps;
   std::vector<std::string> key_numbers;  ///< extra key numbers (besides the summary table's)
   bool posterior = false;  ///< stage 4A: members drawn from the posterior of conditioning.method: bayesian
+  /// stage 4D (STX-TN-17 section 3): a Saltelli design instead of random members
+  bool saltelli = false;
+  std::size_t base_samples = 0, bootstrap = 0;
+  double confidence = 0.95;
   /// stage 4C (STX-TN-16 section 3): pick and velocity uncertainty; each member gets its own
   /// realisation (a seeded correlated field) of every source
   struct InterpretationSource { std::string kind, target; std::size_t index = 0; };  ///< kind "picks" or "velocity"
@@ -129,33 +133,6 @@ struct MemberResult {
   std::vector<std::pair<std::string, double>> keys;  ///< key numbers
   std::string topology;   ///< stage 4A: "same" as the base case, or the contacts that differ ("" when not built)
 };
-struct KeyStats { std::string key, unit; Stats stats; std::size_t failed = 0; };
-struct OatRow { std::string parameter, key; double low = 0, high = 0, base = 0; };
-struct SobolRow { std::string parameter, key; double index = 0; bool distinguishable = false; };
-struct ProbabilityMap { ProbabilityMapSpec spec; double x0 = 0, y0 = 0, dx = 0, dy = 0; std::size_t nx = 0, ny = 0; std::vector<double> p; };
-
-struct EnsembleResult {
-  EnsembleSpec spec;
-  std::vector<MemberResult> members;  ///< index 0 is the base case
-  std::vector<KeyStats> stats;
-  std::vector<OatRow> oat;
-  std::vector<SobolRow> sobol;
-  std::vector<ProbabilityMap> maps;
-  std::size_t topology_differs = 0;  ///< stage 4A: members whose contact graph differs from the base case's
-  /// stage 4C: per velocity-model horizon, the depth variance from the depth conversion (picks and
-  /// velocity) and from the structural parameters, averaged over a lattice of the base surface
-  struct VarianceSplit { std::string horizon; std::size_t nodes = 0, members = 0; double conversion = 0, structural = 0, covariance = 0, total = 0; };
-  std::vector<VarianceSplit> variance_split;
-  std::size_t ok() const;
-};
-
-struct EnsembleOptions {
-  int members = 0;          ///< 0: from the description
-  std::int64_t seed = -1;   ///< < 0: from the description
-  unsigned threads = 0;     ///< 0: default
-  bool figures = true;
-  bool base_build = false;  ///< also write the base case's full build into out_dir/base
-};
 // ---- total-effect sensitivity (stage 4D, STX-TN-17 section 3) ---------------------------------
 /// Saltelli (2010) design on k parameters: N base rows of matrices A and B (uniforms in (0, 1)),
 /// run order A, B, then A_B^(i) for i = 1..k: N (k + 2) rows of k uniforms.
@@ -174,6 +151,36 @@ struct TotalEffectRow {
 };
 std::vector<TotalEffectRow> total_effect_indices(const SensitivityDesign& d, const std::vector<double>& y, const std::vector<std::string>& names,
                                                  const std::string& key, std::size_t bootstrap, double level, std::uint64_t seed);
+struct KeyStats { std::string key, unit; Stats stats; std::size_t failed = 0; };
+struct OatRow { std::string parameter, key; double low = 0, high = 0, base = 0; };
+struct SobolRow { std::string parameter, key; double index = 0; bool distinguishable = false; };
+struct ProbabilityMap { ProbabilityMapSpec spec; double x0 = 0, y0 = 0, dx = 0, dy = 0; std::size_t nx = 0, ny = 0; std::vector<double> p; };
+
+struct EnsembleResult {
+  EnsembleSpec spec;
+  std::vector<MemberResult> members;  ///< index 0 is the base case
+  std::vector<KeyStats> stats;
+  std::vector<OatRow> oat;
+  std::vector<SobolRow> sobol;
+  std::vector<ProbabilityMap> maps;
+  std::size_t topology_differs = 0;  ///< stage 4A: members whose contact graph differs from the base case's
+  /// stage 4C: per velocity-model horizon, the depth variance from the depth conversion (picks and
+  /// velocity) and from the structural parameters, averaged over a lattice of the base surface
+  struct VarianceSplit { std::string horizon; std::size_t nodes = 0, members = 0; double conversion = 0, structural = 0, covariance = 0, total = 0; };
+  std::vector<VarianceSplit> variance_split;
+  /// stage 4D: first-order and total-effect indices of a Saltelli design (uncertainty.sensitivity)
+  std::vector<TotalEffectRow> total_effects;
+  std::vector<std::string> total_effect_notes;  ///< keys whose indices were not computed, with the reason
+  std::size_t ok() const;
+};
+
+struct EnsembleOptions {
+  int members = 0;          ///< 0: from the description
+  std::int64_t seed = -1;   ///< < 0: from the description
+  unsigned threads = 0;     ///< 0: default
+  bool figures = true;
+  bool base_build = false;  ///< also write the base case's full build into out_dir/base
+};
 /// Run the ensemble of a description; writes into out_dir when it is not empty.
 EnsembleResult run_ensemble(const std::filesystem::path& description, const std::filesystem::path& out_dir, const EnsembleOptions& o);
 

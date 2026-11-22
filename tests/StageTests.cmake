@@ -107,13 +107,19 @@ if(Python3_Interpreter_FOUND AND NOT STRATONIX_SANITIZE AND (CMAKE_BUILD_TYPE ST
   add_test(NAME ensemble_variance_split_time_depth
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_variance_split.py ${STX_TEST_TMP}/cli_ensemble_time_depth)
   set_tests_properties(ensemble_variance_split_time_depth PROPERTIES DEPENDS cli_ensemble_time_depth)
+  # Stage 4D: first-order and total-effect indices of a Saltelli design (320 builds)
+  add_test(NAME cli_ensemble_sensitivity COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_ensemble_sensitivity
+           "-DARGS=ensemble;${PROJECT_SOURCE_DIR}/examples/sensitivity_one_fault.yaml;--no-figures" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
+  set_tests_properties(cli_ensemble_sensitivity PROPERTIES TIMEOUT 1800)
+  add_test(NAME ensemble_total_effects COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_total_effects.py ${STX_TEST_TMP}/cli_ensemble_sensitivity)
+  set_tests_properties(ensemble_total_effects PROPERTIES DEPENDS cli_ensemble_sensitivity)
 endif()
 # The example builds with every check passing (exit code 0).
 add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
          -DDESC=${PROJECT_SOURCE_DIR}/examples/synthetic_fold_two_faults.yaml -DOUT=${STX_TEST_TMP}/cli_build_example
          -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
 # The worked examples of the user guide build with every check passing.
-foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data hybrid_fault_fold_conditioning fault_system_uncertainty salt_sheet_drape saucer_sill_forced_fold injectite_complex negative_flower thrust_duplex breached_relay growth_fault_decay polygonal_faults tangential_clinoforms channels_and_lobes restoration_and_backstripping basin_heat_pressure_fractures wells_logs_ages time_depth_conversion geostat_properties)
+foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data hybrid_fault_fold_conditioning fault_system_uncertainty salt_sheet_drape saucer_sill_forced_fold injectite_complex negative_flower thrust_duplex breached_relay growth_fault_decay polygonal_faults tangential_clinoforms channels_and_lobes restoration_and_backstripping basin_heat_pressure_fractures wells_logs_ages time_depth_conversion geostat_properties fault_following_grid)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)

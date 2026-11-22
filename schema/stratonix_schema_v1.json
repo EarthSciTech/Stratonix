@@ -2255,9 +2255,10 @@
           "type": "string",
           "enum": [
             "fault_conforming",
-            "vertical"
+            "vertical",
+            "fault_following"
           ],
-          "description": "Stage 4B: vertical pillars for dense intersecting fault networks (faults stair-stepped across cells)."
+          "description": "Stage 4B: vertical pillars for dense intersecting fault networks (faults stair-stepped across cells). Stage 4D: fault_following moves one pillar column per fault onto its trace in every row (no stair steps; fall-backs reported by C25)."
         },
         "upscaled_logs": {
           "type": "array",
@@ -2753,6 +2754,33 @@
                   }
                 }
               }
+            }
+          }
+        },
+        "sensitivity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "base_samples",
+            "bootstrap",
+            "confidence"
+          ],
+          "description": "stage 4D: first-order and total-effect indices from a Saltelli design (STX-TN-17 section 3)",
+          "properties": {
+            "method": {
+              "enum": [
+                "saltelli"
+              ]
+            },
+            "base_samples": {
+              "$ref": "#/$defs/param"
+            },
+            "bootstrap": {
+              "$ref": "#/$defs/param"
+            },
+            "confidence": {
+              "$ref": "#/$defs/param"
             }
           }
         }

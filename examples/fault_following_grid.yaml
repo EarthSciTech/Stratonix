@@ -1,0 +1,149 @@
+# Stage 4D example (STX-TN-17 section 2, I-035): the fault-system example on a grid whose pillars
+# follow the fault traces (grid.pillars: fault_following) instead of stepping across oblique
+# faults. C25 lists the lines left as stair steps. The base description follows.
+#
+# Worked example 7: a fault system (stage 2A). A master normal fault F1 with drag, a linked splay F2
+# in its hanging wall, and a soft-linked relay ramp where F1 hands its throw over to F3.
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: fault_following_grid, version: "1.2.0", status: DESIGN,
+        title: "Fault system: master fault, linked splay and relay ramp"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[12000, 12000] m | user_instruction | worked example"
+  depth_range: "[0, 2500] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1500, 3000] m | user_instruction | worked example: control well in the footwall"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+      H4: "1600 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]   # the faults cut top and base on purpose
+  units:
+    - {name: Overburden, top: model_top, base: H1, clay_fraction: "0.60 fraction | assumed | worked example: shale above H1 (for the gouge window)"}
+    - {name: Unit_1, top: H1, base: H2, clay_fraction: "0.15 fraction | assumed | worked example: clean sand"}
+    - {name: Unit_2, top: H2, base: H3, clay_fraction: "0.70 fraction | assumed | worked example: shale"}
+    - {name: Unit_3, top: H3, base: H4, clay_fraction: "0.20 fraction | assumed | worked example: sand"}
+    - {name: Underburden, top: H4, base: model_base, clay_fraction: "0.40 fraction | assumed | worked example: below H4 (for the gouge window)"}
+  # Stage 3B: porosity of the grid cells follows these compaction laws (present-day geometry as given).
+  compaction:
+    geometry: present
+    surface_depth: "0 m | user_instruction | worked example"
+    units:
+      - {unit: Unit_1, law: exponential, surface_porosity: "0.49 fraction | literature_derived | Sclater and Christie (1980), Table 2, sandstone", decay: "0.27 1/km | literature_derived | Sclater and Christie (1980), Table 2, sandstone"}
+      - {unit: Unit_2, law: exponential, surface_porosity: "0.63 fraction | literature_derived | Sclater and Christie (1980), Table 2, shale", decay: "0.51 1/km | literature_derived | Sclater and Christie (1980), Table 2, shale"}
+      - {unit: Unit_3, law: exponential, surface_porosity: "0.49 fraction | literature_derived | Sclater and Christie (1980), Table 2, sandstone", decay: "0.27 1/km | literature_derived | Sclater and Christie (1980), Table 2, sandstone"}
+structure:
+  regional: {type: flat}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example: master fault"
+    geometry:
+      type: planar
+      reference_point: "[5000, 3000] m | user_instruction | worked example"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: dips east"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "8000 m | user_instruction | worked example: from 1 km south of the model to y = 7000 m"
+    throw:
+      max: "120 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.1 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+    relay: {fault: F3}
+  - name: F3
+    age: "2 ordinal | user_instruction | worked example: takes over F1's throw to the north"
+    geometry:
+      type: planar
+      reference_point: "[6500, 9000] m | user_instruction | worked example: stepped 1.5 km east"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "8000 m | user_instruction | worked example: from y = 5000 m to 1 km north of the model"
+    throw:
+      max: "120 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.1 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+  - name: F2
+    age: "3 ordinal | user_instruction | worked example: splay, youngest"
+    geometry:
+      type: planar
+      reference_point: "[5250, 2500] m | user_instruction | worked example"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "15 deg | user_instruction | worked example"
+      dip: "75 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "5000 m | user_instruction | worked example"
+    throw:
+      max: "50 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: sine}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+    abuts: {fault: F1, side: hanging_wall, transfer: true}
+frame: {fixed: {well: W1}}
+# Stage 2F: faults as rock and the stress field (STX-TN-10).
+fault_rock:
+  shale_threshold: "0.5 fraction | assumed | worked example: clay fraction of a smearing shale"
+  thickness_displacement_ratio: "0.01 ratio | literature_derived | Hull (1988): fault-zone thickness about 1/100 of displacement"
+  seal_calibration: {type: sgr_power, a: "27 ratio | literature_derived | Sperrevik et al. (2002) form, illustrative coefficients",
+                     c: "0.5 ratio | literature_derived | Sperrevik et al. (2002) form, illustrative coefficients"}
+# Stage 3B: a corner-point grid conforming to the faults and horizons (STX-TN-12).
+grid:
+  pillars: fault_following
+  spacing: "[200, 200] m | user_instruction | worked example: areal cell size"
+  margin: "50 m | user_instruction | worked example: pillars above the top and below the base horizon"
+  zones:
+    - {unit: Unit_1, layers: "4 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Unit_2, layers: "3 ordinal | user_instruction | worked example", layering: follow_top,
+       layer_thickness: "70 m | user_instruction | worked example: shale in 70 m layers from its top"}
+    - {unit: Unit_3, layers: "4 ordinal | user_instruction | worked example", layering: proportional}
+  facies:
+    - {unit: Unit_1, code: "1 ordinal | user_instruction | worked example", name: sand}
+    - {unit: Unit_2, code: "2 ordinal | user_instruction | worked example", name: shale}
+    - {unit: Unit_3, code: "1 ordinal | user_instruction | worked example", name: sand}
+  porosity: compaction
+  transforms:
+    - {name: PERMX, unit: mD, from: PORO, law: exponential, a: "0.01 mD | assumed | worked example: porosity-permeability trend",
+       b: "30 ratio | assumed | worked example: porosity-permeability trend"}
+    - {name: PERMY, unit: mD, from: PORO, law: exponential, a: "0.01 mD | assumed | worked example: porosity-permeability trend",
+       b: "30 ratio | assumed | worked example: porosity-permeability trend"}
+  fault_transmissibility: {calibration: manzocchi_1999}
+  tetrahedral: true
+stress:
+  regime:
+    sv_gradient: "23 MPa/km | assumed | worked example: overburden of mean density 2.35 g/cm3"
+    shmax_ratio: "0.85 ratio | assumed | worked example: normal-faulting regime"
+    shmin_ratio: "0.65 ratio | assumed | worked example: normal-faulting regime"
+    shmax_azimuth: "10 deg | assumed | worked example: about parallel to the master fault"
+  pore_pressure_gradient: "10 MPa/km | assumed | worked example: hydrostatic"
+  friction: "0.6 ratio | literature_derived | Byerlee (1978)"
+outputs:
+  curvature:
+    horizons: [H1]
+    fracture_threshold: "0.000005 1/m | assumed | worked example: curvature above which fractures are drawn"
+  sections:
+    - name: XS_South
+      polyline: "[[500, 2500], [11500, 2500]] m | user_instruction | worked example: across master and splay"
+    - name: XS_Relay
+      polyline: "[[500, 6000], [11500, 6000]] m | user_instruction | worked example: across the relay ramp"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv, grdecl, grid_vtk]

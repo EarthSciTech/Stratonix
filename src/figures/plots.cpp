@@ -2431,6 +2431,44 @@ Figure sobol_figure(const FigureContext& c, const std::string& key, const std::v
   return f;
 }
 
+Figure total_effect_figure(const FigureContext& c, const std::string& key, const std::vector<EffectBar>& in, double level, std::size_t base_samples,
+                           std::size_t runs, const EnsembleLabel& l) {
+  Figure f(842, 520);
+  auto bars = in;
+  std::stable_sort(bars.begin(), bars.end(), [](auto& a, auto& b) { return a.st > b.st; });
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - first-order and total effects on " + key,
+        "Saltelli design: " + std::to_string(base_samples) + " base samples, " + std::to_string(runs) + " runs; bars " +
+            fmt_fixed(100 * level, 0) + " % bootstrap intervals; " + ensemble_note(l));
+  const double px = 230, py = 70, pw = 842 - 230 - 230, rowh = std::min(36.0, (520.0 - 150) / std::max<std::size_t>(1, bars.size()));
+  const double ph = rowh * static_cast<double>(bars.size());
+  auto X = [&](double v) { return px + std::clamp(v, 0.0, 1.0) * pw; };
+  for (double t : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+    f.line({X(t), py}, {X(t), py + ph}, kGrid, 0.4);
+    f.text({X(t), py + ph + 11}, fmt_fixed(t, 2), 7, Anchor::Middle, false, kInk);
+  }
+  const Color c1 = rgb(40, 90, 160), ct = rgb(230, 140, 40);
+  for (std::size_t k = 0; k < bars.size(); ++k) {
+    const auto& b = bars[k];
+    const double y = py + rowh * static_cast<double>(k), h = 0.34 * rowh;
+    const double y1 = y + 0.12 * rowh, y2 = y1 + h + 0.04 * rowh;
+    f.rect(px, y1, std::max(0.5, X(b.s1) - px), h, c1, kInk, 0.3);
+    f.rect(px, y2, std::max(0.5, X(b.st) - px), h, ct, kInk, 0.3);
+    f.line({X(b.s1_lo), y1 + h / 2}, {X(b.s1_hi), y1 + h / 2}, kInk, 0.9);
+    f.line({X(b.st_lo), y2 + h / 2}, {X(b.st_hi), y2 + h / 2}, kInk, 0.9);
+    f.text({px - 6, y + 0.5 * rowh + 2.5}, b.parameter, 7, Anchor::End, false, kInk);
+    f.text({std::max(X(b.s1), X(b.s1_hi)) + 4, y1 + h / 2 + 2.3}, fmt_fixed(b.s1, 3), 6.2, Anchor::Start, false, kInk);
+    f.text({std::max(X(b.st), X(b.st_hi)) + 4, y2 + h / 2 + 2.3}, fmt_fixed(b.st, 3), 6.2, Anchor::Start, false, kInk);
+  }
+  f.rect(px, py, pw, ph, none(), kInk, 0.6);
+  f.text({px + pw / 2, py + ph + 26}, "Share of the variance of " + key, 8, Anchor::Middle, false, kInk);
+  std::vector<LegendEntry> es{{"Index", "First order S_i (alone)", c1}, {"Index", "Total effect S_Ti (with interactions)", ct},
+                              {"Index", fmt_fixed(100 * level, 0) + " % interval", none(), true, kInk, 0.9}};
+  double ly = legend(f, 842 - 214, 56, 196, es, 520.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 214, ly, 196);
+  footer(f, c);
+  return f;
+}
+
 Figure probability_map_figure(const FigureContext& c, const std::string& what, const Grid2D& p, const EnsembleLabel& l) {
   Figure f(842, 595);
   const auto& d = c.model->info().domain;

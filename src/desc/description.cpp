@@ -147,6 +147,7 @@ std::vector<const Param*> Description::all_params() const {
   }
   add(geological_map.sample_spacing);
   for (auto& q : uncertainty.picks) { add(q.sigma); add(q.correlation_length); }
+  add(uncertainty.sensitivity.base_samples); add(uncertainty.sensitivity.bootstrap); add(uncertainty.sensitivity.confidence);
   for (auto& q : uncertainty.velocity) { add(q.v0_sigma); add(q.k_sigma); add(q.correlation_length); }
   for (auto& h : horizons) add(h.age);
   for (auto& u : units) add(u.clay_fraction);
@@ -1289,6 +1290,14 @@ struct Typer {
         }
       if (const Node* kn = un->get("key_numbers"))
         for (auto& x : kn->seq) u.key_numbers.push_back(x.str);
+      if (const Node* se = un->get("sensitivity")) {
+        auto& q = u.sensitivity;
+        q.present = true;
+        q.method = S(se, "method");
+        q.base_samples = P(se, "base_samples", "uncertainty.sensitivity", Dimension::Ordinal, true, 1);
+        q.bootstrap = P(se, "bootstrap", "uncertainty.sensitivity", Dimension::Ordinal, true, 1);
+        q.confidence = P(se, "confidence", "uncertainty.sensitivity", Dimension::Dimensionless, true, 1);
+      }
       if (const Node* in = un->get("interpretation")) {
         if (const Node* ps = in->get("picks"))
           for (std::size_t k = 0; k < ps->seq.size(); ++k) {
@@ -1999,6 +2008,18 @@ struct Typer {
       if (fr.seal_a.present && !(fr.seal_a.si() > 0)) c.err("fault_rock.seal_calibration.a", "F27", "a must be positive");
       if (!fr.seal_type.empty() && std::none_of(d.units.begin(), d.units.end(), [](const UnitDesc& u) { return u.clay_fraction.present; }))
         c.err("fault_rock.seal_calibration", "F27", "a seal calibration needs clay fractions on the units");
+    }
+    // STX-TN-17 section 3 (F50): sensitivity designs
+    if (d.uncertainty.sensitivity.present) {
+      const auto& q = d.uncertainty.sensitivity;
+      const std::string b = "uncertainty.sensitivity";
+      if (q.method != "saltelli") c.err(b + ".method", "F50", "the sensitivity design is 'saltelli' (Saltelli et al. 2010)");
+      if (q.base_samples.present && !(q.base_samples.si() >= 8)) c.err(b + ".base_samples", "F50", "at least 8 base samples");
+      if (q.bootstrap.present && !(q.bootstrap.si() >= 100)) c.err(b + ".bootstrap", "F50", "at least 100 bootstrap resamples for an interval");
+      if (q.confidence.present && !(q.confidence.si() > 0 && q.confidence.si() < 1)) c.err(b + ".confidence", "F50", "the confidence level is between 0 and 1");
+      if (!d.uncertainty.correlations.empty()) c.err(b, "F50", "a Saltelli design needs independent parameters: remove the correlations or use a random ensemble");
+      if (d.uncertainty.parameters.empty() && d.uncertainty.scenarios.empty()) c.err(b, "F50", "a sensitivity design needs uncertain parameters or scenarios");
+      if (d.conditioning.method == "bayesian") c.err(b, "F50", "posterior members are not a Saltelli design");
     }
     // STX-TN-17 section 1 (F49): geostatistical properties
     {

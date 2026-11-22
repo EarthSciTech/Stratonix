@@ -210,8 +210,6 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
   const Domain& d = info.domain;
   if (!(o.dx > 0) || !(o.dy > 0)) throw std::invalid_argument("grid: spacing must be positive");
   if (o.zones.empty()) throw std::invalid_argument("grid: no zones");
-  if (o.follow_fault_traces)
-    throw Error(ErrorCode::NotImplemented, "grid: pillars along fault traces are not implemented (stage 4D, Prompt 60)");
   const int nunits = static_cast<int>(info.units.size());
   for (std::size_t z = 0; z < o.zones.size(); ++z) {
     const auto& zs = o.zones[z];
@@ -260,6 +258,7 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
   std::vector<double> px(np), py(np), off_top_x(np, 0), off_base_x(np, 0), off_top_y(np, 0), off_base_y(np, 0);
   std::vector<double> snap_dist(np, 1e300);
   std::vector<std::array<double, 6>> snapped(np);
+  std::size_t follow_fallback = 0;
   g.pillar_fault.assign(np, -1);
   for (int j = 0; j < NY; ++j)
     for (int i = 0; i < NX; ++i) { px[g.pillar(i, j)] = g.x0 + i * g.dx; py[g.pillar(i, j)] = g.y0 + j * g.dy; }
@@ -281,6 +280,49 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
       }
       FaultEval fe;
       if (!mp.empty()) m.evaluate_fault(static_cast<int>(f), mp, fe);
+      if (o.follow_fault_traces) {
+        // stage 4D (STX-TN-17 section 2, I-035): one pillar column per fault - the node index
+        // nearest the trace on average - is moved onto the trace in every line the fault
+        // crosses, however far, so its faces are cell faces; the row is relaxed linearly between
+        // the fault pillars and the domain's edges (the tilt below). A line where that pillar is
+        // already another fault's, or where the move would cross a neighbouring fault pillar,
+        // keeps the stair step (counted in GridDefects::fallback_faces by C25).
+        std::vector<std::size_t> in;
+        double mean = 0;
+        for (std::size_t k = 0; k < cm.size(); ++k)
+          if (!(std::isnan(fe.extent[k]) || fe.extent[k] > 1.0)) {
+            in.push_back(k);
+            mean += (cm[k].s - s0) / dn;
+          }
+        if (in.empty()) continue;
+        const int node = std::clamp(static_cast<int>(std::llround(mean / static_cast<double>(in.size()))), 1, nn - 2);
+        for (std::size_t k : in) {
+          double st = nearest_crossing(ct, cm[k].line, cm[k].s), sb = nearest_crossing(cb, cm[k].line, cm[k].s);
+          if (std::isnan(st) || std::isnan(sb)) continue;
+          std::size_t p = along_x ? g.pillar(node, cm[k].line) : g.pillar(cm[k].line, node);
+          if (g.pillar_fault[p] >= 0) { ++follow_fallback; continue; }
+          // order along the line against the other faults' pillars already placed
+          bool ok = true;
+          for (int n2 = 1; n2 < nn - 1 && ok; ++n2) {
+            if (n2 == node) continue;
+            std::size_t q = along_x ? g.pillar(n2, cm[k].line) : g.pillar(cm[k].line, n2);
+            if (g.pillar_fault[q] < 0) continue;
+            const double sq = along_x ? snapped[q][0] : snapped[q][1], sqb = along_x ? snapped[q][3] : snapped[q][4];
+            const double gap = 0.3 * dn * std::abs(n2 - node);
+            if (n2 < node) ok = sq + gap < st && sqb + gap < sb;
+            else ok = st + gap < sq && sb + gap < sqb;
+          }
+          if (!ok || st <= s0 + 0.3 * dn || sb <= s0 + 0.3 * dn || st >= s0 + (nn - 1.3) * dn || sb >= s0 + (nn - 1.3) * dn) {
+            ++follow_fallback;
+            continue;
+          }
+          snap_dist[p] = 0;
+          g.pillar_fault[p] = static_cast<int>(f);
+          double b = (along_x ? g.y0 : g.x0) + cm[k].line * dl;
+          snapped[p] = along_x ? std::array<double, 6>{st, b, z_hi, sb, b, z_lo} : std::array<double, 6>{b, st, z_hi, b, sb, z_lo};
+        }
+        continue;
+      }
       for (std::size_t k = 0; k < cm.size(); ++k) {
         if (std::isnan(fe.extent[k]) || fe.extent[k] > 1.0) continue;
         int node = static_cast<int>(std::llround((cm[k].s - s0) / dn));
@@ -330,6 +372,7 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
       }
     }
   }
+  g.trace_fallbacks = follow_fallback;
   g.coord.resize(6 * np);
   for (std::size_t p = 0; p < np; ++p) {
     if (g.pillar_fault[p] >= 0) {
@@ -491,6 +534,7 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
 
 GridDefects grid_defects(const Model& m, const CornerPointGrid& g, double fault_tol) {
   GridDefects d;
+  d.fallback_faces = g.trace_fallbacks;
   auto label = [](int i, int j, int k) {
     return "cell (" + std::to_string(i + 1) + ", " + std::to_string(j + 1) + ", " + std::to_string(k + 1) + ")";
   };
