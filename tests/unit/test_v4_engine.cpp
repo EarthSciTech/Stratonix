@@ -271,7 +271,7 @@ TEST_CASE("E5 fault relations: abutting and splay are recovered from data and ru
   }
   // A's data: along strike towards B, stopping 40 m from B's surface
   for (double d = -500; d <= 500; d += 100)
-    for (double s = -1500; s <= 3000; s += 100) {
+    for (double s = -1500; s <= 6000; s += 100) {
       Vec3 p = on_plane(A.plane, s, d);
       double dist = dot(p - B.plane.centroid, B.plane.normal);
       if (dist < -40) A.points.push_back(p);
@@ -684,6 +684,112 @@ TEST_CASE("E14 the stage 3A examples with isochore declarations rebuild with fre
     CHECK(away <= 10.0);
     CHECK(near <= 30.0);
   }
+}
+#endif
+
+// ---- E15, E16: folds and faults from data in the implicit builder -------------------------------
+namespace {
+double fold_truth(int h, double x, double) { return -1000.0 - 200.0 * h + 250.0 * std::sin(2 * kPi * (x - 5000) / 5000.0); }
+std::string fold_yaml(bool with_frame) {
+  return std::string("stratonix_schema: 1\nmodel: {name: foldframe, version: \"1.0.0\", status: DESIGN}\n"
+                     "crs: {name: local, vertical_datum: datum, length_unit: m}\ndomain:\n  origin: ") + qq("[0, 0] m") + "\n  size: " +
+         qq("[10000, 10000] m") + "\n  depth_range: " + qq("[0, 2500] m") + "\n  grid_spacing: " + qq("100 m") +
+         "\ninputs:\n  - {id: P, path: points.csv, role: surface points, sharing: shareable, source: test, evidence: interpreted}\n"
+         "  - {id: O, path: orient.csv, role: orientations, sharing: shareable, source: test, evidence: interpreted}\n"
+         "wells:\n  - {name: W1, role: check, head: " + qq("[5000, 5000] m") + "}\n"
+         "stratigraphy:\n  reference: {well: W1}\n  horizons: [{name: H1}, {name: H2}]\n  units: [{name: U1, top: H1, base: H2}]\n"
+         "implicit:\n  data:\n    - {input: P, kind: points, format: csv_points}\n    - {input: O, kind: orientations, format: csv_orientations}\n"
+         "  use_well_tops: false\n  surface_spacing: " + qq("100 m") + "\n" +
+         (with_frame ? "  folds:\n    - {name: A1}\n" : "");
+}
+void write_fold_data(const fs::path& dir) {
+  std::mt19937_64 rng(15);
+  std::uniform_real_distribution<double> U(200, 9800), Us(200, 3000);
+  std::string p = "X,Y,Z,surface\n", o = "X,Y,Z,G_x,G_y,G_z,surface\n";
+  for (int i = 0; i < 60; ++i) {
+    int h = i % 2;
+    double x = U(rng), y = U(rng);
+    p += fmt_fixed(x, 2) + "," + fmt_fixed(y, 2) + "," + fmt_fixed(fold_truth(h, x, y), 3) + ",H" + std::to_string(h + 1) + "\n";
+  }
+  for (int i = 0; i < 300; ++i) {  // orientations only in the south (y < 3 km)
+    int h = i % 2;
+    double x = U(rng), y = Us(rng), z = fold_truth(h, x, y);
+    double sl = 250.0 * 2 * kPi / 5000.0 * std::cos(2 * kPi * (x - 5000) / 5000.0);
+    Vec3 n = normalized(Vec3{-sl, 0, 1});
+    o += fmt_fixed(x, 2) + "," + fmt_fixed(y, 2) + "," + fmt_fixed(z, 3) + "," + fmt_fixed(n.x, 6) + "," + fmt_fixed(n.y, 6) + "," +
+         fmt_fixed(n.z, 6) + ",H" + std::to_string(h + 1) + "\n";
+  }
+  write_text(dir / "points.csv", p);
+  write_text(dir / "orient.csv", o);
+}
+double fold_p95(const Model& m) {
+  std::vector<double> e;
+  for (double y = 4000; y <= 9500; y += 250)
+    for (double x = 500; x <= 9500; x += 250)
+      for (int h = 0; h < 2; ++h) {
+        double z = -depth_faulted(m, h, x, y);
+        if (!std::isnan(z)) e.push_back(std::fabs(z - fold_truth(h, x, y)));
+      }
+  return percentile95(e);
+}
+}  // namespace
+
+TEST_CASE("E15 a fold frame fitted to orientations in one part of a fold constrains the field where only sparse points exist") {
+  register_all_plugins();
+  auto dir = tmpdir("foldframe");
+  write_fold_data(dir);
+  auto run = [&](bool frame, BuildLog* lg) {
+    desc::Description d;
+    auto rep = desc::validate_description_text(fold_yaml(frame), dir, &d);
+    if (!rep.ok()) std::cerr << rep.text();
+    REQUIRE(rep.ok());
+    BuildInputs in;
+    io::load_build_inputs(d, in);
+    BuildLog l;
+    auto m = build_model(d, in, l);
+    if (lg) *lg = l;
+    return m;
+  };
+  BuildLog lf;
+  auto plain = run(false, nullptr);
+  auto framed = run(true, &lf);
+  double e0 = fold_p95(*plain), e1 = fold_p95(*framed);
+  std::printf("  north of the orientations: p95 without a fold frame %.1f m, with %.1f m\n", e0, e1);
+  for (auto& kv : lf.values)
+    if (kv.first.rfind("implicit.fold.", 0) == 0) std::printf("    %s: %s\n", kv.first.c_str(), kv.second.c_str());
+  CHECK(e1 < 0.5 * e0);
+  CHECK(e1 <= 25.0);
+}
+
+#if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__)
+TEST_CASE("E16 the relay example with displacement fields: throws within 15 % and the fitted fields logged; relations logged (release builds)") {
+  register_all_plugins();
+  fs::path ex = fs::path(STX_SOURCE_DIR) / "examples";
+  std::ifstream f(ex / "implicit_relay_splay_from_samples.yaml");
+  std::string y((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  const std::string est = "station_spacing: \"250 m | assumed | the data spacing\"}";
+  REQUIRE(y.find(est) != std::string::npos);
+  y = replace_all(y, est, "station_spacing: \"250 m | assumed | the data spacing\", model: displacement_field}");
+  desc::Description d;
+  auto rep = desc::validate_description_text(y, ex, &d);
+  if (!rep.ok()) std::cerr << rep.text();
+  REQUIRE(rep.ok());
+  BuildInputs in;
+  io::load_build_inputs(d, in);
+  BuildLog log;
+  auto m = build_model(d, in, log);
+  for (const char* fn : {"F1", "F3"}) {
+    std::string fld = "implicit.fault." + std::string(fn) + ".displacement_field";
+    bool found = false;
+    for (auto& kv : log.values)
+      if (kv.first == fld) { found = true; std::printf("  %s: %s\n", fn, kv.second.c_str()); }
+    CHECK(found);
+    double t = log_value(log, "implicit.fault." + std::string(fn) + ".estimated_throw");
+    std::printf("    estimated throw %.2f m (source 120)\n", t);
+    CHECK(std::fabs(t - 120.0) <= 0.15 * 120.0);
+  }
+  for (auto& kv : log.values)
+    if (kv.first.rfind("implicit.fault_relation.", 0) == 0) std::printf("  %s: %s\n", kv.first.c_str(), kv.second.c_str());
 }
 #endif
 

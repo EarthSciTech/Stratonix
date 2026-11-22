@@ -116,8 +116,9 @@ std::vector<const Param*> Description::all_params() const {
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
                   &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
                   &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch, &implicit.points_per_patch, &implicit.overlap,
-                  &implicit.discrete_spacing, &implicit.discrete_vertical_spacing, &implicit.discrete_regularisation, &implicit.discrete_orientation_weight, &implicit.discrete_max_iterations})
+                  &implicit.discrete_spacing, &implicit.discrete_vertical_spacing, &implicit.discrete_regularisation, &implicit.discrete_orientation_weight, &implicit.discrete_max_iterations, &implicit.relation_distance})
     add(*p);
+  for (auto& ff : implicit.folds) { add(ff.wavelength); add(ff.order); add(ff.constraint_spacing); }
   for (auto& w : wells) {
     add(w.head); add(w.datum_elevation); add(w.total_depth); add(w.stations); add(w.top_uncertainty);
     for (auto& [h, p] : w.tops) add(p);
@@ -607,6 +608,7 @@ struct Typer {
         if (est) {
           fd.estimate_band = P(est, "band", b + ".throw.estimate", Dimension::Length, true, 1);
           fd.estimate_spacing = P(est, "station_spacing", b + ".throw.estimate", Dimension::Length, true, 1);
+          fd.estimate_model = S(est, "model", "horizons");
         }
         fd.length = P(e, "length", b + ".extent", Dimension::Length, !fd.throw_estimate, 1);
         fd.tip_line_shape = S(e, "tip_line_shape", "rectangular");
@@ -744,6 +746,21 @@ struct Typer {
       if (const Node* ih = im->get("isochore_horizons"))
         for (auto& x : ih->seq) d.implicit.isochore_horizons.push_back(x.str);
       d.implicit.horizon_values = S(im, "horizon_values", "fixed");
+      d.implicit.fault_relations = S(im, "fault_relations", "stated");
+      d.implicit.relation_distance = P(im, "relation_distance", "implicit", Dimension::Length, false, 1);
+      if (const Node* fl = im->get("folds"))
+        for (std::size_t k = 0; k < fl->seq.size(); ++k) {
+          const Node& x = fl->seq[k];
+          std::string bb = "implicit.folds[" + std::to_string(k) + "]";
+          ImplicitDesc::FoldFrameDesc ff;
+          ff.name = S(&x, "name");
+          ff.series = S(&x, "series");
+          ff.foliation = S(&x, "foliation");
+          ff.wavelength = P(&x, "wavelength", bb, Dimension::Length, false, 1);
+          ff.order = P(&x, "order", bb, Dimension::Ordinal, false, 1);
+          ff.constraint_spacing = P(&x, "constraint_spacing", bb, Dimension::Length, false, 1);
+          d.implicit.folds.push_back(ff);
+        }
       if (const Node* dz = im->get("discrete")) {
         d.implicit.discrete_spacing = P(dz, "spacing", "implicit.discrete", Dimension::Length, false, 1);
         d.implicit.discrete_vertical_spacing = P(dz, "vertical_spacing", "implicit.discrete", Dimension::Length, false, 1);
@@ -1582,6 +1599,19 @@ struct Typer {
         c.err("implicit.discrete.orientation_weight", "F35", "the orientation weight must be positive");
       if (im.discrete_max_iterations.present && !(im.discrete_max_iterations.si() >= 10))
         c.err("implicit.discrete.max_iterations", "F35", "at least 10 iterations per level");
+      // STX-TN-14 sections 2 and 3: fold frames and fault relations
+      for (std::size_t k = 0; k < im.folds.size(); ++k) {
+        auto& ff = im.folds[k];
+        std::string bb = "implicit.folds[" + std::to_string(k) + "]";
+        if (!ff.series.empty() && std::none_of(d.series.begin(), d.series.end(), [&](const SeriesDesc& sr) { return sr.name == ff.series; }))
+          c.err(bb + ".series", "R1", "unknown series '" + ff.series + "'");
+        if (!ff.foliation.empty() && std::none_of(d.inputs.begin(), d.inputs.end(), [&](const InputDesc& x) { return x.id == ff.foliation; }))
+          c.err(bb + ".foliation", "R1", "unknown input '" + ff.foliation + "'");
+        if (ff.order.present && !(ff.order.si() >= 1 && ff.order.si() <= 3)) c.err(bb + ".order", "I3", "the Fourier order must be 1, 2 or 3");
+        if (ff.wavelength.present && !(ff.wavelength.si() > 0)) c.err(bb + ".wavelength", "I3", "the wavelength must be positive");
+      }
+      if (im.relation_distance.present && !(im.relation_distance.si() > 0))
+        c.err("implicit.relation_distance", "I3", "the relation distance must be positive");
       if (im.points_per_patch.present && !(im.points_per_patch.si() >= 30))
         c.err("implicit.solver.points_per_patch", "F29", "a patch needs at least 30 interface data");
       if (im.overlap.present && !(im.overlap.si() > 1 && im.overlap.si() <= 3))

@@ -55,9 +55,13 @@ jobs:
       - name: Build the command-line tool
         run: cmake --preset linux-gcc-release && cmake --build build/linux-gcc-release --target stratonix
       - name: Install LoopStructural
-        run: python3 -m pip install --upgrade pip && python3 -m pip install "LoopStructural>=1.5,<2" pandas scipy numpy
+        run: python3 -m pip install --upgrade pip && python3 -m pip install "LoopStructural>=1.5,<2" pandas scipy numpy pyamg
       - name: Cross-check
         run: python3 tests/tools/crosscheck_v3.py build/linux-gcc-release/apps/stratonix/stratonix examples crosscheck_report --require-loopstructural
+      # Stage 4A (STX-TN-14 section 10): LoopStructural's single-fold example, predicted by both codes
+      - name: Fold example
+        continue-on-error: true
+        run: python3 tests/tools/ls_fold_v4.py build/linux-gcc-release/apps/stratonix/stratonix crosscheck_report
       - uses: actions/upload-artifact@v4
         if: always()
         with:

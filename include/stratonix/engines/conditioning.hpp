@@ -36,6 +36,7 @@ struct ThrowStation {
   double s = 0;          ///< m along strike from the plane's centroid
   double throw_m = 0;    ///< vertical separation of the cut-offs (+ normal)
   std::size_t n_fw = 0, n_hw = 0;
+  double z = kNaN;       ///< stage 4A: mean elevation of the two cut-offs
 };
 struct ThrowEstimate {
   int horizon = -1;
@@ -74,6 +75,8 @@ struct DisplacementField {
   std::string reason;
   double max_throw = kNaN, s0 = kNaN, d0 = kNaN, length = kNaN, height = kNaN, rms = kNaN;
   std::size_t observations = 0;
+  std::string shape_strike = "elliptical", shape_dip = "elliptical";
+  double taper = 0.3;
   double at(double s, double d) const;  ///< T(s, d), 0 outside the tips
 };
 /// Observations from the stage 3A stations of every horizon (station s, the cut-off's down-dip
@@ -94,6 +97,7 @@ struct FaultRelation {
   std::string kind;          ///< abuts | splay | crosses
   std::string rule;          ///< the rule and the data it rests on, in words
   double distance = kNaN;    ///< m: closest approach of a's data to b's surface
+  std::string side;          ///< abuts and splay: hanging_wall | footwall (the side of b where a lies)
 };
 std::vector<FaultRelation> infer_fault_relations(const std::vector<FaultDataSet>& faults, double relation_distance);
 

@@ -1,12 +1,17 @@
 #include "cli_commands.hpp"
 #include "stratonix/package/uncertainty.hpp"
 
+#include <fstream>
+
 #include <cctype>
+#include <cmath>
 #include <iostream>
 
 #include "stratonix/checks/manifest.hpp"
 #include "stratonix/core/util.hpp"
 #include "stratonix/desc/description.hpp"
+#include "stratonix/engines/foldframe.hpp"
+#include "stratonix/io/io.hpp"
 #include "stratonix/model/model_suite.hpp"
 #include "stratonix/package/bench.hpp"
 #include "stratonix/package/delivery.hpp"
@@ -139,6 +144,44 @@ int cmd_ensemble(Args& a) {
     std::cout << "  " << k.key << ": P10 " << fmt_fixed(k.stats.p10, 2) << ", P50 " << fmt_fixed(k.stats.p50, 2) << ", P90 " << fmt_fixed(k.stats.p90, 2) << " (n "
               << k.stats.n << ")\n";
   return 0;
+}
+int cmd_fold_frame(Args& a) {
+  if (a.positional().empty() || !a.has("o"))
+    throw Error(ErrorCode::InvalidArgument, "usage: stratonix fold-frame <bedding.csv> [--foliation <axial_foliation.csv>] [--at <points.csv>] -o <frame.json>");
+  auto& reg = registry::Registry::global();
+  auto read_orient = [&](const std::string& f) {
+    auto d = reg.create<io::Importer>(registry::Kind::Importer, "csv_orientations")->read(f);
+    std::vector<OrientationDatum> v;
+    for (std::size_t i = 0; i < d.points.size(); ++i) v.push_back({d.points[i], d.normals[i]});
+    return v;
+  };
+  auto bed = read_orient(a.positional()[0]);
+  std::vector<OrientationDatum> fol;
+  if (a.has("foliation")) fol = read_orient(a.get("foliation"));
+  FoldFrameOptions o;
+  auto F = fit_fold_frame(bed, fol, o);
+  std::string j = "{\n  \"ok\": " + std::string(F.ok ? "true" : "false") + ",\n  \"reason\": \"" + F.reason + "\",\n";
+  auto num = [](double v) { return std::isfinite(v) ? fmt_shortest(v) : std::string("null"); };
+  j += "  \"axis\": [" + num(F.axis.x) + ", " + num(F.axis.y) + ", " + num(F.axis.z) + "],\n";
+  j += "  \"trend_deg\": " + num(rad2deg(F.trend)) + ",\n  \"plunge_deg\": " + num(rad2deg(F.plunge)) + ",\n";
+  j += "  \"interlimb_deg\": " + num(rad2deg(F.interlimb)) + ",\n  \"wavelength_m\": " + num(F.wavelength) + ",\n";
+  j += "  \"order\": " + std::to_string(F.order) + ",\n  \"cylindricity\": " + num(F.cylindricity) + ",\n";
+  j += "  \"rms_deg\": " + num(rad2deg(F.rms)) + ",\n  \"data\": " + std::to_string(F.data);
+  if (a.has("at") && F.ok) {
+    auto d = reg.create<io::Importer>(registry::Kind::Importer, "csv_points")->read(a.get("at"));
+    j += ",\n  \"predicted_normals\": [";
+    for (std::size_t i = 0; i < d.points.size(); ++i) {
+      Vec3 n = F.bedding_normal(d.points[i]);
+      j += std::string(i ? ", " : "") + "[" + num(n.x) + ", " + num(n.y) + ", " + num(n.z) + "]";
+    }
+    j += "]";
+  }
+  j += "\n}\n";
+  std::ofstream(a.get("o"), std::ios::binary) << j;
+  std::cout << "fold frame " << (F.ok ? "fitted" : "NOT fitted: " + F.reason) << ": axis trend " << fmt_fixed(rad2deg(F.trend), 1) << " deg, plunge "
+            << fmt_fixed(rad2deg(F.plunge), 1) << " deg, interlimb " << fmt_fixed(rad2deg(F.interlimb), 1) << " deg, wavelength "
+            << fmt_fixed(F.wavelength, 0) << " m -> " << a.get("o") << "\n";
+  return F.ok ? 0 : 4;
 }
 int cmd_plugins(Args&) {
   for (auto* e : registry::Registry::global().all())

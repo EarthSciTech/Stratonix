@@ -925,6 +925,12 @@
                   },
                   "station_spacing": {
                     "$ref": "#/$defs/param"
+                  },
+                  "model": {
+                    "enum": [
+                      "horizons",
+                      "displacement_field"
+                    ]
                   }
                 }
               }
@@ -1308,6 +1314,46 @@
             },
             "orientation_weight": {
               "$ref": "#/$defs/param"
+            }
+          }
+        },
+        "fault_relations": {
+          "enum": [
+            "stated",
+            "infer"
+          ]
+        },
+        "relation_distance": {
+          "$ref": "#/$defs/param"
+        },
+        "folds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "series": {
+                "type": "string"
+              },
+              "foliation": {
+                "type": "string"
+              },
+              "wavelength": {
+                "$ref": "#/$defs/param"
+              },
+              "order": {
+                "$ref": "#/$defs/param"
+              },
+              "constraint_spacing": {
+                "$ref": "#/$defs/param"
+              }
             }
           }
         }

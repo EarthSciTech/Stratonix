@@ -43,6 +43,9 @@ std::map<std::string, Command>& commands() {
                    "[--formats petrel,vtk,...] [--no-figures]", cli::cmd_package}},
       {"ensemble", {"Run the seeded ensemble of a description's uncertainty block (stage 3C)",
                     "stratonix ensemble <description.yaml> -o <new folder> [--members N] [--seed S] [--threads N] [--no-figures]", cli::cmd_ensemble}},
+      {"fold-frame", {"Fit a fold frame to bedding orientations and predict bedding normals (stage 4A)",
+                      "stratonix fold-frame <bedding.csv> [--foliation <axial_foliation.csv>] [--at <points.csv>] -o <frame.json>",
+                      cli::cmd_fold_frame}},
       {"plugins", {"List the registered plugins", "stratonix plugins", cli::cmd_plugins}},
       {"bench", {"Run timing benchmarks (reference and optimised kernels)",
                  "stratonix bench [description.yaml] [--spacing 50,25] [--mode both|reference|optimised] "

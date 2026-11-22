@@ -165,6 +165,7 @@ struct FaultDesc {
   // Faults from data (stage 3A, STX-TN-11 section 3).
   std::string sticks_fit = "plane";  ///< geometry.fit for sticks: plane | profile
   bool throw_estimate = false;       ///< throw.estimate: throw, length and tips from horizon cut-offs
+  std::string estimate_model = "horizons";  ///< stage 4A: horizons | displacement_field
   Param estimate_band, estimate_spacing;
   // Interaction (STX-TN-05 sections 3 and 4).
   bool abuts_transfer = false;     ///< abuts.transfer: a linked splay of the abutted fault
@@ -223,6 +224,11 @@ struct ImplicitDesc {
   // Stage 4A (STX-TN-14 section 1): free horizon values on the discrete solver.
   std::string horizon_values = "fixed";  ///< fixed | free
   Param discrete_spacing, discrete_vertical_spacing, discrete_regularisation, discrete_orientation_weight, discrete_max_iterations;
+  // Stage 4A (STX-TN-14 sections 2 and 3): fold frames and fault relations from data.
+  struct FoldFrameDesc { std::string name, series, foliation; Param wavelength, order, constraint_spacing; };
+  std::vector<FoldFrameDesc> folds;
+  std::string fault_relations = "stated";  ///< stated | infer
+  Param relation_distance;
 };
 
 /// Hybrid conditioning (stage 3A, STX-TN-11 section 4): parameters of the description fitted to data.

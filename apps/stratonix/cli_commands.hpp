@@ -59,6 +59,7 @@ int cmd_state(Args&);
 int cmd_export(Args&);
 int cmd_package(Args&);
 int cmd_ensemble(Args&);
+int cmd_fold_frame(Args&);
 int cmd_plugins(Args&);
 int cmd_bench(Args&);
 int cmd_suite(Args&);

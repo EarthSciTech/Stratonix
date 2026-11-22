@@ -103,7 +103,7 @@ std::vector<ThrowEstimate> estimate_throws(const FittedPlane& pl, const std::vec
         z[side] = (a + c * cz * cotd) / (1 + c * cotd);  // where the side's plane meets the fault surface at s_k
       }
       if (!ok) continue;
-      e.stations.push_back({sk, z[0] - z[1], fw.size(), hw.size()});
+      e.stations.push_back({sk, z[0] - z[1], fw.size(), hw.size(), 0.5 * (z[0] + z[1])});
     }
     if (e.stations.size() < 3) {
       e.reason = "fewer than 3 stations with data on both sides";
@@ -501,12 +501,189 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
   return R;
 }
 
-// ---- stage 4A (STX-TN-14 section 3): interfaces only until Prompt 44 ------------------------------
-double DisplacementField::at(double, double) const { throw Error(ErrorCode::NotImplemented, "stage 4A: faults from data (Prompt 44)"); }
-std::vector<DisplacementObservation> displacement_observations(const FittedPlane&, const std::vector<ThrowEstimate>&,
-                                                              const std::vector<HorizonPoint>&) { throw Error(ErrorCode::NotImplemented, "stage 4A: faults from data (Prompt 44)"); }
-DisplacementField fit_displacement_field(const std::vector<DisplacementObservation>&, const DisplacementOptions&) { throw Error(ErrorCode::NotImplemented, "stage 4A: faults from data (Prompt 44)"); }
-std::vector<FaultRelation> infer_fault_relations(const std::vector<FaultDataSet>&, double) { throw Error(ErrorCode::NotImplemented, "stage 4A: faults from data (Prompt 44)"); }
+// ---- stage 4A (STX-TN-14 section 3): displacement fields and fault relations ---------------------
+double DisplacementField::at(double s, double d) const {
+  if (!ok) return kNaN;
+  double fs = shape_value(shape_strike, taper, (s - s0) / length + 0.5);
+  double fd = std::isfinite(height) ? shape_value(shape_dip, taper, (d - d0) / height + 0.5) : 1.0;
+  return max_throw * fs * fd;
+}
+
+std::vector<DisplacementObservation> displacement_observations(const FittedPlane& plane, const std::vector<ThrowEstimate>& est,
+                                                              const std::vector<HorizonPoint>& pts) {
+  (void)pts;
+  const double sind = std::max(1e-6, std::sin(plane.dip));
+  std::vector<DisplacementObservation> out;
+  for (auto& e : est) {
+    if (!e.ok) continue;
+    for (auto& st : e.stations)
+      if (std::isfinite(st.z)) out.push_back({st.s, (plane.centroid.z - st.z) / sind, st.throw_m, e.horizon});
+  }
+  return out;
+}
+
+DisplacementField fit_displacement_field(const std::vector<DisplacementObservation>& obs, const DisplacementOptions& o) {
+  DisplacementField F;
+  F.observations = obs.size();
+  if (obs.size() < 5) { F.reason = "fewer than 5 throw observations"; return F; }
+  double smin = 1e300, smax = -1e300, dmin = 1e300, dmax = -1e300;
+  for (auto& q : obs) {
+    smin = std::min(smin, q.s); smax = std::max(smax, q.s);
+    dmin = std::min(dmin, q.d); dmax = std::max(dmax, q.d);
+  }
+  const double sspan = std::max(smax - smin, 1.0), dspan = dmax - dmin;
+  const bool one_level = dspan < 1.0;
+  const double hmax = one_level ? 0.0 : 20.0 * dspan;
+  // residual for (s0, L, d0, H); T_max linear
+  auto eval = [&](const double p[4], double& tmax) {
+    if (p[1] <= 0 || (!one_level && p[3] <= 0)) return 1e300;
+    // bounds: the centre near the data, the length at most four times their span
+    if (p[0] < smin - sspan || p[0] > smax + sspan || p[1] > 4.5 * sspan) return 1e300;
+    if (!one_level && (p[2] < dmin - 2 * dspan || p[2] > dmax + 2 * dspan)) return 1e300;
+    double sg = 0, sgt = 0;
+    std::vector<double> g(obs.size());
+    for (std::size_t k = 0; k < obs.size(); ++k) {
+      double gs = shape_value(o.shape_strike, o.taper, (obs[k].s - p[0]) / p[1] + 0.5);
+      double gd = one_level ? 1.0 : shape_value(o.shape_dip, o.taper, (obs[k].d - p[2]) / std::min(p[3], hmax) + 0.5);
+      g[k] = gs * gd;
+      sg += g[k] * g[k];
+      sgt += g[k] * obs[k].throw_m;
+    }
+    tmax = sg > 0 ? sgt / sg : 0.0;
+    double ss = 0;
+    for (std::size_t k = 0; k < g.size(); ++k) ss += std::pow(obs[k].throw_m - tmax * g[k], 2);
+    return std::sqrt(ss / static_cast<double>(g.size()));
+  };
+  // grid search, then Nelder-Mead (Nelder and Mead 1965)
+  double best[4] = {0.5 * (smin + smax), 2 * sspan, 0.5 * (dmin + dmax), one_level ? 1.0 : 3 * dspan}, bt = 0, br = 1e300;
+  const int n = 10;
+  for (int a = 0; a <= n; ++a)
+    for (int b = 1; b <= n; ++b)
+      for (int c = 0; c <= (one_level ? 0 : n); ++c)
+        for (int e = 1; e <= (one_level ? 1 : n); ++e) {
+          double p[4] = {smin + sspan * a / n, sspan * (0.5 + 3.5 * b / n), dmin - dspan + 3 * dspan * c / n,
+                         one_level ? 1.0 : dspan * (0.6 + 8.0 * e / n)};
+          double t, r = eval(p, t);
+          if (r < br) { br = r; bt = t; std::copy(p, p + 4, best); }
+        }
+  const int dim = one_level ? 2 : 4;
+  std::vector<std::array<double, 4>> sx(static_cast<std::size_t>(dim + 1));
+  std::vector<double> fx(static_cast<std::size_t>(dim + 1));
+  const double step[4] = {0.1 * sspan, 0.2 * sspan, 0.2 * std::max(dspan, 1.0), 0.3 * std::max(dspan, 1.0)};
+  for (int i = 0; i <= dim; ++i) {
+    std::copy(best, best + 4, sx[static_cast<std::size_t>(i)].begin());
+    if (i > 0) sx[static_cast<std::size_t>(i)][static_cast<std::size_t>(i - 1)] += step[i - 1];
+    double t;
+    fx[static_cast<std::size_t>(i)] = eval(sx[static_cast<std::size_t>(i)].data(), t);
+  }
+  for (int it = 0; it < 600; ++it) {
+    std::vector<std::size_t> ord(fx.size());
+    for (std::size_t i = 0; i < ord.size(); ++i) ord[i] = i;
+    std::sort(ord.begin(), ord.end(), [&](std::size_t a, std::size_t b) { return fx[a] < fx[b]; });
+    auto s2 = sx; auto f2 = fx;
+    for (std::size_t i = 0; i < ord.size(); ++i) { sx[i] = s2[ord[i]]; fx[i] = f2[ord[i]]; }
+    if (std::fabs(fx.back() - fx.front()) < 1e-10 * std::max(1.0, fx.front())) break;
+    std::array<double, 4> c{0, 0, 0, 0};
+    for (int i = 0; i < dim; ++i)
+      for (int k = 0; k < 4; ++k) c[static_cast<std::size_t>(k)] += sx[static_cast<std::size_t>(i)][static_cast<std::size_t>(k)] / dim;
+    auto at = [&](double t) {
+      std::array<double, 4> p;
+      for (int k = 0; k < 4; ++k) p[static_cast<std::size_t>(k)] = c[static_cast<std::size_t>(k)] + t * (sx.back()[static_cast<std::size_t>(k)] - c[static_cast<std::size_t>(k)]);
+      return p;
+    };
+    double t;
+    auto xr = at(-1.0);
+    double fr = eval(xr.data(), t);
+    if (fr < fx.front()) {
+      auto xe = at(-2.0);
+      double fe = eval(xe.data(), t);
+      if (fe < fr) { sx.back() = xe; fx.back() = fe; } else { sx.back() = xr; fx.back() = fr; }
+    } else if (fr < fx[fx.size() - 2]) {
+      sx.back() = xr; fx.back() = fr;
+    } else {
+      auto xc = at(0.5);
+      double fc = eval(xc.data(), t);
+      if (fc < fx.back()) { sx.back() = xc; fx.back() = fc; }
+      else
+        for (std::size_t i = 1; i < sx.size(); ++i) {
+          for (int k = 0; k < 4; ++k)
+            sx[i][static_cast<std::size_t>(k)] = sx[0][static_cast<std::size_t>(k)] + 0.5 * (sx[i][static_cast<std::size_t>(k)] - sx[0][static_cast<std::size_t>(k)]);
+          fx[i] = eval(sx[i].data(), t);
+        }
+    }
+  }
+  std::size_t ib = static_cast<std::size_t>(std::min_element(fx.begin(), fx.end()) - fx.begin());
+  double t;
+  F.rms = eval(sx[ib].data(), t);
+  F.max_throw = t;
+  F.s0 = sx[ib][0];
+  F.length = sx[ib][1];
+  F.d0 = one_level ? kNaN : sx[ib][2];
+  F.height = one_level || sx[ib][3] >= hmax * 0.999 ? std::numeric_limits<double>::infinity() : sx[ib][3];
+  F.ok = std::isfinite(F.max_throw) && F.length > 0;
+  F.shape_strike = o.shape_strike;
+  F.shape_dip = o.shape_dip;
+  F.taper = o.taper;
+  if (!F.ok) F.reason = "the fit did not converge";
+  return F;
+}
+
+std::vector<FaultRelation> infer_fault_relations(const std::vector<FaultDataSet>& faults, double relation_distance) {
+  std::vector<FaultRelation> out;
+  auto sides = [&](const FaultDataSet& a, const FaultDataSet& b, double& dmin, std::size_t& pos, std::size_t& neg) {
+    dmin = std::numeric_limits<double>::max();
+    pos = neg = 0;
+    const Vec3 sdir{std::sin(b.plane.strike), std::cos(b.plane.strike), 0};
+    for (auto& p : a.points) {
+      Vec3 r = p - b.plane.centroid;
+      // only data beside b's surface along its strike (within its extent, when known)
+      if (std::isfinite(b.tip_extent) && std::fabs(dot(r, sdir)) > b.tip_extent + relation_distance) continue;
+      double d = dot(r, b.plane.normal);
+      dmin = std::min(dmin, std::fabs(d));
+      (d > 0 ? pos : neg) += 1;
+    }
+  };
+  auto strike_diff = [](double a, double b) {
+    double d = std::fmod(std::fabs(a - b), kPi);
+    return std::min(d, kPi - d);
+  };
+  for (std::size_t i = 0; i < faults.size(); ++i)
+    for (std::size_t j = i + 1; j < faults.size(); ++j) {
+      const auto& A = faults[i];
+      const auto& B = faults[j];
+      double dab, dba;
+      std::size_t pa, na, pb, nb;
+      sides(A, B, dab, pa, na);
+      sides(B, A, dba, pb, nb);
+      auto two_sided = [](std::size_t p, std::size_t n) { return std::min(p, n) > 0.1 * static_cast<double>(p + n); };
+      auto one_sided = [](std::size_t p, std::size_t n) { return p + n > 0 && std::min(p, n) <= 0.02 * static_cast<double>(p + n); };
+      if ((two_sided(pa, na) && dab <= relation_distance) || (two_sided(pb, nb) && dba <= relation_distance)) {
+        const bool a_cuts = two_sided(pa, na) && dab <= relation_distance;
+        const auto& X = a_cuts ? A : B;
+        const auto& Y = a_cuts ? B : A;
+        out.push_back({X.name, Y.name, "crosses",
+                       "data of " + X.name + " lie on both sides of " + Y.name + " (closest " + fmt_fixed(a_cuts ? dab : dba, 1) +
+                           " m): the faults cross; their ages need the cross-cutting offsets",
+                       a_cuts ? dab : dba, ""});
+        continue;
+      }
+      for (int dir = 0; dir < 2; ++dir) {
+        const auto& X = dir ? B : A;
+        const auto& Y = dir ? A : B;
+        double dmin = dir ? dba : dab;
+        std::size_t p = dir ? pb : pa, nn = dir ? nb : na;
+        if (!(one_sided(p, nn) && dmin <= relation_distance)) continue;
+        const bool same_dip = dot(Vec3{X.plane.normal.x, X.plane.normal.y, 0}, Vec3{Y.plane.normal.x, Y.plane.normal.y, 0}) > 0;
+        const bool splay = strike_diff(X.plane.strike, Y.plane.strike) < deg2rad(30) && same_dip;
+        const std::string side = (p > nn) ? "hanging wall" : "footwall";
+        out.push_back({X.name, Y.name, splay ? "splay" : "abuts",
+                       "data of " + X.name + " end " + fmt_fixed(dmin, 1) + " m from " + Y.name + ", all on its " + side + " side" +
+                           (splay ? "; strikes within 30 degrees and the same dip direction (stage 2A branch-line rule)" : ""),
+                       dmin, p > nn ? "hanging_wall" : "footwall"});
+      }
+    }
+  return out;
+}
 
 ConditionedModel::ConditionedModel(std::shared_ptr<ParametricModel> inner, ConditioningResult r)
     : inner_(std::move(inner)), r_(std::move(r)), info_(inner_->info()) {}

@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <tuple>
@@ -18,6 +19,7 @@
 #include "stratonix/core/util.hpp"
 #include "stratonix/engines/conditioning.hpp"
 #include "stratonix/engines/fields.hpp"
+#include "stratonix/engines/foldframe.hpp"
 #include "stratonix/engines/wells.hpp"
 
 namespace stratonix {
@@ -765,9 +767,57 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
       if (tm.empty())
         throw Error(ErrorCode::Build, "fault " + f.name + ": no horizon is offset by more than its station scatter; the throw cannot be estimated from the data" +
                                           per_horizon);
-      const double T = median(tm), L = median(len), C = median(cen);
+      double T = median(tm), L = median(len), C = median(cen);
       std::string src = "estimated from horizon cut-offs of " + inputs_txt + " (" + std::to_string(stations) + " stations on " +
                         std::to_string(tm.size()) + " horizons, RMS " + fmt_fixed(rms, 2) + " m)";
+      // stage 4A (STX-TN-14 section 3.1): one displacement field over the fault surface
+      DisplacementField dfield;
+      if (f.estimate_model == "displacement_field") {
+        DisplacementOptions dop;
+        dop.shape_strike = f.profile_strike.type.empty() ? "flat_topped" : f.profile_strike.type;
+        dop.taper = f.profile_strike.taper.present ? f.profile_strike.taper.si() : 0.25;
+        dop.shape_dip = "sine";  // finite throw gradient at the tips (the stage 2A admissibility check)
+        auto dobs = displacement_observations(pl, est, hp);
+        // stations within the band of another fault see that fault's offset too: excluded
+        {
+          const Vec3 sd{std::sin(pl.strike), std::cos(pl.strike), 0};
+          const Vec3 dn = normalized(Vec3{std::cos(pl.strike) * std::cos(pl.dip), -std::sin(pl.strike) * std::cos(pl.dip), -std::sin(pl.dip)});
+          std::size_t before = dobs.size();
+          dobs.erase(std::remove_if(dobs.begin(), dobs.end(),
+                                    [&](const DisplacementObservation& q) {
+                                      Vec3 X = pl.centroid + sd * q.s + dn * q.d;
+                                      for (auto& g : d2.faults) {
+                                        if (&g == &f || g.geom_type != "planar" || !g.reference_point.present || !g.strike.present || !g.dip.present)
+                                          continue;
+                                        Vec3 cg{g.reference_point.si(0), g.reference_point.si(1), -g.reference_depth.si()};
+                                        double st = g.strike.si(), dp = g.dip.si();
+                                        Vec3 ng{std::sin(dp) * std::cos(st), -std::sin(dp) * std::sin(st), std::cos(dp)};
+                                        Vec3 sg{std::sin(st), std::cos(st), 0};
+                                        if (g.length.present && std::fabs(dot(X - cg, sg)) > 0.5 * g.length.si() + o.band) continue;
+                                        if (std::fabs(dot(X - cg, ng)) / std::max(1e-6, std::sin(dp)) <= o.band) return true;
+                                      }
+                                      return false;
+                                    }),
+                     dobs.end());
+          if (dobs.size() < before)
+            log.value("implicit.fault." + f.name + ".displacement_field_excluded",
+                      std::to_string(before - dobs.size()) + " of " + std::to_string(before) +
+                          " observations within the band of another fault (they see its offset too)");
+        }
+        dfield = fit_displacement_field(dobs, dop);
+        if (!dfield.ok) throw Error(ErrorCode::Build, "fault " + f.name + ": the displacement field cannot be fitted: " + dfield.reason);
+        T = dfield.max_throw;
+        L = dfield.length;
+        C = dfield.s0;
+        src = "displacement field fitted to " + std::to_string(dfield.observations) + " cut-off separations of " + inputs_txt + " (RMS " +
+              fmt_fixed(dfield.rms, 2) + " m)";
+        log.value("implicit.fault." + f.name + ".displacement_field",
+                  "maximum " + fmt_fixed(T, 2) + " m at " + fmt_fixed(C, 0) + " m along strike" +
+                      (std::isfinite(dfield.height) ? " and " + fmt_fixed(dfield.d0, 0) + " m down dip; height " + fmt_fixed(dfield.height, 0) + " m"
+                                                    : "; height beyond the data (tips free down dip)") +
+                      ", length " + fmt_fixed(L, 0) + " m, RMS " + fmt_fixed(dfield.rms, 2) + " m, " + std::to_string(dfield.observations) +
+                      " observations (calibrated)");
+      }
       std::string b = "faults." + f.name;
       f.throw_max = make_param(b + ".throw.max", {T}, "m", Dimension::Length, 1, desc::Evidence::Calibrated, src);
       f.length = make_param(b + ".extent.length", {L}, "m", Dimension::Length, 1, desc::Evidence::Calibrated, src);
@@ -789,12 +839,67 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
         t.fraction = make_param(b + ".extent.tip.fraction", {0.5}, "fraction", Dimension::Dimensionless, 1, desc::Evidence::Calibrated,
                                 "midway between the unoffset and the offset horizon (" + src + ")");
       };
+      if (dfield.ok && std::isfinite(dfield.height) && kPi * T / dfield.height >= 0.8) {
+        log.note("fault " + f.name + ": the displacement field's height (" + fmt_fixed(dfield.height, 0) +
+                 " m) would give a throw gradient of " + fmt_fixed(kPi * T / dfield.height, 2) +
+                 " near the tips; the tips are set from the offset horizons instead");
+        dfield.height = std::numeric_limits<double>::infinity();
+      }
+      if (dfield.ok && std::isfinite(dfield.height)) {
+        // tips where the displacement field ends down dip (depths), unless stated
+        const double sind = std::sin(pl.dip);
+        auto depth_tip = [&](desc::TipDesc& t, double dd, const std::string& which) {
+          if (!t.rule.empty()) return;
+          t.rule = "depth";
+          t.depth = make_param(b + ".extent." + which + ".depth", {-pl.centroid.z + dd * sind}, "m", Dimension::Length, 1, desc::Evidence::Calibrated, src);
+        };
+        depth_tip(f.upper, dfield.d0 - 0.5 * dfield.height, "upper_tip");
+        depth_tip(f.lower, dfield.d0 + 0.5 * dfield.height, "lower_tip");
+        f.profile_dip.type = "sine";
+      }
       set_tip(f.upper, hmin - 1, hmin, hmin == 0);
       set_tip(f.lower, hmax, hmax + 1, hmax + 1 >= static_cast<int>(nh));
       f.throw_estimate = false;
       log.value("implicit.fault." + f.name + ".estimated_throw", fmt_fixed(T, 2) + " m, length " + fmt_fixed(L, 0) + " m, centre " + fmt_fixed(C, 0) +
                                                                  " m along strike from the plane's reference point (calibrated: " + src + ")");
       provenance.push_back("Fault " + f.name + ": throw, length and tips " + src);
+    }
+  }
+  // Fault relations inferred from data and rules (stage 4A, STX-TN-14 section 3.2): logged; applied to
+  // faults without a stated relation when implicit.fault_relations is infer.
+  {
+    std::vector<FaultDataSet> fds;
+    for (std::size_t k = 0; k < d.faults.size(); ++k) {
+      if (d.faults[k].geom_type != "sticks") continue;
+      auto it = in.lines.find(d.faults[k].geom_input);
+      if (it == in.lines.end()) continue;
+      FaultDataSet fs;
+      fs.name = d.faults[k].name;
+      fs.plane = fit_plane(it->second);
+      for (auto& st : it->second)
+        for (auto& p : st) fs.points.push_back(p);
+      if (d2.faults[k].length.present) fs.tip_extent = 0.5 * d2.faults[k].length.si();
+      fds.push_back(std::move(fs));
+    }
+    const double rd = d.implicit.relation_distance.present ? d.implicit.relation_distance.si() : 150.0;  // Stratonix default
+    for (auto& r : infer_fault_relations(fds, rd)) {
+      log.value("implicit.fault_relation." + r.a + "." + r.b, r.kind + ": " + r.rule);
+      if (d.implicit.fault_relations != "infer" || r.kind == "crosses") continue;
+      int ka = d2.fault_index(r.a), kb = d2.fault_index(r.b);
+      auto& fa = d2.faults[static_cast<std::size_t>(ka)];
+      if (!fa.abuts_fault.empty()) {
+        log.note("implicit: the stated relation of " + r.a + " is kept (inferred: " + r.kind + " " + r.b + ")");
+        continue;
+      }
+      const auto& fb = d2.faults[static_cast<std::size_t>(kb)];
+      if (fa.age.present && fb.age.present && fb.age.si() > fa.age.si()) {
+        log.note("implicit: " + r.a + " " + r.kind + " " + r.b + " was inferred but " + r.b + " is younger: not applied");
+        continue;
+      }
+      fa.abuts_fault = r.b;
+      fa.abuts_side = r.side;
+      fa.abuts_transfer = r.kind == "splay";
+      provenance.push_back("Fault " + r.a + ": " + r.kind + " " + r.b + " inferred from data (" + r.rule + ")");
     }
   }
   // 5. Iterate: fields in the restored frame -> surfaces -> parametric model with faults -> restore data.
@@ -883,6 +988,62 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
         ++iso_used;
       }
       if (it == 0 && iso_used) log.value("implicit.isochore_data_in_field." + group_names[gi], std::to_string(iso_used));
+      // fold frames (stage 4A, STX-TN-14 section 2): predicted bedding normals at lattice points
+      // without measured orientations constrain the series' field
+      for (auto& fd : d.implicit.folds) {
+        if (!(fd.series.empty() ? groups.size() == 1 || group_names[gi] == "all horizons" : group_names[gi] == fd.series)) continue;
+        std::vector<OrientationDatum> bed, fol;
+        BBox bb;
+        double zs = 0;
+        std::size_t nz = 0;
+        for (auto& dt : data) {
+          if (group_of[static_cast<std::size_t>(dt.horizon)] != static_cast<int>(gi)) continue;
+          bb.add(dt.restored);
+          if (dt.oriented) bed.push_back({dt.restored, dt.normal_restored});
+          else { zs += dt.restored.z; ++nz; }
+        }
+        if (!fd.foliation.empty()) {
+          auto itf = in.data.find(fd.foliation);
+          if (itf != in.data.end())
+            for (auto& dp : itf->second)
+              if (dp.oriented) fol.push_back({dp.p, dp.n});
+        }
+        FoldFrameOptions fo;
+        if (fd.wavelength.present) fo.wavelength = fd.wavelength.si();
+        if (fd.order.present) fo.max_order = static_cast<int>(fd.order.si());
+        FoldFrame ff = fit_fold_frame(bed, fol, fo);
+        if (!ff.ok) throw Error(ErrorCode::Build, "implicit: fold frame " + fd.name + ": " + ff.reason);
+        const double step = fd.constraint_spacing.present ? fd.constraint_spacing.si() : std::max(2 * sp, ff.wavelength / 16);
+        // constraint levels: the mean elevation of each horizon of the series with data
+        std::map<int, std::pair<double, std::size_t>> hz;
+        for (auto& dt : data)
+          if (!dt.oriented && group_of[static_cast<std::size_t>(dt.horizon)] == static_cast<int>(gi)) {
+            hz[dt.horizon].first += dt.restored.z;
+            ++hz[dt.horizon].second;
+          }
+        std::vector<double> levels;
+        for (auto& [hh, v] : hz) levels.push_back(v.first / static_cast<double>(v.second));
+        if (levels.empty()) levels.push_back(nz ? zs / static_cast<double>(nz) : 0.5 * (bb.lo.z + bb.hi.z));
+        std::map<std::pair<long, long>, bool> measured;
+        for (auto& o2 : bed) measured[{std::lround(o2.p.x / step), std::lround(o2.p.y / step)}] = true;
+        std::size_t added = 0;
+        for (double y = bb.lo.y; y <= bb.hi.y + 1e-9; y += step)
+          for (double x = bb.lo.x; x <= bb.hi.x + 1e-9; x += step) {
+            if (measured.count({std::lround(x / step), std::lround(y / step)})) continue;
+            for (double zl : levels) {
+              Vec3 q{x, y, zl};
+              gs.push_back({q, ff.bedding_normal(q)});
+              ++added;
+            }
+          }
+        if (it == 0)
+          log.value("implicit.fold." + fd.name,
+                    "axis trend " + fmt_fixed(rad2deg(ff.trend), 1) + " deg, plunge " + fmt_fixed(rad2deg(ff.plunge), 1) + " deg; interlimb " +
+                        fmt_fixed(rad2deg(ff.interlimb), 1) + " deg; wavelength " + fmt_fixed(ff.wavelength, 0) + " m; Fourier order " +
+                        std::to_string(ff.order) + "; RMS " + fmt_fixed(rad2deg(ff.rms), 2) + " deg on " + std::to_string(ff.data) +
+                        " bedding orientations; cylindricity " + fmt_fixed(ff.cylindricity, 3) + "; " + std::to_string(added) +
+                        " constraints at " + fmt_fixed(step, 0) + " m (calibrated)" + (ff.reason.empty() ? "" : "; " + ff.reason));
+      }
       if (vs.size() < 4)
         throw Error(ErrorCode::Build, "implicit: series " + group_names[gi] + " has " + std::to_string(vs.size()) +
                                           " interface data; at least four are needed for its field");
