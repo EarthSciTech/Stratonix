@@ -5,7 +5,21 @@ has its own version (`stratonix_schema`).
 
 ## [Unreleased]
 
+### Added
+- Stage 4A (STX-TN-14), in progress:
+  - discrete implicit field with free horizon values (`implicit.solver.type: discrete`,
+    `implicit.horizon_values: free`; rules F34, F35);
+  - fold frames fitted to bedding (`implicit.folds`, `stratonix fold-frame`);
+  - fault displacement fields (`throw.estimate.model: displacement_field`) and fault relations
+    inferred from data (`implicit.fault_relations: infer`);
+  - Bayesian conditioning (`conditioning.method: bayesian`, `conditioning.sampler`): an
+    affine-invariant ensemble sampler with differential-evolution and stretch moves, posterior
+    tables, trace and corner figures, check C28 and rule F36; `stratonix ensemble` draws the
+    members of a Bayesian description from its posterior.
+
 ### Changed
+- Least-squares conditioning updates its Jacobian by Broyden's formula: one model build per
+  iteration after the first finite-difference Jacobian.
 - Roadmap 3.1 (`docs/roadmap.md`): a new v4, geological engine and real data (stages 4A to 4D), comes
   before the applications, which move to v5, and the platform, which moves to v6.
 - CI: after a release is published by the release job, the citation and container workflows are

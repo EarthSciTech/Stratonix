@@ -239,6 +239,8 @@ struct ConditioningDesc {
   bool use_well_tops = true;
   Param uncertainty, orientation_uncertainty, max_iterations;
   std::vector<FitParameterDesc> parameters;
+  std::string method = "least_squares";  ///< stage 4A: least_squares | bayesian
+  Param walkers, steps, burn_in, thin, seed;  ///< stage 4A: conditioning.sampler
 };
 
 /// Grids and properties (stage 3B, STX-TN-12 section 10).

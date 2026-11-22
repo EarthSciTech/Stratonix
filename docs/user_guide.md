@@ -371,7 +371,23 @@ conditioning:
 
   Fitted values are labelled calibrated, with their uncertainty (`conditioning.csv`) and the data
   that control them (`influence.csv`). A fit that does not converge inside its range, or that no
-  datum controls, is refused with the reason.
+  datum controls, is refused with the reason. The least-squares fit updates its Jacobian by
+  Broyden's formula, so an iteration costs one model build (2026.4).
+- **Bayesian conditioning (2026.4).** `conditioning.method: bayesian` samples the posterior of
+  the same parameters: the prior is the parameter's distribution under `uncertainty.parameters`,
+  or uniform on [min, max]; the likelihood is Gaussian in the stated uncertainties.
+
+```yaml
+conditioning:
+  method: bayesian
+  sampler: {walkers: "16 ordinal", steps: "2000 ordinal", burn_in: "500 ordinal", thin: "10 ordinal", seed: "1 ordinal"}
+```
+
+  The build writes `posterior_samples.csv` and `posterior_summary.csv` (prior, least-squares
+  value with its Laplace sigma, mean, 95 % interval, R-hat, effective sample size), trace and
+  corner figures, and runs check C28. `stratonix ensemble` on the same description builds one
+  member per retained sample (or `--members N` of them), so statistics, sensitivity and
+  probability maps describe the posterior.
 - **Checks.** C21 (data misfit within the stated uncertainty) and C22 (the conditioning
   converged inside its ranges).
 
@@ -511,6 +527,7 @@ exports and figures.
 | C23 cell volumes | an active grid cell has a volume of zero or less |
 | C24 inverted cells | an active grid cell is inverted (corner order or corner Jacobian) |
 | C25 fault faces | a fault face of the grid lies off its fault surface by more than 1 % of the cell size |
+| C28 posterior | a parameter's split R-hat is 1.01 or more, or its effective sample size is below 100: run the sampler longer |
 
 Targets are reported, never used to tune the model.
 

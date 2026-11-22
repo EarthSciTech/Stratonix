@@ -15,6 +15,7 @@
 #include "stratonix/checks/manifest.hpp"
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/util.hpp"
+#include "stratonix/engines/posterior.hpp"
 #include "stratonix/engines/wells.hpp"
 #include "stratonix/figures/figures.hpp"
 #include "stratonix/io/export.hpp"
@@ -102,7 +103,7 @@ double Distribution::quantile(double u) const {
     const double fc = (b - a) / (c - a);
     return u < fc ? a + std::sqrt(u * (c - a) * (b - a)) : c - std::sqrt((1 - u) * (c - a) * (c - b));
   }
-  if (type == "discrete") {
+  if (type == "discrete" || type == "posterior") {
     double cum = 0;
     for (std::size_t k = 0; k < values.size(); ++k) {
       cum += weights[k];
@@ -358,9 +359,12 @@ void set_parameter(desc::Node& doc, const std::string& path, double value, const
 
 desc::Node member_document(const desc::Node& base, const EnsembleSpec& s, const MemberSample& m) {
   desc::Node doc = base;
-  // the members carry no uncertainty block of their own
+  // the members carry no uncertainty block of their own; posterior members are not refitted
+  const bool drop_cond = s.posterior && m.index != 0;
   if (doc.is_map())
-    doc.map.erase(std::remove_if(doc.map.begin(), doc.map.end(), [](auto& kv) { return kv.first == "uncertainty"; }), doc.map.end());
+    doc.map.erase(std::remove_if(doc.map.begin(), doc.map.end(),
+                                 [&](auto& kv) { return kv.first == "uncertainty" || (drop_cond && kv.first == "conditioning"); }),
+                  doc.map.end());
   if (m.index != 0)  // members (> 0) and one-at-a-time runs (< 0); the base case keeps its values
     for (std::size_t i = 0; i < s.parameters.size(); ++i) {
       const auto& p = s.parameters[i];
@@ -368,6 +372,11 @@ desc::Node member_document(const desc::Node& base, const EnsembleSpec& s, const 
                             : p.dist.type == "normal"     ? "normal(" + fmt_shortest(p.dist.a) + ", " + fmt_shortest(p.dist.b) + ")"
                             : p.dist.type == "triangular" ? "triangular(" + fmt_shortest(p.dist.a) + ", " + fmt_shortest(p.dist.b) + ", " + fmt_shortest(p.dist.c) + ")"
                                                           : "discrete";
+      if (p.dist.type == "posterior") {
+        set_parameter(doc, p.path, m.values[i], p.unit, "calibrated",
+                      p.source + (m.index > 0 ? "; member " + std::to_string(m.index) : std::string("; one-at-a-time run")));
+        continue;
+      }
       set_parameter(doc, p.path, m.values[i], p.unit, "assumed",
                     "sampled: " + d + " " + p.unit + " (" + p.evidence + (p.source.empty() ? "" : ", " + p.source) + "; base " + fmt_shortest(p.base) +
                         " " + p.unit + ")" + (m.index > 0 ? "; member " + std::to_string(m.index) + ", seed " + std::to_string(m.seed) : std::string("; one-at-a-time run")));
@@ -590,10 +599,44 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
   register_all_plugins();
   auto d = desc::load_description(description);
   EnsembleResult res;
-  res.spec = ensemble_spec(d);
+  const bool bayes = d.conditioning.present && d.conditioning.method == "bayesian";
+  res.spec = (d.uncertainty.present || !bayes) ? ensemble_spec(d) : EnsembleSpec{};
   auto& s = res.spec;
   if (o.members > 0) s.members = o.members;
   if (o.seed >= 0) s.seed = static_cast<std::uint64_t>(o.seed);
+  // stage 4A (STX-TN-14 section 4): a Bayesian conditioning gives the members of its posterior,
+  // one per retained sample (every thin-th step of every walker), or an even subset of them
+  PosteriorResult post;
+  std::vector<std::size_t> post_rows;
+  if (bayes) {
+    BuildInputs in;
+    io::load_build_inputs(d, in);
+    BuildLog lg;
+    post = sample_posterior(d, in, posterior_options(d), lg);
+    if (!post.ok) throw Error(ErrorCode::Build, "posterior sampling refused: " + post.reason, "conditioning");
+    std::vector<std::size_t> rows;
+    for (std::size_t w = 0; w < static_cast<std::size_t>(post.walkers); ++w)
+      for (std::size_t st = static_cast<std::size_t>(post.thin) - 1; st < static_cast<std::size_t>(post.steps); st += static_cast<std::size_t>(post.thin))
+        rows.push_back(w * static_cast<std::size_t>(post.steps) + st);
+    const std::size_t n = (o.members > 0 && static_cast<std::size_t>(o.members) < rows.size()) ? static_cast<std::size_t>(o.members) : rows.size();
+    for (std::size_t k = 0; k < n; ++k) post_rows.push_back(rows[k * rows.size() / n]);
+    s.members = static_cast<int>(n);
+    if (!d.uncertainty.present) s.seed = post.seed;
+    // the conditioned parameters leave the prior sampling (their priors are inside the posterior)
+    std::vector<int> keep;
+    std::vector<UncertainParameter> kept;
+    for (std::size_t i = 0; i < s.parameters.size(); ++i) {
+      bool cond = std::find(post.paths.begin(), post.paths.end(), s.parameters[i].path) != post.paths.end();
+      keep.push_back(cond ? -1 : static_cast<int>(kept.size()));
+      if (!cond) kept.push_back(s.parameters[i]);
+    }
+    std::vector<std::pair<std::pair<int, int>, double>> corr;
+    for (auto& [ij, rho] : s.correlations)
+      if (keep[static_cast<std::size_t>(ij.first)] >= 0 && keep[static_cast<std::size_t>(ij.second)] >= 0)
+        corr.push_back({{keep[static_cast<std::size_t>(ij.first)], keep[static_cast<std::size_t>(ij.second)]}, rho});
+    s.parameters = kept;
+    s.correlations = corr;
+  }
   // every scenario option must give a valid description on its own
   for (std::size_t k = 0; k < s.scenarios.size(); ++k)
     for (std::size_t q = 0; q < s.scenarios[k].options.size(); ++q) {
@@ -607,7 +650,35 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
         throw Error(ErrorCode::Validation, "uncertainty: scenario " + s.scenarios[k].name + ", option " + s.scenarios[k].options[q].name +
                                                " gives an invalid description:\n" + rep.text(), "uncertainty.scenarios");
     }
+  // the base case and the domain: the least-squares fit (the posterior is not sampled again)
+  desc::Node base_doc = d.resolved;
+  desc::Description dbase = d;
+  if (bayes) {
+    if (desc::Node* cn = find_node(base_doc, "conditioning"); cn && cn->is_map())
+      cn->map.erase(std::remove_if(cn->map.begin(), cn->map.end(), [](auto& kv) { return kv.first == "method" || kv.first == "sampler"; }), cn->map.end());
+    dbase.conditioning.method = "least_squares";
+    dbase.conditioning.walkers = dbase.conditioning.steps = dbase.conditioning.burn_in = dbase.conditioning.thin = dbase.conditioning.seed = desc::Param{};
+  }
   auto samples = sample_members(s);
+  if (bayes) {
+    s.posterior = true;
+    for (std::size_t k = 0; k < post.paths.size(); ++k) {
+      const desc::Param* bp = d.param_by_name(post.paths[k]);
+      UncertainParameter up;
+      up.path = post.paths[k];
+      up.unit = bp->unit;
+      up.base = bp->values.at(0);
+      up.evidence = "calibrated";
+      up.source = "posterior sample of conditioning.method: bayesian (" + std::to_string(post.walkers) + " walkers, seed " + std::to_string(post.seed) + ")";
+      up.dist.type = "posterior";
+      for (std::size_t r : post_rows) up.dist.values.push_back(post.chain[r][k] / bp->to_si);
+      std::sort(up.dist.values.begin(), up.dist.values.end());
+      up.dist.weights.assign(up.dist.values.size(), 1.0 / static_cast<double>(up.dist.values.size()));
+      samples[0].values.push_back(up.base);
+      for (std::size_t m = 1; m < samples.size(); ++m) samples[m].values.push_back(post.chain[post_rows[m - 1]][k] / bp->to_si);
+      s.parameters.push_back(std::move(up));
+    }
+  }
   // one-at-a-time runs: each parameter at its P10 and P90, the others at their base values
   std::vector<MemberSample> oat;
   if (s.one_at_a_time)
@@ -618,7 +689,7 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
         m.values[i] = s.parameters[i].dist.quantile(q);
         oat.push_back(m);
       }
-  const Domain dom = build_only(d, BuildOptions{}).model->info().domain;
+  const Domain dom = build_only(dbase, BuildOptions{}).model->info().domain;
   std::vector<GridSpec> map_grids;
   for (auto& mp : s.maps) {
     GridSpec g;
@@ -643,7 +714,7 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
     for (;;) {
       std::size_t k = next.fetch_add(1);
       if (k >= all.size()) return;
-      runs[k] = run_member(d.resolved, description.parent_path(), s, all[k], map_grids);
+      runs[k] = run_member(base_doc, description.parent_path(), s, all[k], map_grids);
     }
   };
   {
@@ -729,6 +800,7 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
   // ---- files ----
   const fs::path e = out_dir / "ensemble";
   fs::create_directories(e / "maps");
+  if (bayes) write_posterior_tables(d, post, e);
   const std::string N = std::to_string(s.members), seed = std::to_string(s.seed);
   {
     std::string t = "member,seed,status";
@@ -783,6 +855,7 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
                        "Members: " + N + "; seed: " + seed + "; generator: xoshiro256** seeded per member by SplitMix64(seed, member)\n" +
                        "Members ok: " + std::to_string(nok) + "; failed (refused, build failed or checks failed): " + std::to_string(failed) + " - every one listed in members.csv\n\n" +
                        "members.csv          every member: seed, sampled values, scenario options, status and reason, key numbers\n" +
+                       (bayes ? std::string("posterior_*.csv      posterior of the Bayesian conditioning: retained samples, priors, diagnostics (members = these samples; base = least-squares fit)\n") : std::string()) +
                        "statistics.csv       per key number over the ok members: n, mean, sd, P10, P50, P90, min, max (with N and seed)\n" +
                        "sensitivity_sobol.csv first-order variance-based indices from the ensemble (given data, sqrt(N) bins)\n" +
                        (s.one_at_a_time ? std::string("sensitivity_oat.csv  one at a time: each parameter at its P10 and P90, others at base\n") : std::string()) +
@@ -790,7 +863,7 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
                        (o.figures ? std::string("figures/             histograms, first-order indices, tornado charts and probability maps (PNG, SVG, TIFF, PPTX)\n") : std::string()) +
                        (o.base_build ? std::string("../base/             the base case (the description as written): full build, checks, exports and figures\n") : std::string());
   if (o.figures) {
-    auto m0 = build_only(d, BuildOptions{}).model;
+    auto m0 = build_only(dbase, BuildOptions{}).model;
     std::vector<std::pair<std::string, std::string>> kk = {{"Members ok / failed", std::to_string(nok) + " / " + std::to_string(failed)},
                                                            {"Seed", seed}};
     auto c = figure_context(d, *m0, kk);

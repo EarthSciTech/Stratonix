@@ -2274,6 +2274,41 @@
         },
         "max_iterations": {
           "$ref": "#/$defs/param"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "least_squares",
+            "bayesian"
+          ],
+          "description": "Stage 4A: least squares (Levenberg-Marquardt with Broyden updates) or Bayesian sampling of the posterior (STX-TN-14 section 4)."
+        },
+        "sampler": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Stage 4A: the affine-invariant ensemble sampler (conditioning.method: bayesian).",
+          "properties": {
+            "walkers": {
+              "$ref": "#/$defs/param",
+              "description": "Even number of walkers, at least 4 and twice the number of parameters (default max(4 n, 16))."
+            },
+            "steps": {
+              "$ref": "#/$defs/param",
+              "description": "Steps per walker after burn-in (default 2000)."
+            },
+            "burn_in": {
+              "$ref": "#/$defs/param",
+              "description": "Discarded steps per walker (default 500)."
+            },
+            "thin": {
+              "$ref": "#/$defs/param",
+              "description": "Every thin-th step is written as an ensemble member (default 10)."
+            },
+            "seed": {
+              "$ref": "#/$defs/param",
+              "description": "Seed of the walker streams (default 0)."
+            }
+          }
         }
       }
     }

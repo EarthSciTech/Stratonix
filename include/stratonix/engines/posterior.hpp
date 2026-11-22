@@ -19,6 +19,7 @@ struct PosteriorOptions {
   int burn_in = 500;
   int thin = 10;              ///< members written: every thin-th step of every walker
   double stretch = 2.0;       ///< a of the stretch move
+  double de_fraction = 0.8;   ///< fraction of differential-evolution moves (ter Braak 2006); the rest are stretch moves
   std::uint64_t seed = 0;
   int threads = 0;            ///< 0 = hardware concurrency
 };
@@ -41,7 +42,9 @@ struct PosteriorResult {
   std::vector<double> rhat, ess;            ///< split R-hat and effective sample size per parameter
   double acceptance = 0;
   bool converged = false;                   ///< every rhat < 1.01 and ess >= 100
-  long builds = 0;                          ///< model evaluations used
+  std::vector<double> lsq, lsq_sigma;       ///< least-squares start and its Laplace sigma per parameter (SI; empty if the fit failed)
+  std::vector<PriorSpec> priors;            ///< per parameter (sample_posterior)
+  long builds = 0;                          ///< posterior evaluations (a proposal outside the prior range is rejected without a build)
   std::uint64_t seed = 0;
   int walkers = 0, steps = 0, burn_in = 0, thin = 1;
 };
@@ -50,15 +53,20 @@ struct PosteriorResult {
 using LogDensity = std::function<double(const std::vector<double>&)>;
 
 /// Sample a log density with the affine-invariant ensemble sampler, walkers started from `start`
-/// (one vector per walker). Deterministic for a given seed whatever the number of threads.
+/// (one vector per walker). Each walker moves by a differential-evolution move (probability
+/// de_fraction) or a stretch move, both built from the complementary half of the ensemble.
+/// Deterministic for a given seed whatever the number of threads.
 PosteriorResult sample_ensemble(const LogDensity& f, const std::vector<std::vector<double>>& start, const PosteriorOptions& o);
 
 /// Split R-hat (Vehtari et al. 2021, without rank normalisation) of one parameter over chains
 /// [chain][draw].
 double split_rhat(const std::vector<std::vector<double>>& chains);
-/// Effective sample size from the integrated autocorrelation time of the walker-mean series
-/// (Goodman and Weare 2010; Sokal's automatic window).
+/// Effective sample size: draws over the integrated autocorrelation time, estimated from the
+/// walker-averaged autocorrelation function with Sokal's automatic window (Goodman and Weare 2010).
 double effective_sample_size(const std::vector<std::vector<double>>& chains);
+
+/// Sampler options from conditioning.sampler (defaults where a key is absent).
+PosteriorOptions posterior_options(const desc::Description& d);
 
 /// Bayesian conditioning of a description (conditioning.method: bayesian): priors, likelihood of
 /// the data residuals, sampler started around the least-squares fit.

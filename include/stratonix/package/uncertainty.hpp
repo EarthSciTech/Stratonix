@@ -37,7 +37,7 @@ double normal_cdf(double x);
 double normal_quantile(double p);
 
 struct Distribution {
-  std::string type;              ///< uniform, normal, triangular, discrete
+  std::string type;              ///< uniform, normal, triangular, discrete; posterior (stage 4A: sorted samples, equal weights)
   double a = 0, b = 0, c = 0;    ///< uniform: min, max; normal: mean, sd; triangular: min, mode, max
   double lo = -1e300, hi = 1e300;  ///< normal truncation (min, max)
   std::vector<double> values, weights;  ///< discrete
@@ -78,6 +78,7 @@ struct EnsembleSpec {
   bool one_at_a_time = false;
   std::vector<ProbabilityMapSpec> maps;
   std::vector<std::string> key_numbers;  ///< extra key numbers (besides the summary table's)
+  bool posterior = false;  ///< stage 4A: members drawn from the posterior of conditioning.method: bayesian
 };
 /// The ensemble specification of a description's uncertainty block (rule F33 already applied).
 EnsembleSpec ensemble_spec(const desc::Description& d);

@@ -7,6 +7,7 @@
 #include "stratonix/checks/checks.hpp"
 #include "stratonix/checks/manifest.hpp"
 #include "stratonix/engines/conditioning.hpp"
+#include "stratonix/engines/posterior.hpp"
 #include "stratonix/engines/history.hpp"
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/wells.hpp"
@@ -519,6 +520,70 @@ void write_restoration(const desc::Description& d, const Model& m, const std::fi
                     "Section " + sname + " unfolded by flexural slip.", "Bed lengths conserved by construction; compare them for line-length balance.");
 }
 
+/// Stage 4A posterior samples in the parameters' units, for the figures (STX-TN-14 section 4).
+fig::PosteriorSamples posterior_samples(const desc::Description& d, const PosteriorResult& pr) {
+  fig::PosteriorSamples s;
+  std::vector<double> to;
+  for (auto& p : pr.paths) {
+    const desc::Param* q = d.param_by_name(p);
+    s.names.push_back(p);
+    s.units.push_back(q ? q->unit : "");
+    to.push_back(q ? q->to_si : 1.0);
+  }
+  s.walkers = pr.walkers;
+  s.steps = pr.steps;
+  s.burn_in = pr.burn_in;
+  s.thin = pr.thin;
+  s.seed = pr.seed;
+  s.acceptance = pr.acceptance;
+  s.converged = pr.converged;
+  s.rhat = pr.rhat;
+  s.ess = pr.ess;
+  for (std::size_t k = 0; k < to.size(); ++k) {
+    s.mean.push_back(pr.mean[k] / to[k]);
+    s.q025.push_back(pr.q025[k] / to[k]);
+    s.q975.push_back(pr.q975[k] / to[k]);
+    s.lsq.push_back(k < pr.lsq.size() ? pr.lsq[k] / to[k] : kNaN);
+  }
+  s.chain.reserve(pr.chain.size());
+  for (auto& v : pr.chain) {
+    std::vector<double> u(v.size());
+    for (std::size_t k = 0; k < v.size(); ++k) u[k] = v[k] / to[k];
+    s.chain.push_back(std::move(u));
+  }
+  return s;
+}
+
+/// posterior_samples.csv (every thin-th step of every walker) and posterior_summary.csv.
+void write_posterior_tables(const desc::Description& d, const PosteriorResult& pr, const std::filesystem::path& dir) {
+  auto s = posterior_samples(d, pr);
+  std::string t = "walker,step";
+  for (std::size_t k = 0; k < s.names.size(); ++k) t += "," + s.names[k] + " (" + s.units[k] + ")";
+  t += ",log_posterior\n";
+  for (std::size_t w = 0; w < static_cast<std::size_t>(s.walkers); ++w)
+    for (std::size_t st = static_cast<std::size_t>(s.thin) - 1; st < static_cast<std::size_t>(s.steps); st += static_cast<std::size_t>(s.thin)) {
+      const std::size_t i = w * static_cast<std::size_t>(s.steps) + st;
+      t += std::to_string(w + 1) + "," + std::to_string(st + 1);
+      for (double v : s.chain[i]) t += "," + fmt_fixed(v, 6);
+      t += "," + fmt_fixed(pr.log_posterior[i], 6) + "\n";
+    }
+  write_file(dir / "posterior_samples.csv", t);
+  std::string u = "path,unit,prior,least_squares,laplace_sigma,mean,sd,q025,q975,rhat,ess,walkers,steps,burn_in,thin,seed,acceptance,converged\n";
+  for (std::size_t k = 0; k < s.names.size(); ++k) {
+    const double to = d.param_by_name(s.names[k]) ? d.param_by_name(s.names[k])->to_si : 1.0;
+    const auto& P = pr.priors.at(k);
+    std::string prior = P.distribution + "(" + fmt_shortest(P.a / to) + " " + fmt_shortest(P.b / to) +
+                        (P.distribution == "triangular" ? " " + fmt_shortest(P.c / to) : std::string()) + ") on [" + fmt_shortest(P.min / to) + " " +
+                        fmt_shortest(P.max / to) + "]";
+    u += s.names[k] + "," + s.units[k] + "," + prior + "," + (k < pr.lsq.size() ? fmt_fixed(pr.lsq[k] / to, 6) : std::string()) + "," +
+         (k < pr.lsq_sigma.size() ? fmt_fixed(pr.lsq_sigma[k] / to, 6) : std::string()) + "," + fmt_fixed(s.mean[k], 6) + "," + fmt_fixed(pr.sd[k] / to, 6) +
+         "," + fmt_fixed(s.q025[k], 6) + "," + fmt_fixed(s.q975[k], 6) + "," + fmt_fixed(pr.rhat[k], 5) + "," + fmt_fixed(pr.ess[k], 1) + "," +
+         std::to_string(pr.walkers) + "," + std::to_string(pr.steps) + "," + std::to_string(pr.burn_in) + "," + std::to_string(pr.thin) + "," +
+         std::to_string(pr.seed) + "," + fmt_fixed(pr.acceptance, 4) + "," + (pr.converged ? "yes" : "no") + "\n";
+  }
+  write_file(dir / "posterior_summary.csv", u);
+}
+
 /// Stage 3A figures: fitted parameters, and the data misfit per horizon where uncertainties are
 /// stated or the model was conditioned (STX-TN-11 section 6).
 void write_data_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
@@ -534,6 +599,14 @@ void write_data_figures(const desc::Description& d, const Model& m, const std::v
     fig::write_figure(fig::conditioning_figure(c, rows, cr->chi2_reduced, cr->residuals.size()), folder, fig::figure_basename(c, "conditioning", ""),
                       c.model_name + " - fitted parameters", "Parameters fitted to the data, with their admissible ranges and uncertainties.",
                       "Fitted values are labelled calibrated; the data controlling each are listed in influence.csv.");
+  }
+  if (auto* pr = static_cast<const PosteriorResult*>(m.capability("posterior"))) {
+    auto ps = posterior_samples(d, *pr);
+    const std::string ev = "Posterior of conditioning.method: bayesian; seed " + std::to_string(pr->seed) + "; samples in posterior_samples.csv.";
+    fig::write_figure(fig::posterior_trace_figure(c, ps), folder, fig::figure_basename(c, "posterior_trace", ""), c.model_name + " - posterior traces",
+                      "Walker paths of every fitted parameter after burn-in, with split R-hat and effective sample size.", ev);
+    fig::write_figure(fig::posterior_corner_figure(c, ps), folder, fig::figure_basename(c, "posterior_corner", ""), c.model_name + " - posterior",
+                      "Marginal and pairwise posterior of the fitted parameters.", ev);
   }
   std::map<std::string, std::vector<fig::MisfitPoint>> per;
   for (auto& r : *mis)
@@ -659,6 +732,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     write_file(out_dir / "conditioning.csv", t);
     write_file(out_dir / "influence.csv", inf);
   }
+  if (auto* pr = static_cast<const PosteriorResult*>(o.model->capability("posterior"))) write_posterior_tables(d, *pr, out_dir);
   CheckContext ctx(*o.model, d, make_well_paths(d), d.grid_spacing.si());
   CheckReport rep = run_checks(ctx);
   o.checks_passed = rep.passed();
@@ -674,6 +748,14 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
                                               ", range " + fmt_shortest(p.min) + " to " + fmt_shortest(p.max) + ")"});
     rows.push_back({"Conditioning", std::to_string(cr->residuals.size()) + " data, reduced chi2 " + fmt_fixed(cr->chi2_reduced, 3) + ", " +
                                         std::to_string(cr->iterations) + " iterations"});
+  }
+  if (auto* pr = static_cast<const PosteriorResult*>(o.model->capability("posterior"))) {
+    auto ps = posterior_samples(d, *pr);
+    for (std::size_t k = 0; k < ps.names.size(); ++k)
+      rows.push_back({"Posterior " + ps.names[k], fmt_fixed(ps.mean[k], 3) + " " + ps.units[k] + " (95 % " + fmt_fixed(ps.q025[k], 3) + " to " +
+                                                     fmt_fixed(ps.q975[k], 3) + "; R-hat " + fmt_fixed(pr->rhat[k], 4) + ", ESS " + fmt_fixed(pr->ess[k], 0) + ")"});
+    rows.push_back({"Posterior sampler", std::to_string(pr->walkers) + " walkers x " + std::to_string(pr->steps) + " steps, seed " + std::to_string(pr->seed) +
+                                             (pr->converged ? ", converged" : ", not converged")});
   }
   const GridProducts* gp = ctx.grid_products();
   if (gp)

@@ -1,6 +1,7 @@
 // Stage 3A (STX-TN-11): faults from data and hybrid conditioning. Specified; built by Prompts 35
 // and 36.
 #include "stratonix/engines/conditioning.hpp"
+#include "stratonix/engines/posterior.hpp"
 
 #include <algorithm>
 #include <array>
@@ -222,25 +223,12 @@ StickProfile profile_from_sticks(const std::vector<Polyline>& sticks) {
   return pr;
 }
 
-namespace {
-struct CondDatum {
-  Vec3 p, n;
-  int horizon = -1;
-  bool oriented = false;
-  double sigma = 0;  ///< m; degrees for orientations
-  std::string input, evidence, kind;
-};
-}  // namespace
-
-ConditioningResult condition_to_data(const desc::Description& d, const BuildInputs& in, BuildLog& log) {
-  ConditioningResult R;
+ConditioningProblem::ConditioningProblem(const desc::Description& d, const BuildInputs& in) : dd_(d), in_(&in) {
   const auto& cd = d.conditioning;
   // 1. data, each with its uncertainty
-  std::vector<CondDatum> data;
-  std::set<std::string> used_inputs;
   for (auto& e : cd.data) {
     auto it = in.data.find(e.input);
-    if (it == in.data.end()) { R.reason = "conditioning data input '" + e.input + "' was not loaded"; return R; }
+    if (it == in.data.end()) { reason_ = "conditioning data input '" + e.input + "' was not loaded"; return; }
     std::string ev = "assumed";
     for (auto& x : d.inputs)
       if (x.id == e.input && !x.evidence.empty()) ev = x.evidence;
@@ -248,7 +236,7 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
     for (auto& dp : it->second) {
       int h = d.horizon_index(dp.label);
       if (h < 0) continue;
-      CondDatum c;
+      ConditioningDatum c;
       c.p = dp.p;
       c.n = dp.n;
       c.horizon = h;
@@ -260,9 +248,9 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
       else if (e.uncertainty.present) c.sigma = orient ? rad2deg(e.uncertainty.si()) : e.uncertainty.si();
       else if (orient && cd.orientation_uncertainty.present) c.sigma = rad2deg(cd.orientation_uncertainty.si());
       else if (!orient && cd.uncertainty.present) c.sigma = cd.uncertainty.si();
-      if (!(c.sigma > 0)) { R.reason = "datum of input " + e.input + " has no positive uncertainty (give conditioning.uncertainty or a sigma column)"; return R; }
-      data.push_back(c);
-      used_inputs.insert(e.input);
+      if (!(c.sigma > 0)) { reason_ = "datum of input " + e.input + " has no positive uncertainty (give conditioning.uncertainty or a sigma column)"; return; }
+      data_.push_back(c);
+      used_.insert(e.input);
     }
   }
   if (cd.use_well_tops) {
@@ -274,80 +262,95 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
         int h = d.horizon_index(hn);
         if (h < 0) continue;
         double z = -p.si();
-        CondDatum c;
+        ConditioningDatum c;
         c.p = wells[w].vertical() ? Vec3{wells[w].x(), wells[w].y(), z} : wells[w].at_elevation(z);
         c.horizon = h;
         c.input = "well:" + wd.name;
         c.evidence = desc::evidence_name(p.evidence);
         c.kind = "well_top";
         c.sigma = wd.top_uncertainty.present ? wd.top_uncertainty.si() : (cd.uncertainty.present ? cd.uncertainty.si() : 0.0);
-        if (!(c.sigma > 0)) { R.reason = "top " + hn + " of well " + wd.name + " has no positive uncertainty (give top_uncertainty or conditioning.uncertainty)"; return R; }
-        data.push_back(c);
-        used_inputs.insert(c.input);
+        if (!(c.sigma > 0)) { reason_ = "top " + hn + " of well " + wd.name + " has no positive uncertainty (give top_uncertainty or conditioning.uncertainty)"; return; }
+        data_.push_back(c);
+        used_.insert(c.input);
       }
     }
   }
-  const std::size_t m = data.size(), np = cd.parameters.size();
-  if (m < np) { R.reason = "fewer data (" + std::to_string(m) + ") than parameters (" + std::to_string(np) + ")"; return R; }
+  const std::size_t m = data_.size(), np = cd.parameters.size();
+  if (m < np) { reason_ = "fewer data (" + std::to_string(m) + ") than parameters (" + std::to_string(np) + ")"; return; }
   // 2. parameters (SI internally)
-  desc::Description dd = d;
-  dd.conditioning = desc::ConditioningDesc{};
+  dd_.conditioning = desc::ConditioningDesc{};
   // control wells stay data, not a correction of the surfaces: the residuals must show the fit
-  for (auto& w : dd.wells)
+  for (auto& w : dd_.wells)
     if (w.role == "control") w.role = "check";
-  std::vector<desc::Param*> P;
-  std::vector<double> x(np), lo(np), hi(np);
   for (std::size_t k = 0; k < np; ++k) {
     auto& fp = cd.parameters[k];
-    desc::Param* p = dd.param_by_name(fp.path);
-    if (!p) { R.reason = "'" + fp.path + "' names no parameter of this description"; return R; }
-    P.push_back(p);
-    x[k] = p->si();
-    lo[k] = fp.min.si();
-    hi[k] = fp.max.si();
+    const desc::Param* p = dd_.param_by_name(fp.path);
+    if (!p) { reason_ = "'" + fp.path + "' names no parameter of this description"; return; }
+    paths_.push_back(fp.path);
+    x0_.push_back(p->si());
+    to_si_.push_back(p->to_si);
+    lo_.push_back(fp.min.si());
+    hi_.push_back(fp.max.si());
   }
+}
+
+bool ConditioningProblem::residuals(const std::vector<double>& xv, std::vector<double>& r, std::vector<double>* raw) const {
+  ++builds_;
+  desc::Description dd = dd_;
+  for (std::size_t k = 0; k < paths_.size(); ++k) dd.param_by_name(paths_[k])->values[0] = xv[k] / to_si_[k];
+  BuildLog lq;
+  std::unique_ptr<ParametricModel> mdl;
+  try {
+    mdl = std::make_unique<ParametricModel>(dd, *in_, lq);
+  } catch (const std::exception&) {
+    return false;
+  }
+  const std::size_t m = data_.size();
   std::vector<Vec3> pts;
-  for (auto& c : data) pts.push_back(c.p);
-  // forward model: normalised residuals at x; false if the model cannot be built there
-  auto forward = [&](const std::vector<double>& xv, std::vector<double>& r, std::vector<double>* raw) {
-    for (std::size_t k = 0; k < np; ++k) P[k]->values[0] = xv[k] / P[k]->to_si;
-    BuildLog lq;
-    std::unique_ptr<ParametricModel> mdl;
-    try {
-      mdl = std::make_unique<ParametricModel>(dd, in, lq);
-    } catch (const std::exception&) {
-      return false;
+  pts.reserve(m);
+  for (auto& c : data_) pts.push_back(c.p);
+  EvalResult er;
+  mdl->evaluate(pts, kEvalScalars, er);
+  r.assign(m, 0.0);
+  if (raw) raw->assign(m, 0.0);
+  for (std::size_t i = 0; i < m; ++i) {
+    auto& c = data_[i];
+    double v;
+    if (!c.oriented) {
+      v = er.s(static_cast<std::size_t>(c.horizon), i);
+    } else {
+      const double e = 2.0;
+      std::vector<Vec3> q{c.p + Vec3{e, 0, 0}, c.p - Vec3{e, 0, 0}, c.p + Vec3{0, e, 0}, c.p - Vec3{0, e, 0}, c.p + Vec3{0, 0, e}, c.p - Vec3{0, 0, e}};
+      EvalResult eq;
+      mdl->evaluate(q, kEvalScalars, eq);
+      auto sc = [&](std::size_t k) { return eq.s(static_cast<std::size_t>(c.horizon), k); };
+      Vec3 g = normalized(Vec3{sc(0) - sc(1), sc(2) - sc(3), sc(4) - sc(5)});
+      v = rad2deg(std::acos(std::clamp(dot(g, c.n), -1.0, 1.0)));
     }
-    EvalResult er;
-    mdl->evaluate(pts, kEvalScalars, er);
-    r.assign(m, 0.0);
-    if (raw) raw->assign(m, 0.0);
-    for (std::size_t i = 0; i < m; ++i) {
-      auto& c = data[i];
-      double v;
-      if (!c.oriented) {
-        v = er.s(static_cast<std::size_t>(c.horizon), i);
-      } else {
-        const double e = 2.0;
-        std::vector<Vec3> q{c.p + Vec3{e, 0, 0}, c.p - Vec3{e, 0, 0}, c.p + Vec3{0, e, 0}, c.p - Vec3{0, e, 0}, c.p + Vec3{0, 0, e}, c.p - Vec3{0, 0, e}};
-        EvalResult eq;
-        mdl->evaluate(q, kEvalScalars, eq);
-        auto s = [&](std::size_t k) { return eq.s(static_cast<std::size_t>(c.horizon), k); };
-        Vec3 g = normalized(Vec3{s(0) - s(1), s(2) - s(3), s(4) - s(5)});
-        v = rad2deg(std::acos(std::clamp(dot(g, c.n), -1.0, 1.0)));
-      }
-      if (!std::isfinite(v)) return false;
-      r[i] = v / c.sigma;
-      if (raw) (*raw)[i] = v;
-    }
-    return true;
-  };
+    if (!std::isfinite(v)) return false;
+    r[i] = v / c.sigma;
+    if (raw) (*raw)[i] = v;
+  }
+  return true;
+}
+
+ConditioningResult condition_to_data(const desc::Description& d, const BuildInputs& in, BuildLog& log) {
+  ConditioningResult R;
+  const auto& cd = d.conditioning;
+  ConditioningProblem pb(d, in);
+  if (!pb.ok()) { R.reason = pb.reason(); return R; }
+  const std::size_t m = pb.size(), np = pb.parameters();
+  std::vector<double> x = pb.start();
+  const auto& lo = pb.lower();
+  const auto& hi = pb.upper();
   auto chi2_of = [](const std::vector<double>& r) {
     double s = 0;
     for (double v : r) s += v * v;
     return s;
   };
+  // finite-difference Jacobian (one build per parameter)
   auto jacobian = [&](const std::vector<double>& xv, const std::vector<double>& r, std::vector<double>& J) {
+    ++R.jacobians;
     J.assign(m * np, 0.0);
     for (std::size_t k = 0; k < np; ++k) {
       double h = 1e-3 * (hi[k] - lo[k]);
@@ -355,19 +358,32 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
       if (xs[k] + h > hi[k]) h = -h;
       xs[k] += h;
       std::vector<double> rs;
-      if (!forward(xs, rs, nullptr)) return false;
+      if (!pb.residuals(xs, rs)) return false;
       for (std::size_t i = 0; i < m; ++i) J[i * np + k] = (rs[i] - r[i]) / h;
     }
     return true;
   };
+  // Broyden's rank-one update J += (dr - J dx) dx^T / (dx^T dx) (Broyden 1965; STX-TN-14 section 4)
+  auto broyden = [&](std::vector<double>& J, const std::vector<double>& dx, const std::vector<double>& dr) {
+    double dd = 0;
+    for (double v : dx) dd += v * v;
+    if (!(dd > 0)) return;
+    for (std::size_t i = 0; i < m; ++i) {
+      double jd = 0;
+      for (std::size_t a = 0; a < np; ++a) jd += J[i * np + a] * dx[a];
+      double f = (dr[i] - jd) / dd;
+      for (std::size_t a = 0; a < np; ++a) J[i * np + a] += f * dx[a];
+    }
+  };
   const int maxit = cd.max_iterations.present ? static_cast<int>(cd.max_iterations.si()) : 50;  // Stratonix default
   std::vector<double> r, J;
-  if (!forward(x, r, nullptr)) { R.reason = "the model cannot be built at the start values"; return R; }
+  if (!pb.residuals(x, r)) { R.reason = "the model cannot be built at the start values"; R.builds = pb.builds(); return R; }
   double chi2 = chi2_of(r), lambda = 1e-3;
-  bool converged = false;
-  int it = 0;
+  bool converged = false, fresh = false;
+  int it = 0, failures = 0;
+  if (!jacobian(x, r, J)) { R.reason = "the model cannot be built near the start values"; R.builds = pb.builds(); return R; }
+  fresh = true;
   for (; it < maxit && !converged; ++it) {
-    if (!jacobian(x, r, J)) { R.reason = "the model cannot be built near the current values"; return R; }
     std::vector<double> A(np * np, 0.0), g(np, 0.0);
     for (std::size_t i = 0; i < m; ++i)
       for (std::size_t a = 0; a < np; ++a) {
@@ -381,59 +397,79 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
       if (!(A[a * np + a] > 1e-12 * amax) || A[a * np + a] == 0) {
         R.reason = "parameter " + cd.parameters[a].path + " is not controlled by the data (no datum is sensitive to it)";
         R.iterations = it;
+        R.builds = pb.builds();
         return R;
       }
-    for (int tries = 0; tries < 20; ++tries) {
-      std::vector<double> M = A, dx(np);
-      for (std::size_t a = 0; a < np; ++a) {
-        M[a * np + a] *= 1 + lambda;
-        dx[a] = -g[a];
-      }
-      try {
-        solve_dense_reference(M, dx, np);
-      } catch (...) {
-        lambda *= 10;
-        continue;
-      }
-      std::vector<double> xn(np);
-      double maxstep = 0;
-      for (std::size_t a = 0; a < np; ++a) {
-        xn[a] = std::clamp(x[a] + dx[a], lo[a], hi[a]);
-        maxstep = std::max(maxstep, std::fabs(xn[a] - x[a]) / (hi[a] - lo[a]));
-      }
-      std::vector<double> rn;
-      if (maxstep < 1e-6) { converged = true; break; }  // no further step (at a minimum or held at a bound)
-      if (forward(xn, rn, nullptr) && chi2_of(rn) <= chi2) {
-        double c2 = chi2_of(rn);
-        converged = std::fabs(chi2 - c2) <= 1e-8 * std::max(1.0, chi2) || maxstep < 1e-6;
-        x = xn;
-        r = rn;
-        chi2 = c2;
-        lambda = std::max(lambda / 10, 1e-9);
-        break;
-      }
-      lambda *= 10;
-      if (lambda > 1e12) { converged = true; break; }  // no descent direction left: a minimum
+    // one trial step per iteration: one model build
+    std::vector<double> M = A, dx(np);
+    for (std::size_t a = 0; a < np; ++a) {
+      M[a * np + a] *= 1 + lambda;
+      dx[a] = -g[a];
     }
+    bool solved = true;
+    try {
+      solve_dense_reference(M, dx, np);
+    } catch (...) {
+      solved = false;
+    }
+    if (!solved) { lambda *= 10; continue; }
+    std::vector<double> xn(np), step(np);
+    double maxstep = 0;
+    for (std::size_t a = 0; a < np; ++a) {
+      xn[a] = std::clamp(x[a] + dx[a], lo[a], hi[a]);
+      step[a] = xn[a] - x[a];
+      maxstep = std::max(maxstep, std::fabs(step[a]) / (hi[a] - lo[a]));
+    }
+    if (maxstep < 1e-6) { converged = true; break; }  // no further step (at a minimum or held at a bound)
+    std::vector<double> rn;
+    const bool built = pb.residuals(xn, rn);
+    if (built) {
+      std::vector<double> dr(m);
+      for (std::size_t i = 0; i < m; ++i) dr[i] = rn[i] - r[i];
+      broyden(J, step, dr);
+    }
+    if (built && chi2_of(rn) <= chi2) {
+      double c2 = chi2_of(rn);
+      converged = std::fabs(chi2 - c2) <= 1e-8 * std::max(1.0, chi2);
+      x = xn;
+      r = rn;
+      chi2 = c2;
+      lambda = std::max(lambda / 10, 1e-9);
+      failures = 0;
+      fresh = false;
+      continue;
+    }
+    lambda *= 10;
+    // two failed steps on an updated Jacobian: recompute it by finite differences
+    if (++failures >= 2 && !fresh) {
+      if (!jacobian(x, r, J)) { R.reason = "the model cannot be built near the current values"; R.builds = pb.builds(); return R; }
+      fresh = true;
+      failures = 0;
+    }
+    if (lambda > 1e12) { converged = true; break; }  // no descent direction left: a minimum
   }
   R.iterations = it;
   if (!converged) {
     R.reason = "the fit did not converge within " + std::to_string(maxit) + " iterations (reduced chi2 " +
                fmt_fixed(chi2 / std::max<double>(1.0, static_cast<double>(m - np)), 3) + ")";
+    R.builds = pb.builds();
     return R;
   }
+  desc::Description dd = pb.base();
   for (std::size_t k = 0; k < np; ++k) {
     double rng = hi[k] - lo[k];
     if (x[k] - lo[k] < 1e-6 * rng || hi[k] - x[k] < 1e-6 * rng) {
-      R.reason = "parameter " + cd.parameters[k].path + " converged on the bound of its admissible range (" + fmt_shortest(x[k] / P[k]->to_si) + " " +
-                 P[k]->unit + "): the best fit lies outside the range";
+      const desc::Param* pp = dd.param_by_name(pb.paths()[k]);
+      R.reason = "parameter " + cd.parameters[k].path + " converged on the bound of its admissible range (" + fmt_shortest(x[k] / pb.to_si()[k]) + " " +
+                 pp->unit + "): the best fit lies outside the range";
+      R.builds = pb.builds();
       return R;
     }
   }
-  // 3. uncertainty, controlling data, leverage at the solution
+  // 3. uncertainty, controlling data, leverage at the solution (a fresh Jacobian)
   std::vector<double> raw;
-  forward(x, r, &raw);
-  if (!jacobian(x, r, J)) { R.reason = "the model cannot be built near the solution"; return R; }
+  pb.residuals(x, r, &raw);
+  if (!jacobian(x, r, J)) { R.reason = "the model cannot be built near the solution"; R.builds = pb.builds(); return R; }
   std::vector<double> A(np * np, 0.0), Cov(np * np, 0.0);
   for (std::size_t i = 0; i < m; ++i)
     for (std::size_t a = 0; a < np; ++a)
@@ -444,23 +480,26 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
     solve_dense_multi(Ac, Cov, np, np);
   } catch (...) {
     R.reason = "the parameters are not independently controlled by the data (J^T J is singular)";
+    R.builds = pb.builds();
     return R;
   }
   R.chi2 = chi2;
   R.chi2_reduced = m > np ? chi2 / static_cast<double>(m - np) : kNaN;
   std::string inputs_txt;
-  for (auto& s2 : used_inputs) inputs_txt += (inputs_txt.empty() ? "" : ", ") + s2;
+  for (auto& s2 : pb.inputs_used()) inputs_txt += (inputs_txt.empty() ? "" : ", ") + s2;
   const std::string src = "fitted to " + inputs_txt + " (" + std::to_string(m) + " data, Levenberg-Marquardt, reduced chi2 " +
                           fmt_fixed(R.chi2_reduced, 3) + ")";
+  const auto& data = pb.data();
   for (std::size_t k = 0; k < np; ++k) {
+    desc::Param* P = dd.param_by_name(pb.paths()[k]);
     FittedParameter fp;
     fp.path = cd.parameters[k].path;
-    fp.unit = P[k]->unit;
+    fp.unit = P->unit;
     fp.start = d.param_by_name(fp.path)->values[0];
-    fp.value = x[k] / P[k]->to_si;
-    fp.sigma = std::sqrt(std::max(0.0, Cov[k * np + k])) / P[k]->to_si;
-    fp.min = lo[k] / P[k]->to_si;
-    fp.max = hi[k] / P[k]->to_si;
+    fp.value = x[k] / P->to_si;
+    fp.sigma = std::sqrt(std::max(0.0, Cov[k * np + k])) / P->to_si;
+    fp.min = lo[k] / P->to_si;
+    fp.max = hi[k] / P->to_si;
     // sensitivity of the parameter to each normalised datum: G = Cov J^T
     std::vector<std::pair<double, std::size_t>> gk;
     double tot = 0;
@@ -473,10 +512,10 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
     std::sort(gk.begin(), gk.end(), [](auto& a2, auto& b2) { return a2.first > b2.first; });
     for (std::size_t q = 0; q < std::min<std::size_t>(5, gk.size()); ++q) fp.controlling.push_back({gk[q].second, tot > 0 ? gk[q].first / tot : 0.0});
     // label the fitted value
-    P[k]->values[0] = fp.value;
-    P[k]->evidence = desc::Evidence::Calibrated;
-    P[k]->source = src;
-    P[k]->text = fmt_fixed(fp.value, 3) + " " + fp.unit + " | calibrated | " + src;
+    P->values[0] = fp.value;
+    P->evidence = desc::Evidence::Calibrated;
+    P->source = src;
+    P->text = fmt_fixed(fp.value, 3) + " " + fp.unit + " | calibrated | " + src;
     log.value("conditioning." + fp.path, fmt_fixed(fp.value, 3) + " +- " + fmt_fixed(fp.sigma, 3) + " " + fp.unit + " (start " + fmt_shortest(fp.start) +
                                              ", range " + fmt_shortest(fp.min) + " to " + fmt_shortest(fp.max) + ")");
     R.parameters.push_back(fp);
@@ -487,13 +526,17 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
       for (std::size_t b = 0; b < np; ++b) h += J[i * np + a] * Cov[a * np + b] * J[i * np + b];
     R.leverage.push_back(h);
     auto& c = data[i];
-    DataMisfit dm{c.input, c.evidence, d.horizons[static_cast<std::size_t>(c.horizon)].name, c.kind, c.p, raw[i]};
+    std::string label = c.horizon >= 0 ? d.horizons[static_cast<std::size_t>(c.horizon)].name : c.kind;
+    DataMisfit dm{c.input, c.evidence, label, c.kind, c.p, raw[i]};
     dm.sigma = c.sigma;
     dm.normalised = raw[i] / c.sigma;
     R.residuals.push_back(dm);
   }
+  R.builds = pb.builds();
   log.value("conditioning.data", std::to_string(m) + " data from " + inputs_txt);
   log.value("conditioning.iterations", std::to_string(R.iterations));
+  log.value("conditioning.builds", std::to_string(R.builds) + " model builds (" + std::to_string(R.jacobians) +
+                                       " finite-difference Jacobians, Broyden updates between them)");
   log.value("conditioning.chi2_reduced", fmt_fixed(R.chi2_reduced, 4));
   R.fitted = dd;
   R.fitted.conditioning = d.conditioning;  // keep the block, so checks and reports know the fit
@@ -685,8 +728,8 @@ std::vector<FaultRelation> infer_fault_relations(const std::vector<FaultDataSet>
   return out;
 }
 
-ConditionedModel::ConditionedModel(std::shared_ptr<ParametricModel> inner, ConditioningResult r)
-    : inner_(std::move(inner)), r_(std::move(r)), info_(inner_->info()) {}
+ConditionedModel::ConditionedModel(std::shared_ptr<ParametricModel> inner, ConditioningResult r, std::shared_ptr<const PosteriorResult> posterior)
+    : inner_(std::move(inner)), r_(std::move(r)), post_(std::move(posterior)), info_(inner_->info()) {}
 const ModelInfo& ConditionedModel::info() const { return info_; }
 void ConditionedModel::evaluate(std::span<const Vec3> pts, unsigned fields, EvalResult& out) const { inner_->evaluate(pts, fields, out); }
 void ConditionedModel::scalar_in_block(std::span<const Vec3> pts, BlockCode block, int horizon, std::span<double> out) const {
@@ -697,16 +740,23 @@ void ConditionedModel::restore(std::span<const Vec3> pts, std::span<Vec3> out) c
 const void* ConditionedModel::capability(std::string_view name) const {
   if (name == "conditioning") return &r_;
   if (name == "data_misfit") return &r_.residuals;
+  if (name == "posterior") return post_.get();
   return inner_->capability(name);
 }
 
 ModelPtr build_conditioned_model(const desc::Description& d, const BuildInputs& in, BuildLog& log) {
   auto r = condition_to_data(d, in, log);
   if (!r.converged) throw Error(ErrorCode::Build, "conditioning refused: " + r.reason);
+  std::shared_ptr<const PosteriorResult> post;
+  if (d.conditioning.method == "bayesian") {
+    auto pr = std::make_shared<PosteriorResult>(sample_posterior(d, in, posterior_options(d), log));
+    if (!pr->ok) throw Error(ErrorCode::Build, "posterior sampling refused: " + pr->reason);
+    post = pr;
+  }
   desc::Description fd = r.fitted;
   fd.conditioning = desc::ConditioningDesc{};
   auto inner = std::make_shared<ParametricModel>(fd, in, log);
-  return std::make_shared<ConditionedModel>(inner, std::move(r));
+  return std::make_shared<ConditionedModel>(inner, std::move(r), post);
 }
 
 }  // namespace stratonix

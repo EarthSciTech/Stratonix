@@ -61,6 +61,10 @@ BuildOutcome run_state(const std::filesystem::path& description, const std::file
 /// every state (STX-TN-09 sections 2 and 3). Nothing is written for a model without events.
 void write_restoration(const desc::Description& d, const Model& m, const std::filesystem::path& folder);
 
+struct PosteriorResult;
+/// Stage 4A: posterior_samples.csv and posterior_summary.csv of conditioning.method: bayesian.
+void write_posterior_tables(const desc::Description& d, const PosteriorResult& pr, const std::filesystem::path& dir);
+
 /// Export ids from a request ("petrel" expands to the Petrel set; unknown ids are skipped with a
 /// warning); an empty request takes the description's outputs.exports.
 std::vector<std::string> resolve_export_ids(const desc::Description& d, const std::vector<std::string>& requested);

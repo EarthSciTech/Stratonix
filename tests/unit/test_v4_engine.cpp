@@ -19,6 +19,8 @@
 #include "stratonix/engines/posterior.hpp"
 #include "stratonix/io/io.hpp"
 #include "stratonix/model/model_suite.hpp"
+#include "stratonix/package/pipeline.hpp"
+#include "stratonix/package/uncertainty.hpp"
 #include "stratonix/repr/repr.hpp"
 #include "stratonix/repr/geotime.hpp"
 #include "stratonix/repr/topology.hpp"
@@ -406,13 +408,33 @@ TEST_CASE("E8 least squares with Broyden updates: one model build per iteration 
   CHECK(std::fabs(r.parameters[0].value - 120) <= 2 * r.parameters[0].sigma + 0.5);
 }
 
+TEST_CASE("E8b rule F36: method, sampler and priors of a Bayesian conditioning") {
+  auto dir = tmpdir("f36");
+  write_hybrid_picks(dir);
+  auto rules = [&](const std::string& method, const std::string& extra = "") {
+    desc::Description d;
+    auto rep = desc::validate_description_text(hybrid_yaml(175, 84, extra + hybrid_conditioning(method)), dir, &d);
+    std::string out;
+    for (auto& is : rep.issues)
+      if (is.error) out += is.rule + " " + is.path + "; ";
+    return out;
+  };
+  CHECK(rules("  method: bayesian\n").empty());
+  std::printf("  mcmc: %s\n", rules("  method: mcmc\n").c_str());
+  CHECK(rules("  method: mcmc\n").find("conditioning.method") != std::string::npos);
+  CHECK(rules("  sampler: {walkers: " + qq("16 ordinal") + "}\n").find("F36 conditioning.sampler") != std::string::npos);
+  CHECK(rules("  method: bayesian\n  sampler: {walkers: " + qq("5 ordinal") + "}\n").find("F36 conditioning.sampler.walkers") != std::string::npos);
+  CHECK(rules("  method: bayesian\n  sampler: {thin: " + qq("0 ordinal") + "}\n").find("F36 conditioning.sampler.thin") != std::string::npos);
+}
+
 #if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__)
 TEST_CASE("E6b posterior of the hybrid model: truth within the 95 % credible interval, converged (release builds)") {
   auto dir = tmpdir("posterior");
   write_hybrid_picks(dir);
   desc::Description d;
   auto rep = desc::validate_description_text(
-      hybrid_yaml(175, 84, hybrid_conditioning("  method: bayesian\n  sampler: {walkers: 16, steps: 1500, burn_in: 300, thin: 10, seed: 20261121}\n")),
+      hybrid_yaml(175, 84, hybrid_conditioning("  method: bayesian\n  sampler: {walkers: " + qq("16 ordinal") + ", steps: " + qq("1500 ordinal") + ", burn_in: " +
+                                          qq("300 ordinal") + ", thin: " + qq("10 ordinal") + ", seed: " + qq("20261121 ordinal") + "}\n")),
       dir, &d);
   if (!rep.ok()) std::cerr << rep.text();
   REQUIRE(rep.ok());
@@ -436,6 +458,59 @@ TEST_CASE("E6b posterior of the hybrid model: truth within the 95 % credible int
   }
   CHECK(r.converged);
   CHECK(r.builds == static_cast<long>(o.walkers) * (o.steps + o.burn_in) + o.walkers);
+}
+
+TEST_CASE("E6c a Bayesian build writes the posterior and C28; the ensemble members are the posterior samples (release builds)") {
+  auto dir = tmpdir("posterior_build");
+  write_hybrid_picks(dir);
+  const std::string sampler = "  method: bayesian\n  sampler: {walkers: " + qq("16 ordinal") + ", steps: " + qq("1500 ordinal") + ", burn_in: " +
+                              qq("300 ordinal") + ", thin: " + qq("50 ordinal") + ", seed: " + qq("5 ordinal") + "}\n";
+  const fs::path f = dir / "model.yaml";
+  write_text(f, hybrid_yaml(175, 84, "checks:\n  warn_only: [C6]\n" + hybrid_conditioning(sampler)));
+  BuildOptions bo;
+  auto out = run_build(f, dir / "build", bo, "test");
+  CHECK(out.checks_passed);
+  for (const char* n : {"posterior_samples.csv", "posterior_summary.csv", "conditioning.csv", "manifest.json"}) CHECK(fs::exists(dir / "build" / n));
+  const std::string rep = read_file(dir / "build" / "checks_report.csv");
+  CHECK(rep.find("C28") != std::string::npos);
+  bool trace = false, corner = false;
+  for (auto& e : fs::directory_iterator(dir / "build" / "figures")) {
+    trace = trace || e.path().filename().string().find("posterior_trace") != std::string::npos;
+    corner = corner || e.path().filename().string().find("posterior_corner") != std::string::npos;
+  }
+  CHECK(trace);
+  CHECK(corner);
+  const std::string man = read_file(dir / "build" / "manifest.json");
+  CHECK(man.find("posterior.sampler") != std::string::npos);
+  CHECK(man.find("posterior.prior.faults.F1.throw.max") != std::string::npos);
+  // ensemble: 40 of the 480 retained samples, built without refitting
+  unc::EnsembleOptions eo;
+  eo.members = 40;
+  eo.figures = false;
+  auto er = unc::run_ensemble(f, dir / "ens", eo);
+  REQUIRE(er.members.size() == 41);
+  CHECK(er.spec.posterior);
+  CHECK(er.ok() == 40);
+  CHECK(fs::exists(dir / "ens" / "ensemble" / "posterior_samples.csv"));
+  std::size_t ip = er.spec.parameters.size();
+  for (std::size_t i = 0; i < er.spec.parameters.size(); ++i)
+    if (er.spec.parameters[i].path == "faults.F1.throw.max") ip = i;
+  REQUIRE(ip < er.spec.parameters.size());
+  double lo = 1e9, hi = -1e9;
+  for (std::size_t m = 1; m < er.members.size(); ++m) {
+    lo = std::min(lo, er.members[m].sample.values[ip]);
+    hi = std::max(hi, er.members[m].sample.values[ip]);
+  }
+  std::printf("  ensemble throw F1 from %.2f to %.2f m over %zu members\n", lo, hi, er.members.size() - 1);
+  CHECK(lo > 118);
+  CHECK(hi < 122);
+  CHECK(hi - lo > 0.3);
+  auto* k = static_cast<const unc::KeyStats*>(nullptr);
+  for (auto& ks : er.stats)
+    if (ks.key == "Max throw F1") k = &ks;
+  REQUIRE(k != nullptr);
+  std::printf("  Max throw F1 over the posterior members: mean %.2f sd %.2f\n", k->stats.mean, k->stats.sd);
+  CHECK(std::fabs(k->stats.mean - 119.6) < 1.0);
 }
 #endif
 

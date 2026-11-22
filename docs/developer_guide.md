@@ -60,6 +60,7 @@ interface declared in the model layer, or null:
 | `column` | `ColumnQuery` (model) | parametric | fault rock: restored stratigraphic positions (repr) |
 | `data_misfit` | (engines) | implicit, conditioned | reports, C21 |
 | `conditioning` | `ConditioningResult` (engines) | conditioned parametric | reports, C22 |
+| `posterior` | `PosteriorResult` (engines) | conditioned parametric, `method: bayesian` | posterior tables and figures, C28 |
 | `porosity` | `PorosityQuery` (model) | parametric with compaction | grid porosity (repr) |
 
 A new engine that cannot answer a capability returns null; the callers then report the dependent

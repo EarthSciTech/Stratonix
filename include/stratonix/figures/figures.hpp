@@ -89,6 +89,23 @@ Figure fault_attribute_figure(const FigureContext& c, int fault, const repr::Fau
 /// with +-2 sigma), one row per parameter.
 struct FittedRow { std::string path, unit; double start, value, sigma, min, max; };
 Figure conditioning_figure(const FigureContext& c, const std::vector<FittedRow>& rows, double chi2_reduced, std::size_t data);
+/// Stage 4A (STX-TN-14 section 4): posterior samples for the trace and corner figures, in the
+/// parameters' units. chain[walker * steps + step][parameter], after burn-in.
+struct PosteriorSamples {
+  std::vector<std::string> names, units;
+  int walkers = 0, steps = 0, burn_in = 0, thin = 1;
+  std::uint64_t seed = 0;
+  std::vector<std::vector<double>> chain;
+  std::vector<double> mean, q025, q975, rhat, ess;
+  std::vector<double> lsq;  ///< least-squares values (NaN if none)
+  double acceptance = 0;
+  bool converged = false;
+};
+/// Trace plot: every walker's path per parameter (at most 16 walkers drawn), with R-hat and ESS.
+Figure posterior_trace_figure(const FigureContext& c, const PosteriorSamples& s);
+/// Corner plot: marginal histograms with the 95 % interval, and pairwise scatter of the thinned
+/// samples (at most 6 parameters).
+Figure posterior_corner_figure(const FigureContext& c, const PosteriorSamples& s);
 /// Data misfit map of one horizon: data positions coloured by normalised misfit (r / sigma, -3 to
 /// 3) where an uncertainty is stated, else by misfit in metres.
 struct MisfitPoint { double x, y, misfit, normalised; };

@@ -3,7 +3,9 @@
 /// profiles from sticks) and hybrid conditioning (parameters of the v2 mechanisms fitted to data
 /// by weighted least squares, with uncertainties and the data that control them).
 #pragma once
+#include <atomic>
 #include <memory>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -121,6 +123,54 @@ struct ConditioningResult {
   long builds = 0;                    ///< model evaluations used (stage 4A: Broyden updates)
   int jacobians = 0;                  ///< full finite-difference Jacobians computed
 };
+/// A conditioning datum: an interface point or orientation (or, from stage 4A, a gravity or
+/// magnetic station) with its stated uncertainty.
+struct ConditioningDatum {
+  Vec3 p, n;
+  int horizon = -1;
+  bool oriented = false;
+  double sigma = 0;     ///< m; degrees for orientations; mGal or nT for stations
+  double observed = 0;  ///< stations: the observed anomaly
+  std::string input, evidence, kind;  ///< kind: point | orientation | well_top | gravity | magnetics
+};
+
+/// The data, parameters and admissible ranges of d.conditioning, and the forward model: normalised
+/// residuals at a parameter vector (SI). Thread-safe: each evaluation builds its own model from
+/// its own copy of the description (stage 4A, STX-TN-14 section 4).
+class ConditioningProblem {
+ public:
+  ConditioningProblem(const desc::Description& d, const BuildInputs& in);
+  ConditioningProblem(const ConditioningProblem&) = delete;
+  ConditioningProblem& operator=(const ConditioningProblem&) = delete;
+  bool ok() const { return reason_.empty(); }
+  const std::string& reason() const { return reason_; }
+  std::size_t size() const { return data_.size(); }
+  std::size_t parameters() const { return paths_.size(); }
+  const std::vector<std::string>& paths() const { return paths_; }
+  const std::vector<double>& start() const { return x0_; }
+  const std::vector<double>& lower() const { return lo_; }
+  const std::vector<double>& upper() const { return hi_; }
+  const std::vector<double>& to_si() const { return to_si_; }
+  const std::vector<ConditioningDatum>& data() const { return data_; }
+  const std::set<std::string>& inputs_used() const { return used_; }
+  /// Normalised residuals (value / sigma); raw values when asked. False when the model cannot be
+  /// built at x.
+  bool residuals(const std::vector<double>& x, std::vector<double>& r, std::vector<double>* raw = nullptr) const;
+  long builds() const { return builds_.load(); }
+  /// The description used for the builds (conditioning removed, control wells as check wells).
+  const desc::Description& base() const { return dd_; }
+
+ private:
+  desc::Description dd_;
+  const BuildInputs* in_ = nullptr;
+  std::vector<ConditioningDatum> data_;
+  std::vector<std::string> paths_;
+  std::vector<double> x0_, lo_, hi_, to_si_;
+  std::set<std::string> used_;
+  std::string reason_;
+  mutable std::atomic<long> builds_{0};
+};
+
 /// Fit the parameters named in d.conditioning to the data. Never throws for a failed fit: the
 /// result says why (converged = false).
 ConditioningResult condition_to_data(const desc::Description& d, const BuildInputs& in, BuildLog& log);
@@ -128,9 +178,12 @@ ConditioningResult condition_to_data(const desc::Description& d, const BuildInpu
 /// A parametric model built from the fitted description, with its conditioning result:
 /// capability("conditioning") -> const ConditioningResult*, "data_misfit" -> the residuals.
 class ParametricModel;
+struct PosteriorResult;
+
 class ConditionedModel final : public Model {
  public:
-  ConditionedModel(std::shared_ptr<ParametricModel> inner, ConditioningResult r);
+  /// `posterior`: the samples of conditioning.method: bayesian (capability "posterior").
+  ConditionedModel(std::shared_ptr<ParametricModel> inner, ConditioningResult r, std::shared_ptr<const PosteriorResult> posterior = nullptr);
   const ModelInfo& info() const override;
   void evaluate(std::span<const Vec3> pts, unsigned fields, EvalResult& out) const override;
   void scalar_in_block(std::span<const Vec3> pts, BlockCode block, int horizon, std::span<double> out) const override;
@@ -142,11 +195,14 @@ class ConditionedModel final : public Model {
  private:
   std::shared_ptr<ParametricModel> inner_;
   ConditioningResult r_;
+  std::shared_ptr<const PosteriorResult> post_;
   ModelInfo info_;
 };
 
 /// Condition and build (the parametric builder calls this for a description with conditioning).
-/// Throws Error(Build) with the reason when the fit is refused.
+/// With conditioning.method: bayesian the posterior is sampled too and the model is the
+/// least-squares fit with the posterior attached. Throws Error(Build) with the reason when the
+/// fit or the sampler is refused.
 ModelPtr build_conditioned_model(const desc::Description& d, const BuildInputs& in, BuildLog& log);
 
 }  // namespace stratonix

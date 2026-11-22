@@ -129,7 +129,9 @@ std::vector<const Param*> Description::all_params() const {
   for (auto& u : units) add(u.clay_fraction);
   for (auto& x : implicit.data) add(x.uncertainty);
   for (auto& x : conditioning.data) add(x.uncertainty);
-  for (auto* q : {&conditioning.uncertainty, &conditioning.orientation_uncertainty, &conditioning.max_iterations}) add(*q);
+  for (auto* q : {&conditioning.uncertainty, &conditioning.orientation_uncertainty, &conditioning.max_iterations, &conditioning.walkers,
+                  &conditioning.steps, &conditioning.burn_in, &conditioning.thin, &conditioning.seed})
+    add(*q);
   for (auto& fp : conditioning.parameters) { add(fp.min); add(fp.max); }
   for (auto* q : {&fault_rock.shale_threshold, &fault_rock.thickness_ratio, &fault_rock.seal_a, &fault_rock.seal_c, &stress.sv_gradient,
                   &stress.shmax_ratio, &stress.shmin_ratio, &stress.shmax_azimuth, &stress.tensor_gradient, &stress.pore_pressure_gradient,
@@ -879,6 +881,14 @@ struct Typer {
       cd.uncertainty = P(cn, "uncertainty", "conditioning", Dimension::Length, false, 1);
       cd.orientation_uncertainty = P(cn, "orientation_uncertainty", "conditioning", Dimension::Angle, false, 1);
       cd.max_iterations = P(cn, "max_iterations", "conditioning", Dimension::Ordinal, false, 1);
+      if (cn->get("method")) cd.method = S(cn, "method");
+      if (const Node* sm = cn->get("sampler")) {
+        cd.walkers = P(sm, "walkers", "conditioning.sampler", Dimension::Ordinal, false, 1);
+        cd.steps = P(sm, "steps", "conditioning.sampler", Dimension::Ordinal, false, 1);
+        cd.burn_in = P(sm, "burn_in", "conditioning.sampler", Dimension::Ordinal, false, 1);
+        cd.thin = P(sm, "thin", "conditioning.sampler", Dimension::Ordinal, false, 1);
+        cd.seed = P(sm, "seed", "conditioning.sampler", Dimension::Ordinal, false, 1);
+      }
       if (const Node* ps = cn->get("parameters"))
         for (std::size_t k = 0; k < ps->seq.size(); ++k) {
           const Node& x = ps->seq[k];
@@ -1190,6 +1200,33 @@ struct Typer {
       if (cd.orientation_uncertainty.present && !(cd.orientation_uncertainty.si() > 0))
         c.err("conditioning.orientation_uncertainty", "F31", "the uncertainty must be positive");
       if (cd.max_iterations.present && !(cd.max_iterations.si() >= 1)) c.err("conditioning.max_iterations", "F31", "at least one iteration");
+      // STX-TN-14 (F36): the Bayesian method needs a prior per parameter and a valid sampler
+      if (cd.method != "least_squares" && cd.method != "bayesian")
+        c.err("conditioning.method", "F36", "method must be least_squares or bayesian (got '" + cd.method + "')");
+      if (cd.method != "bayesian" && (cd.walkers.present || cd.steps.present || cd.burn_in.present || cd.thin.present || cd.seed.present))
+        c.err("conditioning.sampler", "F36", "a sampler is used only by conditioning.method: bayesian");
+      if (cd.method == "bayesian") {
+        const double np = static_cast<double>(cd.parameters.size());
+        if (cd.walkers.present) {
+          double w = cd.walkers.si();
+          if (!(w >= std::max(4.0, 2 * np)) || std::fmod(w, 2.0) != 0)
+            c.err("conditioning.sampler.walkers", "F36", "an even number of walkers, at least 4 and at least twice the number of parameters");
+        }
+        if (cd.steps.present && !(cd.steps.si() >= 2)) c.err("conditioning.sampler.steps", "F36", "at least 2 steps");
+        if (cd.burn_in.present && !(cd.burn_in.si() >= 0)) c.err("conditioning.sampler.burn_in", "F36", "burn-in cannot be negative");
+        if (cd.thin.present && !(cd.thin.si() >= 1)) c.err("conditioning.sampler.thin", "F36", "thin is at least 1");
+        if (cd.seed.present && !(cd.seed.si() >= 0)) c.err("conditioning.sampler.seed", "F36", "the seed cannot be negative");
+        for (std::size_t k = 0; k < cd.parameters.size(); ++k) {
+          auto& fp = cd.parameters[k];
+          std::string b = "conditioning.parameters[" + std::to_string(k) + "]";
+          if (!fp.min.present || !fp.max.present) c.err(b, "F36", "a Bayesian fit needs the range [min, max] of '" + fp.path + "' (its prior when no distribution is given)");
+          for (auto& u : d.uncertainty.parameters) {
+            if (u.path != fp.path) continue;
+            if (u.distribution != "normal" && u.distribution != "uniform" && u.distribution != "triangular")
+              c.err(b, "F36", "the prior of '" + fp.path + "' must be normal, uniform or triangular (got '" + u.distribution + "')");
+          }
+        }
+      }
       for (std::size_t k = 0; k < cd.parameters.size(); ++k) {
         auto& fp = cd.parameters[k];
         std::string b = "conditioning.parameters[" + std::to_string(k) + "]";

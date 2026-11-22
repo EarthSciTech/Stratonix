@@ -12,6 +12,7 @@
 #include "stratonix/engines/faults.hpp"
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/conditioning.hpp"
+#include "stratonix/engines/posterior.hpp"
 #include "stratonix/engines/history.hpp"
 #include "stratonix/repr/faultrock.hpp"
 #include "stratonix/repr/repr.hpp"
@@ -1145,6 +1146,34 @@ class C22 final : public Check {
   }
 };
 
+/// C28: posterior convergence (STX-TN-14 section 4): every parameter's split R-hat below 1.01 and
+/// effective sample size at least 100.
+class C28 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* pr = static_cast<const PosteriorResult*>(c.model().capability("posterior"));
+    if (!pr) return out;
+    for (std::size_t k = 0; k < pr->paths.size(); ++k) {
+      auto r = base(c, "C28", "posterior split R-hat", pr->paths[k]);
+      r.value = pr->rhat[k];
+      r.tolerance = 1.01;
+      r.tolerance_source = "STX-TN-14 section 4: split R-hat below 1.01 (Vehtari et al. 2021)";
+      r.passed = pr->rhat[k] < 1.01;
+      r.detail = std::to_string(pr->walkers) + " walkers x " + std::to_string(pr->steps) + " steps after " + std::to_string(pr->burn_in) + " burn-in, seed " +
+                 std::to_string(pr->seed) + (r.passed ? "" : ": run the sampler longer (conditioning.sampler.steps)");
+      out.push_back(r);
+      auto e = base(c, "C28", "posterior effective sample size", pr->paths[k]);
+      e.value = pr->ess[k];
+      e.tolerance = 100;
+      e.tolerance_source = "STX-TN-14 section 4: at least 100 effective samples per parameter";
+      e.passed = pr->ess[k] >= 100;
+      e.detail = "integrated autocorrelation time " + fmt_fixed(static_cast<double>(pr->walkers) * pr->steps / std::max(1.0, pr->ess[k]), 1) + " steps";
+      out.push_back(e);
+    }
+    return out;
+  }
+};
+
 /// C23 to C25: grid checks (STX-TN-12 section 7), when the description asks for a grid.
 class C23 final : public Check {
   std::vector<CheckResult> run(CheckContext& c) const override {
@@ -1210,6 +1239,8 @@ STRATONIX_REGISTER(check_c21, registry::Kind::Check, "C21_data_misfit", "1.0.0",
                    [] { return std::make_unique<C21>(); })
 STRATONIX_REGISTER(check_c22, registry::Kind::Check, "C22_conditioning", "1.0.0", "Conditioning converged inside the admissible ranges",
                    [] { return std::make_unique<C22>(); })
+STRATONIX_REGISTER(check_c28, registry::Kind::Check, "C28_posterior", "1.0.0", "Posterior converged: split R-hat below 1.01, effective sample size at least 100",
+                   [] { return std::make_unique<C28>(); })
 STRATONIX_REGISTER(check_c23, registry::Kind::Check, "C23_grid", "1.0.0", "Grid: positive volumes, no inverted cells, fault faces on the faults",
                    [] { return std::make_unique<C23>(); })
 STRATONIX_REGISTER(check_c11, registry::Kind::Check, "C11_fault_system", "1.0.0",

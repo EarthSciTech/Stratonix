@@ -1293,6 +1293,134 @@ Figure conditioning_figure(const FigureContext& c, const std::vector<FittedRow>&
   return f;
 }
 
+namespace {
+Color walker_color(std::size_t w) {
+  static const Color k[] = {rgb(20, 60, 140), rgb(200, 90, 20), rgb(30, 130, 70), rgb(150, 40, 120), rgb(90, 90, 90), rgb(0, 140, 160), rgb(170, 140, 0), rgb(120, 70, 30)};
+  Color c = k[w % 8];
+  c.a = 150;
+  return c;
+}
+std::string diag_text(const PosteriorSamples& s, std::size_t p) {
+  return "R-hat " + fmt_fixed(s.rhat[p], 4) + ", ESS " + fmt_fixed(s.ess[p], 0);
+}
+}  // namespace
+
+Figure posterior_trace_figure(const FigureContext& c, const PosteriorSamples& s) {
+  const std::size_t np = s.names.size();
+  const double rowh = 110, H = 110 + rowh * static_cast<double>(np);
+  Figure f(842, H);
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - posterior traces",
+        std::to_string(s.walkers) + " walkers, " + std::to_string(s.steps) + " steps after " + std::to_string(s.burn_in) + " burn-in, seed " +
+            std::to_string(s.seed) + ", acceptance " + fmt_fixed(s.acceptance, 2) + (s.converged ? "; converged (R-hat < 1.01, ESS >= 100)" : "; NOT converged"));
+  const double x0 = 90, x1 = 650;
+  const std::size_t nw = std::min<std::size_t>(16, static_cast<std::size_t>(s.walkers));
+  const std::size_t stride = std::max<std::size_t>(1, static_cast<std::size_t>(s.steps) / 400);
+  for (std::size_t p = 0; p < np; ++p) {
+    const double ytop = 60 + rowh * static_cast<double>(p), ybot = ytop + rowh - 30;
+    double lo = 1e300, hi = -1e300;
+    for (auto& v : s.chain) { lo = std::min(lo, v[p]); hi = std::max(hi, v[p]); }
+    if (!(hi > lo)) { lo -= 1; hi += 1; }
+    const double pad = 0.05 * (hi - lo);
+    lo -= pad;
+    hi += pad;
+    auto X = [&](double st) { return x0 + st / std::max(1.0, static_cast<double>(s.steps - 1)) * (x1 - x0); };
+    auto Y = [&](double v) { return ybot - (v - lo) / (hi - lo) * (ybot - ytop); };
+    f.rect(x0, ytop, x1 - x0, ybot - ytop, rgb(250, 250, 250), kInk, 0.5);
+    for (double t : nice_ticks(lo, hi, 4)) {
+      f.line({x0, Y(t)}, {x1, Y(t)}, kGrid, 0.3);
+      f.text({x0 - 4, Y(t) + 2.5}, fmt_shortest(t), 6.5, Anchor::End, false, kInk);
+    }
+    f.clip(x0, ytop, x1 - x0, ybot - ytop);
+    for (std::size_t w = 0; w < nw; ++w) {
+      std::vector<Pt> pts;
+      for (std::size_t st = 0; st < static_cast<std::size_t>(s.steps); st += stride)
+        pts.push_back({X(static_cast<double>(st)), Y(s.chain[w * static_cast<std::size_t>(s.steps) + st][p])});
+      f.path(pts, false, none(), walker_color(w), 0.5);
+    }
+    f.line({x0, Y(s.mean[p])}, {x1, Y(s.mean[p])}, kInk, 0.9, {3, 2});
+    f.unclip();
+    f.text({x0, ytop - 4}, s.names[p] + " (" + s.units[p] + ")", 7.5, Anchor::Start, true, kInk);
+    double tx = x1 + 12;
+    f.text({tx, ytop + 12}, "mean " + fmt_fixed(s.mean[p], 3) + " " + s.units[p], 7, Anchor::Start, false, kInk);
+    f.text({tx, ytop + 24}, "95 %: " + fmt_fixed(s.q025[p], 3) + " to " + fmt_fixed(s.q975[p], 3), 7, Anchor::Start, false, kInk);
+    const bool okp = s.rhat[p] < 1.01 && s.ess[p] >= 100;
+    f.text({tx, ytop + 36}, diag_text(s, p), 7, Anchor::Start, !okp, okp ? kInk : kFault);
+    if (p + 1 == np)
+      for (double t : nice_ticks(0, static_cast<double>(s.steps - 1), 6)) f.text({X(t), ybot + 11}, fmt_fixed(t, 0), 6.5, Anchor::Middle, false, kInk);
+  }
+  f.text({(x0 + x1) / 2, 60 + rowh * static_cast<double>(np) - 4}, "Step after burn-in (" + std::to_string(nw) + " of " + std::to_string(s.walkers) +
+                                                                     " walkers drawn; dashed: posterior mean)",
+         7.5, Anchor::Middle, false, kInk);
+  footer(f, c);
+  return f;
+}
+
+Figure posterior_corner_figure(const FigureContext& c, const PosteriorSamples& s) {
+  const std::size_t np = std::min<std::size_t>(6, s.names.size());
+  Figure f(842, 595);
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - posterior",
+        "Marginal histograms (shaded: 95 % credible interval; dashed: least-squares value) and pairwise samples, every " + std::to_string(s.thin) +
+            "th step of every walker" + (s.names.size() > np ? " (first 6 parameters)" : ""));
+  const double gx = 90, gy = 60, side = std::min(842.0 - 140, 595.0 - 120), cell = side / static_cast<double>(np), gap = 8;
+  std::vector<double> lo(np), hi(np);
+  for (std::size_t p = 0; p < np; ++p) {
+    lo[p] = 1e300;
+    hi[p] = -1e300;
+    for (auto& v : s.chain) { lo[p] = std::min(lo[p], v[p]); hi[p] = std::max(hi[p], v[p]); }
+    if (!(hi[p] > lo[p])) { lo[p] -= 1; hi[p] += 1; }
+  }
+  std::vector<std::size_t> pick;
+  for (std::size_t w = 0; w < static_cast<std::size_t>(s.walkers); ++w)
+    for (std::size_t st = static_cast<std::size_t>(s.thin) - 1; st < static_cast<std::size_t>(s.steps); st += static_cast<std::size_t>(s.thin))
+      pick.push_back(w * static_cast<std::size_t>(s.steps) + st);
+  const std::size_t every = std::max<std::size_t>(1, pick.size() / 3000);
+  for (std::size_t i = 0; i < np; ++i)
+    for (std::size_t j = 0; j <= i; ++j) {
+      const double cx = gx + cell * static_cast<double>(j), cy = gy + cell * static_cast<double>(i), w = cell - gap, h = cell - gap;
+      auto X = [&](double v) { return cx + (v - lo[j]) / (hi[j] - lo[j]) * w; };
+      f.rect(cx, cy, w, h, rgb(250, 250, 250), kInk, 0.5);
+      if (i == j) {
+        const int nb = 30;
+        std::vector<double> cnt(nb, 0.0);
+        for (std::size_t k : pick) {
+          int b = static_cast<int>((s.chain[k][j] - lo[j]) / (hi[j] - lo[j]) * nb);
+          cnt[static_cast<std::size_t>(std::clamp(b, 0, nb - 1))] += 1;
+        }
+        double cm = *std::max_element(cnt.begin(), cnt.end());
+        f.rect(X(s.q025[j]), cy, X(s.q975[j]) - X(s.q025[j]), h, rgb(220, 230, 245), none());
+        for (int b = 0; b < nb; ++b) {
+          double bh = cm > 0 ? cnt[static_cast<std::size_t>(b)] / cm * (h - 6) : 0;
+          f.rect(cx + w * b / nb, cy + h - bh, w / nb, bh, rgb(20, 60, 140), none());
+        }
+        if (j < s.lsq.size() && std::isfinite(s.lsq[j])) f.line({X(s.lsq[j]), cy}, {X(s.lsq[j]), cy + h}, kFault, 0.9, {3, 2});
+        f.text({cx + w / 2, cy - 3}, s.names[j], 6.5, Anchor::Middle, true, kInk);
+      } else {
+        auto Y = [&](double v) { return cy + h - (v - lo[i]) / (hi[i] - lo[i]) * h; };
+        f.clip(cx, cy, w, h);
+        for (std::size_t q = 0; q < pick.size(); q += every) {
+          const auto& v = s.chain[pick[q]];
+          f.rect(X(v[j]) - 0.6, Y(v[i]) - 0.6, 1.2, 1.2, Color{20, 60, 140, 90}, none());
+        }
+        f.unclip();
+      }
+      if (i + 1 == np)
+        for (double t : nice_ticks(lo[j], hi[j], 3)) f.text({X(t), cy + h + 10}, fmt_shortest(t), 6, Anchor::Middle, false, kInk);
+      if (j == 0 && i > 0) {
+        auto Y = [&](double v) { return cy + h - (v - lo[i]) / (hi[i] - lo[i]) * h; };
+        for (double t : nice_ticks(lo[i], hi[i], 3)) f.text({cx - 3, Y(t) + 2}, fmt_shortest(t), 6, Anchor::End, false, kInk);
+      }
+    }
+  const double tx = gx + side + 14;
+  double ty = gy + 10;
+  for (std::size_t p = 0; p < s.names.size(); ++p) {
+    f.text({tx, ty}, s.names[p] + ": " + fmt_fixed(s.mean[p], 3) + " " + s.units[p], 7, Anchor::Start, true, kInk);
+    f.text({tx, ty + 10}, "95 % " + fmt_fixed(s.q025[p], 3) + " to " + fmt_fixed(s.q975[p], 3) + "; " + diag_text(s, p), 6.5, Anchor::Start, false, kInk);
+    ty += 26;
+  }
+  footer(f, c);
+  return f;
+}
+
 Figure misfit_map_figure(const FigureContext& c, const std::string& horizon, const std::vector<MisfitPoint>& pts) {
   Figure f(842, 595);
   const auto& d = c.model->info().domain;
