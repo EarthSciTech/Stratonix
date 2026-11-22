@@ -89,6 +89,7 @@ The sections of a description:
 | `frame` | which block stays fixed: a fixed well or point |
 | `checks` | tolerances and closure targets |
 | `outputs` | sections, vertical exaggeration, voxel spacing, stick spacing, export formats |
+| `bodies` | (2026.4) salt sheets, sills, saucer sills, dykes and sand injectites |
 | `geophysics` | (2026.4) unit densities and susceptibilities, background values, inducing field, gravity and magnetic stations |
 
 Run `stratonix validate model.yaml` while you write: it checks the schema and the semantic rules
@@ -521,6 +522,28 @@ geophysics:
 
 Example: `bayesian_gravity_anticline` (picks and gravity, Bayesian, with Wheeler diagrams).
 
+## 2.17 Bodies: salt sheets, sills, dykes and injectites (2026.4)
+
+A top-level `bodies` list places closed bodies that cut across or fold over the stratigraphy.
+Each has a name, a `type` and an emplacement `age` on the faults' ordinal scale (larger =
+younger):
+
+| Type | Keys | Effect on the host |
+| --- | --- | --- |
+| `salt_sheet` | `footprint` polygon, `base` (`horizon` + `offset`, or `depth`), `thickness`, `taper` | strata above the sheet drape it (lifted by its local thickness) |
+| `sill`, `saucer_sill` | `centre`, `depth` (mid-plane), `radius`, `thickness`; saucer: `outer_radius`, `climb` | the roof is lifted by `accommodation` x the local thickness, decaying upward by `uplift_decay` per km |
+| `dyke` | `trace`, `width`, `top_depth`, `base_depth` | none |
+| `injectite` | `parent` unit, `ceiling` horizon, `area`, `sheets`, `length`, `thickness`, `climb`, `net_to_gross`, `max_fraction`, `seed` | the injected volume is taken from the parent's sand (mass balance in the log) |
+
+- Bodies are units of their own in sections, maps, grids, exports and checks.
+- Restoration evaluates the host without them.
+- A body crossed by a younger fault is refused with the reason: displacing bodies by younger
+  faults is not built, so give the body an age after the fault's.
+- Check C30 reports each body's volume and flags bodies thinner than half the grid spacing.
+- Rule F38 covers names, types, ranges and parent/ceiling order.
+
+Examples: `salt_sheet_drape`, `saucer_sill_forced_fold`, `injectite_complex`.
+
 # 3. Running
 
 | Command | What it does |
@@ -579,6 +602,7 @@ exports and figures.
 | C25 fault faces | a fault face of the grid lies off its fault surface by more than 1 % of the cell size |
 | C26 topology | units in contact inside one fault block are not adjacent in the column, and no unconformity (change of series) or terminating unit explains it |
 | C27 watertight | a horizon edge ends further than the tolerance from any fault, other horizon or the domain boundary (`checks.tolerances.watertight`, default half the surface spacing) |
+| C30 bodies | a body has no volume inside the model (bodies thinner than half the grid spacing are reported) |
 | C29 potential fields | WARNING: the stations' reduced chi-square exceeds 2 |
 | C28 posterior | a parameter's split R-hat is 1.01 or more, or its effective sample size is below 100: run the sampler longer |
 

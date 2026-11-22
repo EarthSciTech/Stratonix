@@ -16,6 +16,11 @@ has its own version (`stratonix_schema`).
     affine-invariant ensemble sampler with differential-evolution and stretch moves, posterior
     tables, trace and corner figures, check C28 and rule F36; `stratonix ensemble` draws the
     members of a Bayesian description from its posterior.
+  - geological-time coordinates and Wheeler diagrams; topology (`topology.json`, checks C26,
+    C27); gravity and magnetics (`geophysics` block, check C29, rule F37).
+- Stage 4B (STX-TN-15), in progress:
+  - bodies: salt sheets, sills, saucer sills, dykes and sand injectites (`bodies`, check C30,
+    rule F38); examples `salt_sheet_drape`, `saucer_sill_forced_fold`, `injectite_complex`.
 
 ### Changed
 - Least-squares conditioning updates its Jacobian by Broyden's formula: one model build per

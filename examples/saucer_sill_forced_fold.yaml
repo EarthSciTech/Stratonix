@@ -1,0 +1,62 @@
+# Stage 4B example (STX-TN-15 section 1.2): a saucer-shaped igneous sill fed by a dyke, with the forced
+# fold above it. The inner sill lies at 1800 m; its outer sheets climb at 20 degrees to a radius of
+# 3.5 km. The roof is lifted by 80 % of the local sill thickness (the rest of the space made by the
+# host), and the lift decays upward by 20 % per km. DESIGN model; every parameter carries value, unit,
+# evidence and source.
+stratonix_schema: 1
+model: {name: saucer_sill_forced_fold, version: "1.0.0", status: DESIGN,
+        title: "Saucer sill and feeder dyke with a forced fold"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 8000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[500, 500] m | user_instruction | worked example"
+    tops: {H1: "600 m | user_instruction | worked example", H2: "1000 m | user_instruction | worked example", H3: "1500 m | user_instruction | worked example", H4: "2200 m | user_instruction | worked example"}
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}, {name: H4}]
+  units:
+    - {name: U1, top: H1, base: H2}
+    - {name: U2, top: H2, base: H3}
+    - {name: U3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+bodies:
+  - name: Feeder_dyke
+    type: dyke
+    age: "1 ordinal | user_instruction | worked example: the feeder, before the sill"
+    color: "#7a2e2e"
+    trace: "[[5000, 3200], [5000, 4800]] m | user_instruction | worked example: strikes across the section"
+    width: "40 m | user_instruction | worked example"
+    top_depth: "1830 m | user_instruction | worked example: up to the sill's floor"
+    base_depth: "3000 m | user_instruction | worked example"
+  - name: Saucer_sill
+    type: saucer_sill
+    age: "2 ordinal | user_instruction | worked example"
+    color: "#a33c3c"
+    centre: "[5000, 4000] m | user_instruction | worked example"
+    depth: "1800 m | user_instruction | worked example: mid-plane of the inner sill"
+    radius: "1500 m | user_instruction | worked example: inner sill"
+    outer_radius: "3500 m | user_instruction | worked example"
+    climb: "20 deg | user_instruction | worked example: outer inclined sheets"
+    thickness: "60 m | user_instruction | worked example: central thickness"
+    accommodation: "0.8 fraction | user_instruction | worked example: 80 % of the space made by roof uplift"
+    uplift_decay: "0.2 fraction | user_instruction | worked example: per km above the roof"
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[0, 4000], [10000, 4000]] m | user_instruction | worked example: through the sill's centre"
+  vertical_exaggeration: "3 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv, grdecl, grid_vtk]
+grid:
+  spacing: "[250, 250] m | user_instruction | worked example: areal cell size"
+  margin: "50 m | user_instruction | worked example: pillars above the top and below the base horizon"
+  zones:
+    - {unit: U1, layers: "5 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: U2, layers: "5 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: U3, layers: "5 ordinal | user_instruction | worked example", layering: proportional}

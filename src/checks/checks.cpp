@@ -11,6 +11,7 @@
 #include "stratonix/core/roots.hpp"
 #include "stratonix/engines/faults.hpp"
 #include "stratonix/engines/structure.hpp"
+#include "stratonix/engines/bodies.hpp"
 #include "stratonix/engines/conditioning.hpp"
 #include "stratonix/engines/posterior.hpp"
 #include "stratonix/engines/history.hpp"
@@ -1200,7 +1201,7 @@ class C26 final : public Check {
     for (auto& e : g.edges) {
       const auto& a = g.nodes[static_cast<std::size_t>(e.a)];
       const auto& b = g.nodes[static_cast<std::size_t>(e.b)];
-      if (a.block != b.block || std::abs(a.unit - b.unit) <= 1) continue;
+      if (a.block != b.block || std::abs(a.unit - b.unit) <= 1 || e.surface.rfind("body:", 0) == 0) continue;  // bodies cut across by design
       auto nm = [&](int u) { return (u >= 0 && static_cast<std::size_t>(u) < inf.units.size()) ? inf.units[static_cast<std::size_t>(u)].name : std::to_string(u); };
       std::string t = nm(std::min(a.unit, b.unit)) + " on " + nm(std::max(a.unit, b.unit)) + " in block " + std::to_string(a.block) + " (" +
                       fmt_fixed(e.area / 1e6, 3) + " km2)";
@@ -1250,6 +1251,27 @@ class C27 final : public Check {
              fmt_fixed(w.gaps[k].at.y, 0) + ", " + fmt_fixed(w.gaps[k].at.z, 0) + ")";
     r.detail = det.empty() ? "every horizon edge ends on a fault, a horizon or the domain boundary" : det;
     return {r};
+  }
+};
+
+/// C30: bodies (STX-TN-15 section 1): every body has a volume inside the model and an emplacement
+/// age; bodies thinner than half the grid spacing are reported.
+class C30 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    auto* bs = static_cast<const std::vector<BodyReport>*>(c.model().capability("bodies"));
+    if (!bs) return out;
+    for (auto& b : *bs) {
+      auto r = base(c, "C30", "body volume", b.name + " (" + b.type + ", age " + fmt_shortest(b.age) + ")");
+      r.unit = "Mm3";
+      r.value = b.volume / 1e6;
+      r.tolerance = 0;
+      r.tolerance_source = "Stratonix rule: a body has a positive volume";
+      r.passed = b.volume > 0 && std::isfinite(b.age);
+      r.detail = b.note.empty() ? "placed in age order; the host is evaluated where the body is not" : b.note;
+      out.push_back(r);
+    }
+    return out;
   }
 };
 
@@ -1353,6 +1375,8 @@ STRATONIX_REGISTER(check_c26, registry::Kind::Check, "C26_topology", "1.0.0", "T
                    [] { return std::make_unique<C26>(); })
 STRATONIX_REGISTER(check_c27, registry::Kind::Check, "C27_watertight", "1.0.0", "Watertight horizon surfaces",
                    [] { return std::make_unique<C27>(); })
+STRATONIX_REGISTER(check_c30, registry::Kind::Check, "C30_bodies", "1.0.0", "Bodies: positive volume, emplacement age, thin bodies reported",
+                   [] { return std::make_unique<C30>(); })
 STRATONIX_REGISTER(check_c29, registry::Kind::Check, "C29_potential_fields", "1.0.0", "Potential-field misfit: reduced chi-square of the stations (warning above 2)",
                    [] { return std::make_unique<C29>(); })
 STRATONIX_REGISTER(check_c28, registry::Kind::Check, "C28_posterior", "1.0.0", "Posterior converged: split R-hat below 1.01, effective sample size at least 100",

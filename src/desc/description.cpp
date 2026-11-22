@@ -137,6 +137,11 @@ std::vector<const Param*> Description::all_params() const {
                   &geophysics.declination, &geophysics.intensity, &geophysics.gravity.uncertainty, &geophysics.magnetics.uncertainty})
     add(*q);
   for (auto& u : geophysics.units) { add(u.density); add(u.susceptibility); }
+  for (auto& b : bodies)
+    for (auto* q : {&b.age, &b.footprint, &b.base_offset, &b.base_depth, &b.thickness, &b.taper, &b.centre, &b.depth, &b.radius, &b.accommodation,
+                    &b.uplift_decay, &b.climb, &b.outer_radius, &b.trace, &b.width, &b.top_depth, &b.sheets, &b.length, &b.length_sd, &b.thickness_sd,
+                    &b.net_to_gross, &b.max_fraction, &b.seed})
+      add(*q);
   for (auto* q : {&fault_rock.shale_threshold, &fault_rock.thickness_ratio, &fault_rock.seal_a, &fault_rock.seal_c, &stress.sv_gradient,
                   &stress.shmax_ratio, &stress.shmin_ratio, &stress.shmax_azimuth, &stress.tensor_gradient, &stress.pore_pressure_gradient,
                   &stress.friction, &stress.cohesion, &fracture_threshold})
@@ -905,6 +910,58 @@ struct Typer {
           cd.parameters.push_back({S(&x, "path"), P(&x, "min", b, Dimension::Any, true, 1), P(&x, "max", b, Dimension::Any, true, 1)});
         }
     }
+    if (const Node* bs = root.get("bodies"))
+      for (std::size_t k = 0; k < bs->seq.size(); ++k) {
+        const Node& x = bs->seq[k];
+        const std::string b = "bodies[" + std::to_string(k) + "]";
+        BodyDesc bd;
+        bd.name = S(&x, "name");
+        bd.type = S(&x, "type");
+        bd.color = S(&x, "color");
+        bd.age = P(&x, "age", b, Dimension::Ordinal, true, 1);
+        const bool sheet = bd.type == "salt_sheet", sill = bd.type == "sill" || bd.type == "saucer_sill", dyke = bd.type == "dyke", inj = bd.type == "injectite";
+        if (sheet) {
+          bd.footprint = P(&x, "footprint", b, Dimension::Length, true, 2, 2);
+          if (const Node* bn = x.get("base")) {
+            bd.base_horizon = S(bn, "horizon");
+            bd.base_offset = P(bn, "offset", b + ".base", Dimension::Length, false, 1);
+            bd.base_depth = P(bn, "depth", b + ".base", Dimension::Length, false, 1);
+          }
+          bd.thickness = P(&x, "thickness", b, Dimension::Length, true, 1);
+          bd.taper = P(&x, "taper", b, Dimension::Length, false, 1);
+        }
+        if (sill) {
+          bd.centre = P(&x, "centre", b, Dimension::Length, true, 2);
+          bd.depth = P(&x, "depth", b, Dimension::Length, true, 1);
+          bd.radius = P(&x, "radius", b, Dimension::Length, true, 1);
+          bd.thickness = P(&x, "thickness", b, Dimension::Length, true, 1);
+          bd.accommodation = P(&x, "accommodation", b, Dimension::Dimensionless, false, 1);
+          bd.uplift_decay = P(&x, "uplift_decay", b, Dimension::Dimensionless, false, 1);
+          bd.climb = P(&x, "climb", b, Dimension::Angle, bd.type == "saucer_sill", 1);
+          bd.outer_radius = P(&x, "outer_radius", b, Dimension::Length, bd.type == "saucer_sill", 1);
+        }
+        if (dyke) {
+          bd.trace = P(&x, "trace", b, Dimension::Length, true, 2, 2);
+          bd.width = P(&x, "width", b, Dimension::Length, true, 1);
+          bd.top_depth = P(&x, "top_depth", b, Dimension::Length, true, 1);
+          bd.base_depth = P(&x, "base_depth", b, Dimension::Length, true, 1);
+        }
+        if (inj) {
+          bd.parent = S(&x, "parent");
+          bd.ceiling = S(&x, "ceiling");
+          bd.footprint = P(&x, "area", b, Dimension::Length, true, 2, 2);
+          bd.sheets = P(&x, "sheets", b, Dimension::Ordinal, true, 1);
+          bd.length = P(&x, "length", b, Dimension::Length, true, 1);
+          bd.length_sd = P(&x, "length_sd", b, Dimension::Length, false, 1);
+          bd.thickness = P(&x, "thickness", b, Dimension::Length, true, 1);
+          bd.thickness_sd = P(&x, "thickness_sd", b, Dimension::Length, false, 1);
+          bd.climb = P(&x, "climb", b, Dimension::Angle, true, 1);
+          bd.net_to_gross = P(&x, "net_to_gross", b, Dimension::Dimensionless, true, 1);
+          bd.max_fraction = P(&x, "max_fraction", b, Dimension::Dimensionless, false, 1);
+          bd.seed = P(&x, "seed", b, Dimension::Ordinal, true, 1);
+        }
+        d.bodies.push_back(bd);
+      }
     if (const Node* gp = root.get("geophysics")) {
       auto& g = d.geophysics;
       g.present = true;
@@ -1213,6 +1270,56 @@ struct Typer {
             if (!(ph.si(q) >= 0 && ph.si(q) < 1)) c.err(ub + ".table_porosity", "F25", "porosities must be in [0, 1)");
         } else {
           c.err(ub + ".law", "F25", "law must be exponential or table");
+        }
+      }
+    }
+    // STX-TN-15 (F38): bodies
+    {
+      std::set<std::string> names;
+      for (std::size_t k = 0; k < d.bodies.size(); ++k) {
+        const auto& bd = d.bodies[k];
+        const std::string b = "bodies[" + std::to_string(k) + "]";
+        if (bd.name.empty() || !names.insert(bd.name).second) c.err(b + ".name", "F38", "every body needs a unique name");
+        if (std::any_of(d.units.begin(), d.units.end(), [&](const UnitDesc& u) { return u.name == bd.name; }))
+          c.err(b + ".name", "F38", "a body cannot share its name with a unit");
+        if (bd.type != "salt_sheet" && bd.type != "sill" && bd.type != "saucer_sill" && bd.type != "dyke" && bd.type != "injectite")
+          c.err(b + ".type", "F38", "type must be salt_sheet, sill, saucer_sill, dyke or injectite (got '" + bd.type + "')");
+        auto pos = [&](const Param& p, const std::string& key) {
+          if (p.present && !(p.si() > 0)) c.err(b + "." + key, "F38", key + " must be positive");
+        };
+        pos(bd.thickness, "thickness");
+        pos(bd.radius, "radius");
+        pos(bd.width, "width");
+        pos(bd.length, "length");
+        if (bd.type == "salt_sheet") {
+          if (bd.footprint.present && bd.footprint.rows() < 3) c.err(b + ".footprint", "F38", "a footprint needs at least three vertices");
+          if (bd.base_horizon.empty() == !bd.base_depth.present) c.err(b + ".base", "F38", "give the sheet's base as a horizon (with an offset) or as a depth, not both");
+          if (!bd.base_horizon.empty() && d.horizon_index(bd.base_horizon) < 0) c.err(b + ".base.horizon", "F38", "unknown horizon '" + bd.base_horizon + "'");
+          if (bd.taper.present && !(bd.taper.si() >= 0)) c.err(b + ".taper", "F38", "the taper cannot be negative");
+        }
+        if (bd.type == "sill" || bd.type == "saucer_sill") {
+          if (bd.thickness.present && (bd.thickness.si() < 1 || bd.thickness.si() > 300)) c.err(b + ".thickness", "F38", "sill thickness from 1 to 300 m");
+          if (bd.accommodation.present && !(bd.accommodation.si() >= 0 && bd.accommodation.si() <= 1)) c.err(b + ".accommodation", "F38", "accommodation from 0 to 1");
+          if (bd.uplift_decay.present && !(bd.uplift_decay.si() >= 0 && bd.uplift_decay.si() <= 1)) c.err(b + ".uplift_decay", "F38", "uplift decay from 0 to 1 per km");
+          if (bd.type == "saucer_sill") {
+            if (bd.climb.present && (bd.climb.si() < 5 * kPi / 180 || bd.climb.si() > 45 * kPi / 180)) c.err(b + ".climb", "F38", "saucer climb from 5 to 45 degrees");
+            if (bd.outer_radius.present && bd.radius.present && !(bd.outer_radius.si() > bd.radius.si())) c.err(b + ".outer_radius", "F38", "the outer radius must exceed the inner sill's radius");
+          }
+        }
+        if (bd.type == "dyke" && bd.top_depth.present && bd.base_depth.present && !(bd.base_depth.si() > bd.top_depth.si()))
+          c.err(b + ".base_depth", "F38", "a dyke's base must be deeper than its top");
+        if (bd.type == "injectite") {
+          int pu = -1;
+          for (std::size_t u = 0; u < d.units.size(); ++u)
+            if (d.units[u].name == bd.parent) pu = static_cast<int>(u);
+          if (pu < 0) c.err(b + ".parent", "F38", "unknown parent unit '" + bd.parent + "'");
+          const int ch = d.horizon_index(bd.ceiling);
+          if (ch < 0) c.err(b + ".ceiling", "F38", "unknown ceiling horizon '" + bd.ceiling + "'");
+          if (pu >= 0 && ch >= 0 && !(ch < d.horizon_index(d.units[static_cast<std::size_t>(pu)].top)))
+            c.err(b + ".ceiling", "F38", "the ceiling must be younger than (above) the parent unit's top");
+          if (bd.max_fraction.present && !(bd.max_fraction.si() > 0 && bd.max_fraction.si() <= 1)) c.err(b + ".max_fraction", "F38", "the fraction must lie in (0, 1]");
+          if (bd.net_to_gross.present && !(bd.net_to_gross.si() > 0 && bd.net_to_gross.si() <= 1)) c.err(b + ".net_to_gross", "F38", "net-to-gross must lie in (0, 1]");
+          if (bd.footprint.present && bd.footprint.rows() < 3) c.err(b + ".area", "F38", "an area needs at least three vertices");
         }
       }
     }

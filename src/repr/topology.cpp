@@ -100,6 +100,12 @@ ContactGraph contact_graph(const Model& m, double spacing) {
       std::string nm = (f >= 0 && static_cast<std::size_t>(f) < inf.faults.size()) ? inf.faults[static_cast<std::size_t>(f)].name : std::to_string(f);
       return "fault:" + nm;
     }
+    // stage 4B: a body (unit after the stratigraphic column) cuts across the stratigraphy
+    const int nstrat = static_cast<int>(inf.horizons.size()) + 1;
+    if (ua >= nstrat || ub >= nstrat) {
+      const int u = ua >= nstrat ? ua : ub;
+      return "body:" + (static_cast<std::size_t>(u) < inf.units.size() ? inf.units[static_cast<std::size_t>(u)].name : std::to_string(u));
+    }
     const int top = std::min(ua, ub), bot = std::max(ua, ub);
     // the boundary is the base horizon of the upper unit
     std::string hn = (top >= 0 && static_cast<std::size_t>(top) < inf.horizons.size()) ? inf.horizons[static_cast<std::size_t>(top)].name : "?";

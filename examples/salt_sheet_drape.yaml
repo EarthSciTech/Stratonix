@@ -1,0 +1,49 @@
+# Stage 4B example (STX-TN-15 section 1.1): an allochthonous salt sheet emplaced on H2 and buried by
+# younger strata that drape it. The sheet's base follows H2; its thickness tapers to its edge, and
+# every younger horizon (H1) is lifted by the sheet's local thickness. DESIGN model; every parameter
+# carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: salt_sheet_drape, version: "1.0.0", status: DESIGN,
+        title: "Allochthonous salt sheet on H2 with draping overburden"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 8000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example"
+    tops: {H1: "800 m | user_instruction | worked example", H2: "1300 m | user_instruction | worked example", H3: "1800 m | user_instruction | worked example", H4: "2300 m | user_instruction | worked example"}
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}, {name: H4}]
+  units:
+    - {name: U1, top: H1, base: H2}
+    - {name: U2, top: H2, base: H3}
+    - {name: U3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+bodies:
+  - name: Salt_sheet
+    type: salt_sheet
+    age: "1 ordinal | user_instruction | worked example: emplaced after H2 was deposited"
+    color: "#d8c3e0"
+    footprint: "[[2500, 2000], [8000, 2000], [8500, 6000], [3000, 6500]] m | user_instruction | worked example"
+    base: {horizon: H2, offset: "0 m | user_instruction | worked example: the sheet advanced over the H2 seafloor"}
+    thickness: "500 m | user_instruction | worked example"
+    taper: "800 m | user_instruction | worked example: thinning to the sheet's toe"
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[0, 4000], [10000, 4000]] m | user_instruction | worked example: through the sheet"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv, grdecl, grid_vtk]
+grid:
+  spacing: "[250, 250] m | user_instruction | worked example: areal cell size"
+  margin: "50 m | user_instruction | worked example: pillars above the top and below the base horizon"
+  zones:
+    - {unit: U1, layers: "5 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: U2, layers: "5 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: U3, layers: "5 ordinal | user_instruction | worked example", layering: proportional}

@@ -77,6 +77,43 @@ TEST_CASE("G2b injectite mass balance and seeded reproducibility") {
   for (auto& s : a.sheets) CHECK(std::max(s.start.z, s.end.z) <= sp.ceiling + 1e-6);
 }
 
+TEST_CASE("G1m bodies in models: unit query, drape of the overburden, restoration removes them, younger faults refused") {
+  register_all_plugins();
+  const fs::path ex = fs::path(STX_SOURCE_DIR) / "examples";
+  auto d = desc::load_description(ex / "salt_sheet_drape.yaml");
+  auto m = build_only(d, BuildOptions{}).model;
+  auto* bs = static_cast<const std::vector<BodyReport>*>(m->capability("bodies"));
+  REQUIRE(bs != nullptr);
+  REQUIRE(bs->size() == 1);
+  const int salt = (*bs)[0].unit;
+  // at the sheet's centre (x 5500, y 4000): base on H2 (1300 m), 500 m thick, H1 lifted by 500 m
+  CHECK(m->unit_at({5500, 4000, -1050}) == salt);
+  CHECK(m->unit_at({5500, 4000, -1350}) != salt);
+  CHECK(m->unit_at({5500, 4000, -790}) == d.horizon_index("H1") + 1);  // U1 above the sheet
+  CHECK(m->unit_at({5500, 4000, -310}) == d.horizon_index("H1") + 1);  // H1 lifted from 800 to 300 m
+  CHECK(m->unit_at({5500, 4000, -290}) == 0);
+  // restoration removes the body: the host at the undeformed position (flat host: z - thickness)
+  Vec3 p{5500, 4000, -600}, r;
+  m->restore(std::span<const Vec3>(&p, 1), std::span<Vec3>(&r, 1));
+  CHECK(std::fabs(r.z - (-1100)) < 1e-6);
+  // a fault younger than a body that crosses it is refused with the reason
+  auto t = model_yaml(planar_fault("F1", "2", "[5000, 5000] m", "1300 m", "0 deg", "60 deg", "40000 m", "max: " + q("100 m"), "dip_slip"), "",
+                      {1000, 1200, 1400, 1600},
+                      "bodies:\n  - {name: S1, type: sill, age: " + q("1 ordinal") + ", centre: " + q("[5000, 5000] m") + ", depth: " + q("1300 m") +
+                          ", radius: " + q("1500 m") + ", thickness: " + q("50 m") + "}\n");
+  bool refused = false;
+  std::string why;
+  try {
+    build_text(t);
+  } catch (const std::exception& e) {
+    refused = true;
+    why = e.what();
+  }
+  std::printf("  refusal: %s\n", why.c_str());
+  CHECK(refused);
+  CHECK(why.find("younger fault F1") != std::string::npos);
+}
+
 // ---- 2. Fault styles (Prompt 50)
 
 TEST_CASE("G3 polygonal fault network: reproducible, spacing within 5 %, throws scale with length") {

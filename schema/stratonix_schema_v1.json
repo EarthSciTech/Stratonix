@@ -2417,6 +2417,127 @@
           "description": "Total-field magnetic stations (nT) as delivered."
         }
       }
+    },
+    "bodies": {
+      "type": "array",
+      "description": "Stage 4B (STX-TN-15 section 1): bodies that cut across or fold over the stratigraphy, emplaced in age order on the faults' ordinal scale.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type",
+          "age"
+        ],
+        "properties": {
+          "age": {
+            "$ref": "#/$defs/param"
+          },
+          "footprint": {
+            "$ref": "#/$defs/param"
+          },
+          "thickness": {
+            "$ref": "#/$defs/param"
+          },
+          "taper": {
+            "$ref": "#/$defs/param"
+          },
+          "centre": {
+            "$ref": "#/$defs/param"
+          },
+          "depth": {
+            "$ref": "#/$defs/param"
+          },
+          "radius": {
+            "$ref": "#/$defs/param"
+          },
+          "accommodation": {
+            "$ref": "#/$defs/param"
+          },
+          "uplift_decay": {
+            "$ref": "#/$defs/param"
+          },
+          "climb": {
+            "$ref": "#/$defs/param"
+          },
+          "outer_radius": {
+            "$ref": "#/$defs/param"
+          },
+          "trace": {
+            "$ref": "#/$defs/param"
+          },
+          "width": {
+            "$ref": "#/$defs/param"
+          },
+          "top_depth": {
+            "$ref": "#/$defs/param"
+          },
+          "base_depth": {
+            "$ref": "#/$defs/param"
+          },
+          "area": {
+            "$ref": "#/$defs/param"
+          },
+          "sheets": {
+            "$ref": "#/$defs/param"
+          },
+          "length": {
+            "$ref": "#/$defs/param"
+          },
+          "length_sd": {
+            "$ref": "#/$defs/param"
+          },
+          "thickness_sd": {
+            "$ref": "#/$defs/param"
+          },
+          "net_to_gross": {
+            "$ref": "#/$defs/param"
+          },
+          "max_fraction": {
+            "$ref": "#/$defs/param"
+          },
+          "seed": {
+            "$ref": "#/$defs/param"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "enum": [
+              "salt_sheet",
+              "sill",
+              "saucer_sill",
+              "dyke",
+              "injectite"
+            ]
+          },
+          "color": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "string"
+          },
+          "ceiling": {
+            "type": "string"
+          },
+          "base": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "horizon": {
+                "type": "string"
+              },
+              "offset": {
+                "$ref": "#/$defs/param"
+              },
+              "depth": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

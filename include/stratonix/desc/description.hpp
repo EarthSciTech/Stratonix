@@ -258,6 +258,24 @@ struct GridDesc {
   bool tetrahedral = false;
 };
 
+/// Bodies (stage 4B, STX-TN-15 section 1): salt sheets, sills, saucer sills, dykes, injectites.
+struct BodyDesc {
+  std::string name, type;          ///< salt_sheet | sill | saucer_sill | dyke | injectite
+  Param age;                       ///< emplacement, on the faults' ordinal scale (larger = younger)
+  std::string color;
+  // salt sheet
+  Param footprint;                 ///< [[x, y], ...] m
+  std::string base_horizon;        ///< base at a horizon (plus base_offset, positive up) or at base_depth
+  Param base_offset, base_depth, thickness, taper;
+  // sill and saucer sill (centre, depth of the mid-plane); also thickness
+  Param centre, depth, radius, accommodation, uplift_decay, climb, outer_radius;
+  // dyke
+  Param trace, width, top_depth;   ///< base: base_depth
+  // injectite
+  std::string parent, ceiling;     ///< parent unit, ceiling horizon
+  Param sheets, length, length_sd, thickness_sd, net_to_gross, max_fraction, seed;
+};
+
 /// Gravity and magnetics (stage 4A, STX-TN-14 section 7).
 struct GeophysicsUnitDesc { std::string unit; Param density, susceptibility; };
 struct StationSetDesc { std::string input, format; Param uncertainty; };
@@ -310,6 +328,7 @@ struct Description {
   GridDesc grid;                   ///< stage 3B
   UncertaintyDesc uncertainty;     ///< stage 3C
   GeophysicsDesc geophysics;       ///< stage 4A
+  std::vector<BodyDesc> bodies;    ///< stage 4B
   StressDesc stress;               ///< stage 2F
   std::vector<std::string> curvature_horizons;  ///< stage 2F: outputs.curvature.horizons
   Param fracture_threshold;        ///< stage 2F: outputs.curvature.fracture_threshold (1/m)

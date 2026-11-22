@@ -1,5 +1,6 @@
 // Builder selection, ModelInfo from descriptions, and the flat-layers builder plugin.
 #include "stratonix/engines/builder.hpp"
+#include "stratonix/engines/bodies.hpp"
 
 #include <cmath>
 
@@ -48,7 +49,7 @@ ModelPtr build_model(const desc::Description& d, const BuildInputs& in, BuildLog
     auto b = reg.create<StructureBuilder>(registry::Kind::StructureBuilder, e->name);
     if (b->accepts(d)) {
       log.value("structure_builder", e->name + "@" + e->version);
-      return b->build(d, in, log);
+      return wrap_bodies(d, b->build(d, in, log), log);  // stage 4B: bodies over any structure
     }
   }
   throw Error(ErrorCode::Build, "no registered structure builder accepts this description");

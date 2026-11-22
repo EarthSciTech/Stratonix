@@ -132,6 +132,8 @@ fig::FigureContext figure_context(const desc::Description& d, const Model& m, co
     std::string role, color, label;
     for (auto& du : d.units)
       if (du.name == u.name) { role = du.role; color = du.color; label = du.label; }
+    for (auto& b : d.bodies)  // stage 4B: bodies carry their own colour
+      if (b.name == u.name) { role = "Bodies"; color = b.color; }
     c.unit_roles.push_back(role);
     c.unit_colors.push_back(color);
     c.unit_labels.push_back(label);

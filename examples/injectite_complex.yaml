@@ -1,0 +1,55 @@
+# Stage 4B example (STX-TN-15 section 1.3): a sand injectite complex sourced from the sand unit U2 and
+# climbing as wings into the mudstone U1, up to H1. Thirty sheets are seeded (reproducible); the
+# injected volume is taken from U2's sand (mass balance in the build log). DESIGN model; every
+# parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: injectite_complex, version: "1.0.0", status: DESIGN,
+        title: "Sand injectite complex above a parent sand"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[8000, 8000] m | user_instruction | worked example"
+  depth_range: "[0, 2000] m | user_instruction | worked example"
+  grid_spacing: "25 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[500, 500] m | user_instruction | worked example"
+    tops: {H1: "700 m | user_instruction | worked example", H2: "1100 m | user_instruction | worked example", H3: "1400 m | user_instruction | worked example"}
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H3}]
+  units:
+    - {name: U1, top: H1, base: H2}
+    - {name: U2, top: H2, base: H3}
+structure:
+  regional: {type: flat}
+bodies:
+  - name: Injectites
+    type: injectite
+    age: "1 ordinal | user_instruction | worked example"
+    color: "#e0c040"
+    parent: U2
+    ceiling: H1
+    area: "[[1500, 1500], [6500, 1500], [6500, 6500], [1500, 6500]] m | user_instruction | worked example"
+    sheets: "30 ordinal | user_instruction | worked example"
+    length: "600 m | user_instruction | worked example"
+    length_sd: "150 m | user_instruction | worked example"
+    thickness: "15 m | user_instruction | worked example"
+    thickness_sd: "4 m | user_instruction | worked example"
+    climb: "25 deg | user_instruction | worked example: wing climb angle"
+    net_to_gross: "0.6 fraction | user_instruction | worked example: sand fraction of U2"
+    max_fraction: "0.3 fraction | user_instruction | worked example"
+    seed: "4 ordinal | user_instruction | worked example"
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[0, 4000], [8000, 4000]] m | user_instruction | worked example"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv, grdecl, grid_vtk]
+grid:
+  spacing: "[200, 200] m | user_instruction | worked example: areal cell size"
+  margin: "50 m | user_instruction | worked example: pillars above the top and below the base horizon"
+  zones:
+    - {unit: U1, layers: "8 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: U2, layers: "5 ordinal | user_instruction | worked example", layering: proportional}

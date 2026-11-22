@@ -136,7 +136,7 @@ std::string figure_basename(const FigureContext& c, const std::string& kind, con
 Color unit_color(const FigureContext& c, std::size_t u) {
   if (u < c.unit_colors.size() && !c.unit_colors[u].empty()) return Color::hex(c.unit_colors[u]);
   const auto& inf = c.model->info();
-  if (u + 1 == inf.units.size()) return Color::hex(kPalette[11]);
+  if (u == inf.horizons.size()) return Color::hex(kPalette[11]);  // below the base horizon (bodies come after it)
   return Color::hex(kPalette[u % 11]);
 }
 
@@ -193,6 +193,27 @@ void draw_section_panel(Figure& f, const FigureContext& c, const repr::Section& 
       }
     }
   }
+  // stage 4B: bodies (units after the stratigraphic column) over the fills, from the unit grid
+  if (inf.units.size() > nh + 1)
+    for (std::size_t col = 0; col + 1 < s.ns; ++col) {
+      const double sa = s.station[col], sb = s.station[col + 1];
+      if (sb < fr.s0 || sa > fr.s1) continue;
+      std::size_t r = 0;
+      while (r < s.nz) {
+        const std::int32_t u = s.unit[r * s.ns + col];
+        std::size_t r2 = r;
+        while (r2 + 1 < s.nz && s.unit[(r2 + 1) * s.ns + col] == u) ++r2;
+        if (u > static_cast<std::int32_t>(nh)) {
+          double zt = std::clamp(s.z_top - (static_cast<double>(r) - 0.5) * s.dz, fr.z1, fr.z0);
+          double zb = std::clamp(s.z_top - (static_cast<double>(r2) + 0.5) * s.dz, fr.z1, fr.z0);
+          if (zt > zb) {
+            const Color cc = unit_color(c, static_cast<std::size_t>(u));
+            f.path({fr.p(sa, zt), fr.p(sb, zt), fr.p(sb, zb), fr.p(sa, zb)}, true, cc, cc, 0.25);
+          }
+        }
+        r = r2 + 1;
+      }
+    }
   // Horizon lines (per fault block where blocks overlap, so both sheets are drawn).
   auto draw_line = [&](const std::vector<double>& zz) {
     std::vector<Pt> cur;

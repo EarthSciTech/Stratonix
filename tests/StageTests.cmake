@@ -79,7 +79,7 @@ if(Python3_Interpreter_FOUND)
 endif()
 # Stage 3B: the GRDECL of the gridded examples read back by an independent reader (test tool).
 if(Python3_Interpreter_FOUND)
-  foreach(ex fault_system_relay_splay rift_inversion_history)
+  foreach(ex fault_system_relay_splay rift_inversion_history salt_sheet_drape saucer_sill_forced_fold injectite_complex)
     add_test(NAME grdecl_independent_${ex}
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/read_grdecl.py ${STX_TEST_TMP}/cli_build_${ex})
     set_tests_properties(grdecl_independent_${ex} PROPERTIES DEPENDS cli_build_${ex} SKIP_RETURN_CODE 77)
@@ -100,7 +100,7 @@ add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:str
          -DDESC=${PROJECT_SOURCE_DIR}/examples/synthetic_fold_two_faults.yaml -DOUT=${STX_TEST_TMP}/cli_build_example
          -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
 # The worked examples of the user guide build with every check passing.
-foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data hybrid_fault_fold_conditioning fault_system_uncertainty)
+foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data hybrid_fault_fold_conditioning fault_system_uncertainty salt_sheet_drape saucer_sill_forced_fold injectite_complex)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
@@ -108,6 +108,13 @@ endforeach()
 foreach(ex implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data)
   set_tests_properties(cli_build_${ex} PROPERTIES TIMEOUT 3600)
 endforeach()
+# Stage 4A: the Bayesian example (picks and gravity, 40 000 posterior evaluations; optimised builds only).
+if(NOT STRATONIX_SANITIZE AND (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
+  add_test(NAME cli_build_bayesian_gravity_anticline COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
+           -DDESC=${PROJECT_SOURCE_DIR}/examples/bayesian_gravity_anticline.yaml -DOUT=${STX_TEST_TMP}/cli_build_bayesian_gravity_anticline
+           -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
+  set_tests_properties(cli_build_bayesian_gravity_anticline PROPERTIES TIMEOUT 3600)
+endif()
 # Every v1 command works unchanged on a data-conditioned (implicit) model.
 set(_imp ${PROJECT_SOURCE_DIR}/examples/implicit_from_samples.yaml)
 add_test(NAME cli_implicit_section COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_implicit_section

@@ -6,6 +6,9 @@
 #include <vector>
 
 #include "stratonix/core/geometry.hpp"
+#include "stratonix/desc/description.hpp"
+#include "stratonix/engines/builder.hpp"
+#include "stratonix/model/model.hpp"
 
 namespace stratonix {
 
@@ -51,5 +54,21 @@ struct InjectiteComplex {
   double injected_volume = 0, parent_volume_after = 0;
 };
 InjectiteComplex build_injectites(const InjectiteSpec& s, std::uint64_t seed);
+
+/// A body placed in a model (capability "bodies" of a model with bodies).
+struct BodyReport {
+  std::string name, type;
+  double age = 0;
+  int unit = -1;           ///< the body's unit index in the model
+  double volume = 0;       ///< m^3 (analytical where a closed form exists)
+  double min_thickness = 0;
+  std::string note;        ///< e.g. thinner than half a grid cell
+};
+
+/// Wrap a built model with the description's bodies (STX-TN-15 section 1). Bodies take the unit
+/// query where they occupy a point (youngest first); sills lift their roof and salt sheets their
+/// overburden (the host is evaluated at the undeformed position); restoration removes the bodies.
+/// Throws Error(Build) for a body that crosses a rule (for example a younger fault crossing it).
+ModelPtr wrap_bodies(const desc::Description& d, ModelPtr base, BuildLog& log);
 
 }  // namespace stratonix
