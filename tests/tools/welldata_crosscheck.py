@@ -18,7 +18,14 @@ import numpy as np
 EXE, LASDIR, WORK = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(WORK, exist_ok=True)
 # files the CWLS standard does not define the way lasio reads them (reason recorded)
-EXCLUDE = {}
+EXCLUDE = {
+    "null_policy_ind.las": "'-1.#IND0000' is the Microsoft C runtime's text for an undefined number: "
+                           "Stratonix keeps it as text (missing), lasio reads -1",
+    "issue79.las": "its data follow a section title without a name ('~   DEPTH ...'): lasio reads no data, "
+                   "Stratonix reads them as the log data and reports the title",
+    "null_policy_runon.las": "run-on numbers ('7.020101130.188'): lasio splits them by a heuristic; "
+                             "Stratonix reports the lines and does not guess where one number ends",
+}
 
 
 def stx_read(path, out):
@@ -38,7 +45,7 @@ def stx_read(path, out):
                 return float(x)
             except ValueError:
                 return math.nan
-        sets.append({h: np.array([num(x) for x in c]) for h, c in zip(head, cols)})
+        sets.append([(h, np.array([num(x) for x in c])) for h, c in zip(head, cols)])  # duplicates kept
     return sets, ""
 
 
@@ -70,12 +77,17 @@ for path in sorted(glob.glob(os.path.join(LASDIR, "*.las"))):
     if sets is None:
         bad.append("%s: Stratonix refused a file lasio reads: %s" % (name, err))
         continue
+    # curves compared by position (lasio renames duplicate, empty and differently cased
+    # mnemonics; both keep the file's order); names that differ are listed, not failed
     s = sets[0]
-    for c in las.curves:
-        if c.mnemonic not in s:
-            bad.append("%s: curve %s missing" % (name, c.mnemonic))
-        elif not same(s[c.mnemonic], c.data):
-            bad.append("%s: curve %s differs" % (name, c.mnemonic))
+    for k, c in enumerate(las.curves):
+        if k >= len(s):
+            bad.append("%s: curve %d (%s) missing" % (name, k + 1, c.mnemonic))
+            continue
+        if s[k][0] != c.mnemonic:
+            print("%s: curve %d named %s by Stratonix, %s by lasio" % (name, k + 1, s[k][0], c.mnemonic))
+        if not same(s[k][1], c.data):
+            bad.append("%s: curve %d (%s) differs" % (name, k + 1, c.mnemonic))
     compared += 1
 print("LAS: %d files compared with lasio" % compared)
 
@@ -105,7 +117,7 @@ if sets is None:
 else:
     with dlis.load(dpath) as files:
         ref = files[0].frames[0].curves()
-    s = sets[0]
+    s = dict(sets[0])
     for nm in ("DEPT", "GR", "RHOB"):
         if nm not in s or not same(s[nm], ref[nm]):
             bad.append("DLIS: channel %s differs from dlisio" % nm)

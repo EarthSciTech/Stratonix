@@ -71,19 +71,19 @@ bool parse_header_line(const std::string& line, bool las3, HeaderLine& h) {
     }
     if (bar != std::string::npos) h.assoc = trim(rest.substr(bar + 1));
   }
-  if (colon == std::string::npos) return false;
+  if (colon == std::string::npos) colon = rest.size();  // "MNEM.UNIT" without a colon: no value, no description
   h.mnem = trim(line.substr(0, dot));
   std::size_t sp = 0;
   while (sp < colon && !std::isspace(static_cast<unsigned char>(rest[sp]))) ++sp;
   h.unit = rest.substr(0, sp);
   h.value = trim(rest.substr(sp, colon - sp));
-  std::string d = rest.substr(colon + 1);
+  std::string d = colon < rest.size() ? rest.substr(colon + 1) : std::string();
   if (las3) {
     const std::size_t lim = std::min(d.find('{'), d.find('|'));
     if (lim != std::string::npos) d = d.substr(0, lim);
   }
-  h.desc = trim(d);
-  if (h.mnem.empty()) return false;
+  h.desc = colon < rest.size() ? trim(d) : std::string();
+  if (h.mnem.empty()) h.mnem = "UNKNOWN";  // a definition without a mnemonic (reported by the caller)
   return true;
 }
 std::vector<std::string> split_data(const std::string& line, char dlm) {
@@ -160,14 +160,15 @@ WellLogSet parse_las(const std::string& text, const std::string& source) {
       const std::size_t bar = title.find('|');
       if (bar != std::string::npos) data_of = trim(title.substr(bar + 1));
       const std::string T = upper(t);
-      if (!las3 || T.size() == 1 || T == "VERSION" || T == "WELL" || T == "CURVE" || T == "PARAMETER" || T == "OTHER" || T == "ASCII") {
-        section = std::string(1, T.empty() ? '?' : T[0]);
-        if (las3 && T.size() > 1 && T != "VERSION" && T != "WELL") section = T;
-      } else {
-        section = T;
+      // LAS 2.0 sections by their first letter; LAS 3.0 keeps the 2.0 names for the log (~Curve,
+      // ~Parameter, ~Other, ~A or a bare ~) and names its other groups in full
+      if (T.empty()) {
+        section = "A";
+        w.report.push_back("line " + std::to_string(lno) + ": a section title without a name ('~" + title + "'), read as the log data (~A)");
       }
-      if (las3 && (T == "VERSION")) section = "V";
-      if (las3 && (T == "WELL")) section = "W";
+      else if (!las3 || T.size() == 1) section = std::string(1, T[0]);
+      else if (T == "VERSION" || T == "WELL" || T == "CURVE" || T == "PARAMETER" || T == "OTHER" || T == "ASCII") section = std::string(1, T[0]);
+      else section = T;
       continue;
     }
     if (section == "A" && !las3) {
@@ -185,12 +186,15 @@ WellLogSet parse_las(const std::string& text, const std::string& source) {
       groups["LOG"].rows.push_back(split_data(line, dlm));
       continue;
     }
+    if (section == "O") continue;  // ~Other: free text, kept out of the data
     HeaderLine h;
     if (!parse_header_line(line, las3, h)) {
       w.report.push_back("line " + std::to_string(lno) + ": not a header line (no period or colon) in ~" + section + ", not read: " + line);
       continue;
     }
     const std::string M = upper(h.mnem);
+    if (h.mnem == "UNKNOWN" && trim(line.substr(0, line.find('.'))).empty())
+      w.report.push_back("line " + std::to_string(lno) + ": a definition without a mnemonic in ~" + section + ", named UNKNOWN");
     if (section == "V") {
       if (M == "VERS") {
         w.version = h.value;
@@ -247,15 +251,29 @@ WellLogSet parse_las(const std::string& text, const std::string& source) {
                            std::to_string(tok.size() % nc) + " not read");
       for (std::size_t a = 0; nc && a + nc <= tok.size(); a += nc) g.rows.emplace_back(tok.begin() + static_cast<long>(a), tok.begin() + static_cast<long>(a + nc));
     } else {
+      // values beyond the defined curves become curves named UNKNOWN (no unit), reported
+      std::size_t widest = 0;
+      for (auto& l : data_lines) widest = std::max(widest, split_data(l, ' ').size());
+      if (widest > nc) {
+        w.report.push_back(std::to_string(widest - nc) + " data column" + (widest - nc == 1 ? "" : "s") + " beyond the " + std::to_string(nc) +
+                           " defined curves: read as curves named UNKNOWN without a unit");
+        for (std::size_t k = nc; k < widest; ++k) g.defs.push_back({"UNKNOWN", "", "", "", "", ""});
+      }
+      const std::size_t ncols = g.defs.size();
+      std::size_t mismatched = 0;
       for (std::size_t r = 0; r < data_lines.size(); ++r) {
         auto t = split_data(data_lines[r], ' ');
-        if (t.size() != nc) {
-          w.report.push_back("line " + std::to_string(data_line_no[r]) + ": " + std::to_string(t.size()) + " values for " + std::to_string(nc) +
-                             " curves, not read");
-          continue;
+        if (t.size() != ncols) {
+          // read as delivered: the values go to the first curves; the others have none on this
+          // line (line by line for the first five, then counted)
+          if (++mismatched <= 5)
+            w.report.push_back("line " + std::to_string(data_line_no[r]) + ": " + std::to_string(t.size()) + " values for " + std::to_string(ncols) +
+                               " curves: the last " + std::to_string(ncols - t.size()) + " curves have no value on this line");
+          t.resize(ncols);
         }
         g.rows.push_back(t);
       }
+      if (mismatched > 5) w.report.push_back(std::to_string(mismatched) + " data lines in all have a number of values other than the curves'");
     }
   }
   // curves of each group
@@ -267,7 +285,8 @@ WellLogSet parse_las(const std::string& text, const std::string& source) {
       lc.description = g.defs[c].desc;
       lc.null_value = null_value;
       const bool is_text = !g.defs[c].format.empty() && std::toupper(static_cast<unsigned char>(g.defs[c].format[0])) == 'S';
-      std::size_t bad = 0;
+      const bool is_index = gname == "LOG" && c == 0;  // an index value is a depth or time, never a null
+      std::size_t bad = 0, commas = 0;
       for (auto& row : g.rows) {
         const std::string cell = c < row.size() ? row[c] : std::string();
         double v = kNaN;
@@ -276,20 +295,32 @@ WellLogSet parse_las(const std::string& text, const std::string& source) {
           lc.values.push_back(kNaN);
           continue;
         }
-        if (!parse_number(cell, v)) {
+        bool ok = parse_number(cell, v);
+        if (!ok && dlm != ',') {
+          // a decimal comma ("123,42") where the delimiter is not a comma
+          const std::size_t cm = cell.find(',');
+          if (cm != std::string::npos && cell.find(',', cm + 1) == std::string::npos) {
+            std::string t = cell;
+            t[cm] = '.';
+            ok = parse_number(t, v);
+            commas += ok;
+          }
+        }
+        if (!ok) {
           ++bad;
           lc.text.push_back(cell);
           lc.values.push_back(kNaN);
           continue;
         }
         if (!lc.text.empty()) lc.text.push_back("");
-        if (std::isfinite(null_value) && std::fabs(v - null_value) <= 1e-9 * std::max(1.0, std::fabs(null_value))) {
+        if (!is_index && std::isfinite(null_value) && std::fabs(v - null_value) <= 1e-9 * std::max(1.0, std::fabs(null_value))) {
           ++lc.nulls;
           v = kNaN;
         }
         lc.values.push_back(v);
       }
       if (bad) w.report.push_back(gname + " " + lc.mnemonic + ": " + std::to_string(bad) + " values are not numbers, kept as text");
+      if (commas) w.report.push_back(gname + " " + lc.mnemonic + ": " + std::to_string(commas) + " values with a decimal comma, read as decimal points");
       out.push_back(std::move(lc));
     }
   };
@@ -341,8 +372,42 @@ WellLogSet read_las(const std::filesystem::path& file) {
   std::ifstream in(file, std::ios::binary);
   if (!in) throw Error(ErrorCode::Io, "cannot open " + file.string());
   std::string s((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-  // encoding: ASCII or UTF-8; another byte is reported with its offset
   std::vector<std::string> enc;
+  // UTF-16 (with a byte-order mark, or recognised by its zero bytes) is converted to UTF-8
+  {
+    const auto b = [&](std::size_t i) { return static_cast<unsigned char>(s[i]); };
+    int order = 0;  // 1 little-endian, 2 big-endian
+    std::size_t start = 0;
+    if (s.size() >= 2 && b(0) == 0xFF && b(1) == 0xFE) { order = 1; start = 2; }
+    else if (s.size() >= 2 && b(0) == 0xFE && b(1) == 0xFF) { order = 2; start = 2; }
+    else if (s.size() >= 4) {
+      std::size_t z_even = 0, z_odd = 0;
+      for (std::size_t i = 0; i + 1 < std::min<std::size_t>(s.size(), 400); i += 2) { z_even += b(i) == 0; z_odd += b(i + 1) == 0; }
+      if (z_odd > 50 && z_even == 0) order = 1;
+      if (z_even > 50 && z_odd == 0) order = 2;
+    }
+    if (order) {
+      std::string u;
+      for (std::size_t i = start; i + 1 < s.size(); i += 2) {
+        std::uint32_t cp = order == 1 ? (b(i) | (b(i + 1) << 8)) : ((b(i) << 8) | b(i + 1));
+        if (cp >= 0xD800 && cp < 0xDC00 && i + 3 < s.size()) {
+          const std::uint32_t lo = order == 1 ? (b(i + 2) | (b(i + 3) << 8)) : ((b(i + 2) << 8) | b(i + 3));
+          cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+          i += 2;
+        }
+        if (cp < 0x80) u += static_cast<char>(cp);
+        else if (cp < 0x800) { u += static_cast<char>(0xC0 | (cp >> 6)); u += static_cast<char>(0x80 | (cp & 0x3F)); }
+        else if (cp < 0x10000) { u += static_cast<char>(0xE0 | (cp >> 12)); u += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); u += static_cast<char>(0x80 | (cp & 0x3F)); }
+        else { u += static_cast<char>(0xF0 | (cp >> 18)); u += static_cast<char>(0x80 | ((cp >> 12) & 0x3F)); u += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); u += static_cast<char>(0x80 | (cp & 0x3F)); }
+      }
+      s = u;
+      enc.push_back(std::string("encoding: UTF-16 ") + (order == 1 ? "little" : "big") + "-endian" + (start ? " with a byte-order mark" : "") + ", converted to UTF-8");
+    } else if (s.size() >= 3 && b(0) == 0xEF && b(1) == 0xBB && b(2) == 0xBF) {
+      s.erase(0, 3);
+      enc.push_back("encoding: UTF-8 with a byte-order mark");
+    }
+  }
+  // encoding: ASCII or UTF-8; another byte is reported with its offset
   for (std::size_t i = 0; i < s.size();) {
     const unsigned char c = static_cast<unsigned char>(s[i]);
     if (c < 0x80) { ++i; continue; }
