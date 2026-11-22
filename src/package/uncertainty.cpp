@@ -17,6 +17,7 @@
 #include "stratonix/core/util.hpp"
 #include "stratonix/engines/posterior.hpp"
 #include "stratonix/engines/wells.hpp"
+#include "stratonix/repr/topology.hpp"
 #include "stratonix/figures/figures.hpp"
 #include "stratonix/io/export.hpp"
 #include "stratonix/io/io.hpp"
@@ -503,6 +504,7 @@ namespace {
 
 struct MemberRun {
   MemberResult r;
+  std::unique_ptr<ContactGraph> graph;  ///< stage 4A: for the topology comparison
   std::vector<std::vector<std::uint8_t>> map_hits;  ///< per probability map, per node (1 hit)
 };
 
@@ -543,6 +545,7 @@ MemberRun run_member(const desc::Node& base, const fs::path& base_dir, const Ens
   try {
     CheckContext ctx(*model, d, make_well_paths(d), d.grid_spacing.si());
     auto rep = run_checks(ctx);
+    out.graph = std::make_unique<ContactGraph>(ctx.contact_graph());
     for (auto& c : rep.results)
       if (!c.passed && !c.warn_only && !c.info) out.r.failed_checks.push_back(c.id + " " + c.subject);
     for (auto& [k, v] : key_numbers(d, *model, rep, ctx)) {
@@ -726,6 +729,20 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
   set_log_level(saved_level);
   set_thread_count(saved_threads);
   for (std::size_t k = 0; k < samples.size(); ++k) res.members.push_back(runs[k].r);
+  // stage 4A (STX-TN-14 section 6): each member's contact graph against the base case's
+  if (runs[0].graph)
+    for (std::size_t k = 1; k < samples.size(); ++k) {
+      if (!runs[k].graph) continue;
+      std::vector<std::string> diff;
+      if (same_topology(*runs[0].graph, *runs[k].graph, &diff)) {
+        res.members[k].topology = "same";
+      } else {
+        ++res.topology_differs;
+        std::string t;
+        for (std::size_t q = 0; q < diff.size() && q < 4; ++q) t += (q ? "; " : "") + diff[q];
+        res.members[k].topology = t + (diff.size() > 4 ? "; and " + std::to_string(diff.size() - 4) + " more" : "");
+      }
+    }
 
   // key names in the order of first appearance (base case first)
   std::vector<std::string> keys;
@@ -807,7 +824,7 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
     for (auto& p : s.parameters) t += "," + p.path + " (" + p.unit + ")";
     for (auto& sc : s.scenarios) t += ",scenario " + sc.name;
     for (auto& k : keys) t += "," + csv_text(k);
-    t += ",failed_checks,reason\n";
+    t += ",failed_checks,reason,topology\n";
     for (auto& m : res.members) {
       t += (m.sample.index == 0 ? std::string("base") : std::to_string(m.sample.index)) + "," + (m.sample.index == 0 ? std::string("-") : std::to_string(m.sample.seed)) +
            "," + m.status;
@@ -819,7 +836,7 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
       }
       std::string fc;
       for (auto& c : m.failed_checks) fc += (fc.empty() ? "" : "; ") + c;
-      t += "," + csv_text(fc) + "," + csv_text(m.reason) + "\n";
+      t += "," + csv_text(fc) + "," + csv_text(m.reason) + "," + csv_text(m.sample.index == 0 ? std::string("base") : m.topology) + "\n";
     }
     write_file(e / "members.csv", t);
   }
@@ -851,9 +868,10 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
                                                   : "P_closure_" + io::petrel_name(pm.spec.horizon);
     write_file(e / "maps" / (nm + ".irap"), io::write_irap_ascii(g, 6));
   }
-  std::string readme = "Stratonix ensemble (STX-TN-13)\n\nModel: " + d.model.name + " v" + d.model.version + " (" + d.model.status + ")\n" +
+  std::string readme = "Stratonix ensemble\n\nModel: " + d.model.name + " v" + d.model.version + " (" + d.model.status + ")\n" +
                        "Members: " + N + "; seed: " + seed + "; generator: xoshiro256** seeded per member by SplitMix64(seed, member)\n" +
-                       "Members ok: " + std::to_string(nok) + "; failed (refused, build failed or checks failed): " + std::to_string(failed) + " - every one listed in members.csv\n\n" +
+                       "Members ok: " + std::to_string(nok) + "; failed (refused, build failed or checks failed): " + std::to_string(failed) + " - every one listed in members.csv\n" +
+                       "Members whose topology (contact graph) differs from the base case: " + std::to_string(res.topology_differs) + " - the differing contacts in members.csv\n\n" +
                        "members.csv          every member: seed, sampled values, scenario options, status and reason, key numbers\n" +
                        (bayes ? std::string("posterior_*.csv      posterior of the Bayesian conditioning: retained samples, priors, diagnostics (members = these samples; base = least-squares fit)\n") : std::string()) +
                        "statistics.csv       per key number over the ok members: n, mean, sd, P10, P50, P90, min, max (with N and seed)\n" +

@@ -1,0 +1,90 @@
+# Stage 4A example (STX-TN-14 sections 4, 5 and 7): Bayesian conditioning on picks and gravity. The
+# anticline and normal fault of the stage 3A hybrid example, with throw and fold relief unknown, are
+# sampled from their posterior given 3 m-uncertain picks of H1 and H2 (examples/data/hybrid_fault_fold/
+# picks.csv) and 49 gravity stations with 0.02 mGal noise (examples/data/bayesian_gravity/gravity.csv,
+# generated from data/hybrid_fault_fold/source.yaml by tools/make_bayesian_gravity_example.py). The
+# source's throw (120 m) and relief (250 m) should lie inside the 95 % credible intervals. Horizon
+# ages give Wheeler diagrams along the section.
+stratonix_schema: 1
+model: {name: bayesian_gravity_anticline, version: "1.0.0", status: DESIGN,
+        title: "Fault throw and fold relief sampled from picks and gravity (Bayesian conditioning)"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+inputs:
+  - {id: PICKS, path: data/hybrid_fault_fold/picks.csv, role: surface points, sharing: shareable, source: "H1 and H2 picks with 3 m noise (tools/make_hybrid_example.py, seed 2026)", evidence: interpreted}
+  - {id: GRAV, path: data/bayesian_gravity/gravity.csv, role: gravity stations, sharing: shareable, source: "anomaly of the source model with 0.02 mGal noise (tools/make_bayesian_gravity_example.py, seed 2026); no corrections", evidence: interpreted}
+stratigraphy:
+  reference: {well: W1}
+  horizons:
+    - {name: H1, intended_offset: true, age: "10 Ma | assumed | worked example"}
+    - {name: H2, age: "20 Ma | assumed | worked example"}
+    - {name: H3, intended_offset: true, age: "30 Ma | assumed | worked example"}
+  units:
+    - {name: U1, top: H1, base: H2}
+    - {name: U2, top: H2, base: H3}
+structure:
+  regional: {type: flat}
+  primitives:
+    - type: anticline
+      name: A1
+      crest: "[5000, 5000] m | user_instruction | worked example"
+      axis_azimuth: "0 deg | user_instruction | worked example"
+      plunge: "0 deg | user_instruction | worked example"
+      half_length: "4000 m | user_instruction | worked example"
+      half_width_left: "2500 m | user_instruction | worked example"
+      half_width_right: "2500 m | user_instruction | worked example"
+      relief:
+        H1: "180 m | assumed | starting value, sampled below"
+        H2: "180 m | assumed | starting value, sampled below"
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry: {type: planar, reference_point: "[6000, 5000] m | user_instruction | worked example", reference_depth: "1200 m | user_instruction | worked example",
+               strike: "0 deg | user_instruction | worked example", dip: "60 deg | user_instruction | worked example"}
+    extent: {upper_tip: {rule: free}, lower_tip: {rule: free}, length: "20000 m | user_instruction | worked example"}
+    throw:
+      max: "90 m | assumed | starting value, sampled below"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.01 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+geophysics:
+  cell: "500 m | user_instruction | worked example"
+  background_density: "2650 kg/m3 | assumed | worked example: units not listed"
+  units:
+    - {unit: U1, density: "2350 kg/m3 | assumed | worked example"}
+    - {unit: U2, density: "2550 kg/m3 | assumed | worked example"}
+  gravity: {input: GRAV, format: csv_stations}
+conditioning:
+  method: bayesian
+  sampler: {walkers: "16 ordinal | assumed | Stratonix guidance: at least 4 per parameter", steps: "2500 ordinal | assumed | worked example: split R-hat below 1.01 needs about 200 effective draws per walker",
+            burn_in: "300 ordinal | assumed | worked example", thin: "25 ordinal | assumed | worked example", seed: "2026 ordinal | assumed | worked example"}
+  data:
+    - {input: PICKS, kind: points, format: csv_points}
+    - {input: GRAV, kind: gravity, format: csv_stations}
+  use_well_tops: true
+  uncertainty: "3 m | assumed | picking uncertainty of the tops (the picks carry their own sigma column)"
+  parameters:
+    - {path: faults.F1.throw.max, min: "20 m | assumed | admissible range", max: "300 m | assumed | admissible range"}
+    - {path: structure.primitives.A1.relief.H1, min: "50 m | assumed | admissible range", max: "500 m | assumed | admissible range"}
+    - {path: structure.primitives.A1.relief.H2, min: "50 m | assumed | admissible range", max: "500 m | assumed | admissible range"}
+  max_iterations: "50 ordinal | assumed | Stratonix default"
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[500, 5000], [9500, 5000]] m | user_instruction | worked example: across the crest and the fault"
+  vertical_exaggeration: "3 ratio | user_instruction | worked example"
+  exports: [petrel, csv]

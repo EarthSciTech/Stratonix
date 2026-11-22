@@ -70,6 +70,9 @@ throw_max: "60 m | assumed | design case 2"
 Evidence classes: `measured`, `interpreted`, `calibrated`, `upscaled`, `literature_derived`,
 `assumed`, `user_instruction`. Lists are written `"[3000, 3000] m | ..."`; a flag is
 `"true flag | ..."`. Depths in descriptions are positive down; exported files use elevation.
+Units: m, km, ft, m2, km2, 1/m, 1/km, deg, rad, fraction, ratio, percent, ordinal, flag, Ma, Pa,
+kPa, MPa, bar, psi, MPa/km, kPa/m, bar/m, psi/ft, mD, D; from 2026.4 also kg/m3, g/cm3, mGal,
+uGal, m/s2, nT, T and SI (susceptibility).
 
 The sections of a description:
 
@@ -86,6 +89,7 @@ The sections of a description:
 | `frame` | which block stays fixed: a fixed well or point |
 | `checks` | tolerances and closure targets |
 | `outputs` | sections, vertical exaggeration, voxel spacing, stick spacing, export formats |
+| `geophysics` | (2026.4) unit densities and susceptibilities, background values, inducing field, gravity and magnetic stations |
 
 Run `stratonix validate model.yaml` while you write: it checks the schema and the semantic rules
 (evidence on every parameter, units, horizons in order, tips in the right order, wells inside the
@@ -471,6 +475,52 @@ uncertainty:
 
 Example: `fault_system_uncertainty`.
 
+## 2.15 Geological time and topology (2026.4)
+
+- **Geological time.** Give every horizon an age (`stratigraphy.horizons[].age`, Ma, young to
+  old). Each point then has depositional coordinates (u, v, t): (u, v) from the model's own
+  restoration and t interpolated between the horizon ages in the restored column. The build
+  writes a Wheeler diagram for every section (`figures/*_wheeler_<section>`): distance against
+  time, coloured by unit, with hiatuses blank and fault cut-outs grey.
+- **Topology.** Every build writes `topology.json`: the units in each fault block and the
+  surfaces between them, with sampled areas (lattice `outputs.voxel_spacing`, or the largest
+  extent / 64). Check C26 refuses contacts between non-adjacent units that no unconformity or
+  termination explains; check C27 measures how far horizon edges stop short of the fault,
+  horizon or boundary that ends them. In an ensemble, `members.csv` states for every member
+  whether its contacts match the base case's, and lists those that differ.
+
+## 2.16 Gravity and magnetics (2026.4)
+
+A top-level `geophysics` block gives the units' densities (kg/m3) and susceptibilities (SI), the
+background values every other unit takes, and the inducing field for magnetics:
+
+```yaml
+geophysics:
+  cell: "500 m | ..."                       # prism size; default the voxel spacing
+  background_density: "2650 kg/m3 | ..."
+  inducing_field: {inclination: "60 deg | ...", declination: "10 deg | ...", intensity: "50000 nT | ..."}
+  units:
+    - {unit: U1, density: "2350 kg/m3 | ...", susceptibility: "0.01 SI | ..."}
+  gravity: {input: GRAV, format: csv_stations}
+  magnetics: {input: MAG, format: csv_stations}
+```
+
+- **Forward model.** The model is divided into columns of `cell` x `cell`; in each column the unit
+  boundaries are found at the column centre, and each run of one unit is a right rectangular prism
+  (gravity after Nagy et al. 2000; magnetics from the prism's potential tensor, induced
+  magnetisation only). Anomalies are contrasts against the background.
+- **Stations.** `csv_stations`: columns X, Y, Z (elevation), value (mGal or nT) and optional
+  sigma, read as delivered: state their corrections in the input's source; Stratonix applies none.
+- **Outputs.** `geophysics_stations.csv` (observed, modelled, residual), anomaly maps and profiles
+  along the sections, and check C29 (reduced chi-square, warning above 2).
+- **Inversion.** As conditioning data (`kind: gravity` or `magnetics`) the stations fit the
+  structural parameters listed under `conditioning.parameters`, alone or with picks and well tops,
+  by least squares or by the Bayesian sampler. Densities and susceptibilities stay as stated.
+- **Rule F37.** Listed units must exist; gravity needs the background density and one unit
+  density; magnetics needs one susceptibility and the inducing field.
+
+Example: `bayesian_gravity_anticline` (picks and gravity, Bayesian, with Wheeler diagrams).
+
 # 3. Running
 
 | Command | What it does |
@@ -527,6 +577,9 @@ exports and figures.
 | C23 cell volumes | an active grid cell has a volume of zero or less |
 | C24 inverted cells | an active grid cell is inverted (corner order or corner Jacobian) |
 | C25 fault faces | a fault face of the grid lies off its fault surface by more than 1 % of the cell size |
+| C26 topology | units in contact inside one fault block are not adjacent in the column, and no unconformity (change of series) or terminating unit explains it |
+| C27 watertight | a horizon edge ends further than the tolerance from any fault, other horizon or the domain boundary (`checks.tolerances.watertight`, default half the surface spacing) |
+| C29 potential fields | WARNING: the stations' reduced chi-square exceeds 2 |
 | C28 posterior | a parameter's split R-hat is 1.01 or more, or its effective sample size is below 100: run the sampler longer |
 
 Targets are reported, never used to tune the model.

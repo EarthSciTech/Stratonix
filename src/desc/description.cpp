@@ -112,7 +112,7 @@ std::vector<const Param*> Description::all_params() const {
   auto add = [&](const Param& p) { if (p.present) r.push_back(&p); };
   for (auto* p : {&origin, &size, &depth_range, &grid_spacing, &ref_point, &regional_dip, &correction_range,
                   &regional_dip_azimuth, &frame_point, &tol_thickness_min, &tol_crossing,
-                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &tol_area, &tol_salt_volume, &tol_solid_thickness, &tol_restoration, &tol_balance, &scaling_min_ratio, &scaling_max_ratio,
+                  &tol_offset_outside_tips, &tol_throw, &tol_wells, &tol_unoffset, &tol_rollover, &tol_area, &tol_salt_volume, &tol_solid_thickness, &tol_restoration, &tol_balance, &tol_watertight, &scaling_min_ratio, &scaling_max_ratio,
                   &closure_faults_seal, &target_closure, &target_area, &target_spill_depth,
                   &target_tolerance, &vertical_exaggeration, &voxel_spacing, &fault_stick_spacing, &implicit.nugget,
                   &implicit.surface_spacing, &implicit.iterations, &implicit.vertical_stretch, &implicit.points_per_patch, &implicit.overlap,
@@ -133,6 +133,10 @@ std::vector<const Param*> Description::all_params() const {
                   &conditioning.steps, &conditioning.burn_in, &conditioning.thin, &conditioning.seed})
     add(*q);
   for (auto& fp : conditioning.parameters) { add(fp.min); add(fp.max); }
+  for (auto* q : {&geophysics.cell, &geophysics.background_density, &geophysics.background_susceptibility, &geophysics.inclination,
+                  &geophysics.declination, &geophysics.intensity, &geophysics.gravity.uncertainty, &geophysics.magnetics.uncertainty})
+    add(*q);
+  for (auto& u : geophysics.units) { add(u.density); add(u.susceptibility); }
   for (auto* q : {&fault_rock.shale_threshold, &fault_rock.thickness_ratio, &fault_rock.seal_a, &fault_rock.seal_c, &stress.sv_gradient,
                   &stress.shmax_ratio, &stress.shmin_ratio, &stress.shmax_azimuth, &stress.tensor_gradient, &stress.pore_pressure_gradient,
                   &stress.friction, &stress.cohesion, &fracture_threshold})
@@ -704,6 +708,7 @@ struct Typer {
         d.tol_solid_thickness = P(t, "solid_thickness", b, Dimension::Dimensionless, false, 1);
         d.tol_restoration = P(t, "restoration", b, Dimension::Length, false, 1);
         d.tol_balance = P(t, "balance", b, Dimension::Dimensionless, false, 1);
+        d.tol_watertight = P(t, "watertight", b, Dimension::Length, false, 1);
       }
       if (const Node* fsc = ch->get("fault_scaling")) {
         d.scaling_min_ratio = P(fsc, "min_ratio", "checks.fault_scaling", Dimension::Dimensionless, false, 1);
@@ -875,7 +880,11 @@ struct Typer {
           const Node& x = data->seq[k];
           cd.data.push_back({S(&x, "input"), S(&x, "kind"), S(&x, "format"), S(&x, "horizon"),
                              P(&x, "uncertainty", "conditioning.data[" + std::to_string(k) + "]",
-                               S(&x, "kind") == "orientations" ? Dimension::Angle : Dimension::Length, false, 1)});
+                               S(&x, "kind") == "orientations" ? Dimension::Angle
+                               : S(&x, "kind") == "gravity"    ? Dimension::Acceleration
+                               : S(&x, "kind") == "magnetics"  ? Dimension::MagneticField
+                                                               : Dimension::Length,
+                               false, 1)});
         }
       if (const Node* u = cn->get("use_well_tops")) cd.use_well_tops = u->boolean || u->str == "true";
       cd.uncertainty = P(cn, "uncertainty", "conditioning", Dimension::Length, false, 1);
@@ -895,6 +904,28 @@ struct Typer {
           std::string b = "conditioning.parameters[" + std::to_string(k) + "]";
           cd.parameters.push_back({S(&x, "path"), P(&x, "min", b, Dimension::Any, true, 1), P(&x, "max", b, Dimension::Any, true, 1)});
         }
+    }
+    if (const Node* gp = root.get("geophysics")) {
+      auto& g = d.geophysics;
+      g.present = true;
+      g.cell = P(gp, "cell", "geophysics", Dimension::Length, false, 1);
+      g.background_density = P(gp, "background_density", "geophysics", Dimension::Density, false, 1);
+      g.background_susceptibility = P(gp, "background_susceptibility", "geophysics", Dimension::Dimensionless, false, 1);
+      if (const Node* f = gp->get("inducing_field")) {
+        g.inclination = P(f, "inclination", "geophysics.inducing_field", Dimension::Angle, false, 1);
+        g.declination = P(f, "declination", "geophysics.inducing_field", Dimension::Angle, false, 1);
+        g.intensity = P(f, "intensity", "geophysics.inducing_field", Dimension::MagneticField, false, 1);
+      }
+      if (const Node* us = gp->get("units"))
+        for (std::size_t k = 0; k < us->seq.size(); ++k) {
+          const Node& x = us->seq[k];
+          const std::string b = "geophysics.units[" + std::to_string(k) + "]";
+          g.units.push_back({S(&x, "unit"), P(&x, "density", b, Dimension::Density, false, 1), P(&x, "susceptibility", b, Dimension::Dimensionless, false, 1)});
+        }
+      if (const Node* gr = gp->get("gravity"))
+        g.gravity = {S(gr, "input"), S(gr, "format"), P(gr, "uncertainty", "geophysics.gravity", Dimension::Acceleration, false, 1)};
+      if (const Node* mg = gp->get("magnetics"))
+        g.magnetics = {S(mg, "input"), S(mg, "format"), P(mg, "uncertainty", "geophysics.magnetics", Dimension::MagneticField, false, 1)};
     }
     if (const Node* un = root.get("uncertainty")) {
       auto& u = d.uncertainty;
@@ -1183,6 +1214,45 @@ struct Typer {
         } else {
           c.err(ub + ".law", "F25", "law must be exponential or table");
         }
+      }
+    }
+    // STX-TN-14 (F37): gravity and magnetics
+    {
+      const auto& g = d.geophysics;
+      bool cond_grav = false, cond_mag = false;
+      for (auto& x : d.conditioning.data) {
+        cond_grav = cond_grav || x.kind == "gravity";
+        cond_mag = cond_mag || x.kind == "magnetics";
+      }
+      if ((cond_grav || cond_mag) && !g.present) c.err("conditioning.data", "F37", "gravity or magnetic data need a geophysics block (unit densities, susceptibilities)");
+      if (g.present) {
+        if (g.cell.present && !(g.cell.si() > 0)) c.err("geophysics.cell", "F37", "the prism size must be positive");
+        bool any_density = false, any_susc = false;
+        for (std::size_t k = 0; k < g.units.size(); ++k) {
+          const auto& u = g.units[k];
+          const std::string b = "geophysics.units[" + std::to_string(k) + "]";
+          if (std::none_of(d.units.begin(), d.units.end(), [&](const UnitDesc& x) { return x.name == u.unit; }))
+            c.err(b + ".unit", "F37", "unit '" + u.unit + "' is not a unit of the stratigraphy");
+          if (u.density.present) {
+            any_density = true;
+            if (!(u.density.si() > 0)) c.err(b + ".density", "F37", "a density must be positive");
+          }
+          if (u.susceptibility.present) {
+            any_susc = true;
+            if (!(u.susceptibility.si() > -1)) c.err(b + ".susceptibility", "F37", "a susceptibility must exceed -1 SI");
+          }
+        }
+        const bool grav = !g.gravity.input.empty() || cond_grav, mag = !g.magnetics.input.empty() || cond_mag;
+        if (!grav && !mag) c.err("geophysics", "F37", "give gravity or magnetics stations (geophysics.gravity, geophysics.magnetics or conditioning data)");
+        if (grav && !g.background_density.present) c.err("geophysics.background_density", "F37", "gravity needs the background density (anomalies are contrasts against it)");
+        if (grav && !any_density) c.err("geophysics.units", "F37", "gravity needs the density of at least one unit");
+        if (mag && !any_susc) c.err("geophysics.units", "F37", "magnetics needs the susceptibility of at least one unit");
+        if (mag && !(g.inclination.present && g.declination.present && g.intensity.present))
+          c.err("geophysics.inducing_field", "F37", "magnetics needs the inducing field: inclination, declination and intensity");
+        if (g.background_density.present && !(g.background_density.si() > 0)) c.err("geophysics.background_density", "F37", "a density must be positive");
+        for (auto* st : {&g.gravity, &g.magnetics})
+          if (!st->input.empty() && std::none_of(d.inputs.begin(), d.inputs.end(), [&](const InputDesc& i) { return i.id == st->input; }))
+            c.err("geophysics", "F37", "input '" + st->input + "' is not listed under inputs");
       }
     }
     // STX-TN-11 (F31): hybrid conditioning

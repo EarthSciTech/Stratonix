@@ -30,6 +30,7 @@ struct ImportedData {
   std::vector<Vec3> normals;          ///< orientation data (unit normals), parallel to points
   std::vector<std::string> labels;    ///< per point (for example the surface name), parallel to points
   std::vector<double> sigmas;         ///< per point uncertainty (m; degrees for orientations), NaN = none (stage 3A)
+  std::vector<double> values;         ///< stage 4A: per station observed anomaly (mGal or nT), parallel to points
   std::string z_is = "as_written";  ///< "elevation", "depth" or "as_written"
   std::vector<std::string> notes;
 };

@@ -40,7 +40,7 @@ set_tests_properties(test_v3_uncertainty PROPERTIES TIMEOUT 3600)
 # Stage 4A analytical tests (STX-TN-14), written before the features (Prompt 42) and made to pass
 # by Prompts 43 to 47.
 stx_test(test_v4_engine stratonix_package)
-set_tests_properties(test_v4_engine PROPERTIES WILL_FAIL TRUE TIMEOUT 3600)
+set_tests_properties(test_v4_engine PROPERTIES TIMEOUT 3600)
 # Stage 4A: the fold-frame command on a sine fold (axis 000, wavelength 4 km)
 add_test(NAME cli_fold_frame COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_fold_frame.json
          "-DARGS=fold-frame;${CMAKE_CURRENT_SOURCE_DIR}/data/fold_bedding.csv" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)

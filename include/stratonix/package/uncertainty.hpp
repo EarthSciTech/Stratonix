@@ -123,6 +123,7 @@ struct MemberResult {
   std::string reason;
   std::vector<std::string> failed_checks;
   std::vector<std::pair<std::string, double>> keys;  ///< key numbers
+  std::string topology;   ///< stage 4A: "same" as the base case, or the contacts that differ ("" when not built)
 };
 struct KeyStats { std::string key, unit; Stats stats; std::size_t failed = 0; };
 struct OatRow { std::string parameter, key; double low = 0, high = 0, base = 0; };
@@ -136,6 +137,7 @@ struct EnsembleResult {
   std::vector<OatRow> oat;
   std::vector<SobolRow> sobol;
   std::vector<ProbabilityMap> maps;
+  std::size_t topology_differs = 0;  ///< stage 4A: members whose contact graph differs from the base case's
   std::size_t ok() const;
 };
 

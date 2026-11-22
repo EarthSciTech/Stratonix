@@ -1,6 +1,7 @@
 // Stage 3A (STX-TN-11): faults from data and hybrid conditioning. Specified; built by Prompts 35
 // and 36.
 #include "stratonix/engines/conditioning.hpp"
+#include "stratonix/engines/geophysics.hpp"
 #include "stratonix/engines/posterior.hpp"
 
 #include <algorithm>
@@ -233,6 +234,24 @@ ConditioningProblem::ConditioningProblem(const desc::Description& d, const Build
     for (auto& x : d.inputs)
       if (x.id == e.input && !x.evidence.empty()) ev = x.evidence;
     const bool orient = e.kind == "orientations";
+    if (e.kind == "gravity" || e.kind == "magnetics") {
+      // stage 4A: stations; residual (modelled - observed) / sigma in mGal or nT
+      const double conv = e.kind == "gravity" ? 1e-5 : 1e-9;
+      for (auto& dp : it->second) {
+        ConditioningDatum c;
+        c.p = dp.p;
+        c.kind = e.kind;
+        c.observed = dp.value;
+        c.input = e.input;
+        c.evidence = ev;
+        c.sigma = dp.sigma > 0 ? dp.sigma : (e.uncertainty.present ? e.uncertainty.si() / conv : 0.0);
+        if (!std::isfinite(c.observed)) { reason_ = "station of input " + e.input + " has no observed value"; return; }
+        if (!(c.sigma > 0)) { reason_ = "station of input " + e.input + " has no positive uncertainty (give a sigma column or the data's uncertainty)"; return; }
+        data_.push_back(c);
+        used_.insert(e.input);
+      }
+      continue;
+    }
     for (auto& dp : it->second) {
       int h = d.horizon_index(dp.label);
       if (h < 0) continue;
@@ -313,8 +332,26 @@ bool ConditioningProblem::residuals(const std::vector<double>& xv, std::vector<d
   mdl->evaluate(pts, kEvalScalars, er);
   r.assign(m, 0.0);
   if (raw) raw->assign(m, 0.0);
+  // stations: one forward computation per kind
+  for (const char* kind : {"gravity", "magnetics"}) {
+    std::vector<Vec3> st;
+    std::vector<std::size_t> idx;
+    for (std::size_t i = 0; i < m; ++i)
+      if (data_[i].kind == kind) { st.push_back(data_[i].p); idx.push_back(i); }
+    if (st.empty()) continue;
+    const auto spec = potential_field_spec(dd, mdl->info());
+    auto mod = std::string(kind) == "gravity" ? gravity_anomaly(*mdl, spec, st) : magnetic_anomaly(*mdl, spec, st);
+    for (std::size_t k = 0; k < idx.size(); ++k) {
+      const auto& c = data_[idx[k]];
+      const double v = mod[k] - c.observed;
+      if (!std::isfinite(v)) return false;
+      r[idx[k]] = v / c.sigma;
+      if (raw) (*raw)[idx[k]] = v;
+    }
+  }
   for (std::size_t i = 0; i < m; ++i) {
     auto& c = data_[i];
+    if (c.kind == "gravity" || c.kind == "magnetics") continue;
     double v;
     if (!c.oriented) {
       v = er.s(static_cast<std::size_t>(c.horizon), i);

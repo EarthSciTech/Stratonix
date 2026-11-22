@@ -8,11 +8,13 @@
 
 #include "stratonix/core/well.hpp"
 #include "stratonix/desc/description.hpp"
+#include "stratonix/engines/geophysics.hpp"
 #include "stratonix/model/model.hpp"
 #include "stratonix/registry/registry.hpp"
 #include "stratonix/repr/faultrock.hpp"
 #include "stratonix/repr/grid.hpp"
 #include "stratonix/repr/repr.hpp"
+#include "stratonix/repr/topology.hpp"
 
 namespace stratonix {
 
@@ -82,6 +84,12 @@ class CheckContext {
   double fault_spacing() const { return fault_spacing_; }
   /// Grid products of the description's grid block (nullptr without one); computed once.
   const GridProducts* grid_products();
+  /// Stage 4A: station misfits of the geophysics block (C29), set by the pipeline; nullptr = none.
+  const PotentialFieldResult* potential_fields = nullptr;
+  /// Stage 4A: the contact graph (C26, topology.json), computed once at topology_spacing().
+  const ContactGraph& contact_graph();
+  /// outputs.voxel_spacing (x) when given, else max(surface spacing, largest extent / 64).
+  double topology_spacing() const;
 
  private:
   const Model& m_;
@@ -96,6 +104,7 @@ class CheckContext {
   std::map<std::pair<int, int>, std::vector<repr::CutoffLine>> cutoffs_;
   std::map<std::pair<int, int>, repr::ThrowRow> throws_;
   std::unique_ptr<GridProducts> grid_products_;
+  std::unique_ptr<ContactGraph> graph_;
 };
 
 /// Check plugin interface.

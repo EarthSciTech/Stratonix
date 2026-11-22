@@ -62,6 +62,11 @@ jobs:
       - name: Fold example
         continue-on-error: true
         run: python3 tests/tools/ls_fold_v4.py build/linux-gcc-release/apps/stratonix/stratonix crosscheck_report
+      - name: Gravity and magnetics against Harmonica
+        continue-on-error: true
+        run: |
+          python3 -m pip install "harmonica>=0.6"
+          python3 tests/tools/harmonica_v4.py build/linux-gcc-release/apps/stratonix/stratonix crosscheck_report --require-harmonica
       - uses: actions/upload-artifact@v4
         if: always()
         with:

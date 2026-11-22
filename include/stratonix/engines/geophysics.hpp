@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "stratonix/core/geometry.hpp"
+#include "stratonix/desc/description.hpp"
+#include "stratonix/engines/builder.hpp"
 #include "stratonix/model/model.hpp"
 
 namespace stratonix {
@@ -32,5 +34,22 @@ struct PotentialFieldSpec {
 /// Anomalies at stations (mGal / nT) of the model's units between z_top and z_base of its domain.
 std::vector<double> gravity_anomaly(const Model& m, const PotentialFieldSpec& s, const std::vector<Vec3>& stations);
 std::vector<double> magnetic_anomaly(const Model& m, const PotentialFieldSpec& s, const std::vector<Vec3>& stations);
+
+/// The spec of a description's geophysics block for a model (densities and susceptibilities by unit
+/// name; cell default outputs.voxel_spacing x, else the largest horizontal extent / 64).
+PotentialFieldSpec potential_field_spec(const desc::Description& d, const ModelInfo& info);
+
+/// Observed against modelled at every station of the description's geophysics block.
+struct StationMisfit {
+  std::string kind, input;  ///< gravity | magnetics
+  Vec3 p;
+  double observed = 0, modelled = 0, sigma = kNaN;  ///< mGal or nT
+};
+struct PotentialFieldResult {
+  std::vector<StationMisfit> stations;
+  double chi2_gravity = kNaN, chi2_magnetics = kNaN;  ///< reduced chi-square (stations with a sigma)
+  std::size_t n_gravity = 0, n_magnetics = 0;
+};
+PotentialFieldResult potential_field_misfit(const Model& m, const desc::Description& d, const BuildInputs& in);
 
 }  // namespace stratonix

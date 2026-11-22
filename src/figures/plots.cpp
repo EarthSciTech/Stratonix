@@ -1,5 +1,6 @@
 // Figure set: sections, maps, 3D views, fence diagram; writing in four formats.
 #include <algorithm>
+#include <set>
 #include <cmath>
 #include <map>
 #include <sstream>
@@ -1304,6 +1305,137 @@ std::string diag_text(const PosteriorSamples& s, std::size_t p) {
   return "R-hat " + fmt_fixed(s.rhat[p], 4) + ", ESS " + fmt_fixed(s.ess[p], 0);
 }
 }  // namespace
+
+Figure anomaly_map_figure(const FigureContext& c, const std::string& kind, const std::string& unit, const std::vector<AnomalyStation>& st, double chi2) {
+  Figure f(842, 595);
+  const auto& d = c.model->info().domain;
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - " + kind + " anomaly",
+        "Observed and modelled anomaly (" + unit + ", contrast against the background) at " + std::to_string(st.size()) + " stations; residual = modelled - observed" +
+            (std::isfinite(chi2) ? "; reduced chi2 " + fmt_fixed(chi2, 3) : std::string()));
+  double vmin = 1e300, vmax = -1e300, rmax = 1e-12;
+  for (auto& a : st) {
+    vmin = std::min({vmin, a.observed, a.modelled});
+    vmax = std::max({vmax, a.observed, a.modelled});
+    rmax = std::max(rmax, std::fabs(a.modelled - a.observed));
+  }
+  if (!(vmax > vmin)) { vmin -= 1; vmax += 1; }
+  rmax = std::max(rmax, 1e-3 * (vmax - vmin));  // residuals below 0.1 % of the range show white
+  auto sig = [](double v) {
+    if (v == 0) return std::string("0");
+    const int dec = std::max(0, 2 - static_cast<int>(std::floor(std::log10(std::fabs(v)))));
+    return fmt_fixed(v, std::min(dec, 8));
+  };
+  const double pw = 250, gap = 20, x00 = 30, y00 = 70;
+  const double sc = std::min(pw / d.sx, 380.0 / d.sy), mw = d.sx * sc, mh = d.sy * sc;
+  const char* names[] = {"Observed", "Modelled", "Residual"};
+  for (int panel = 0; panel < 3; ++panel) {
+    const double ox = x00 + panel * (pw + gap);
+    f.rect(ox, y00, mw, mh, rgb(248, 248, 248), kInk, 0.6);
+    f.text({ox + mw / 2, y00 - 6}, names[panel], 8, Anchor::Middle, true, kInk);
+    const double ss = std::max(2.5, std::min(8.0, 0.6 * std::sqrt(mw * mh / std::max<std::size_t>(1, st.size()))));
+    for (auto& a : st) {
+      const double v = panel == 0 ? a.observed : panel == 1 ? a.modelled : a.modelled - a.observed;
+      const Color col = panel < 2 ? viridis_like((v - vmin) / (vmax - vmin)) : diverging(v / rmax);
+      const double px = ox + (a.x - d.x0) * sc, py = y00 + mh - (a.y - d.y0) * sc;
+      f.rect(px - ss / 2, py - ss / 2, ss, ss, col, none());
+    }
+    // colour bar
+    const double by = y00 + mh + 18;
+    for (int k = 0; k < 100; ++k) {
+      const double t = k / 99.0;
+      f.rect(ox + t * (mw - 2), by, mw / 99.0 + 0.3, 8, panel < 2 ? viridis_like(t) : diverging(2 * t - 1), none());
+    }
+    const double lo = panel < 2 ? vmin : -rmax, hi = panel < 2 ? vmax : rmax;
+    f.text({ox, by + 18}, sig(lo), 6.5, Anchor::Start, false, kInk);
+    f.text({ox + mw, by + 18}, sig(hi) + " " + unit, 6.5, Anchor::End, false, kInk);
+  }
+  footer(f, c);
+  return f;
+}
+
+Figure anomaly_profile_figure(const FigureContext& c, const std::string& kind, const std::string& unit, const AnomalyProfile& p) {
+  Figure f(842, 420);
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - " + kind + " profile " + p.section,
+        "Modelled anomaly along the section (line) and observed stations within " + fmt_fixed(p.band, 0) + " m of it (dots), " + unit);
+  const double x0 = 80, x1 = 800, y0 = 60, y1 = 340;
+  if (p.s.empty()) { footer(f, c); return f; }
+  double lo = 1e300, hi = -1e300;
+  for (double v : p.modelled) { lo = std::min(lo, v); hi = std::max(hi, v); }
+  for (auto& o : p.observed) { lo = std::min(lo, o.second); hi = std::max(hi, o.second); }
+  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  const double pad = 0.08 * (hi - lo), L = std::max(1e-9, p.s.back());
+  lo -= pad;
+  hi += pad;
+  auto X = [&](double s) { return x0 + s / L * (x1 - x0); };
+  auto Y = [&](double v) { return y1 - (v - lo) / (hi - lo) * (y1 - y0); };
+  f.rect(x0, y0, x1 - x0, y1 - y0, rgb(252, 252, 252), kInk, 0.6);
+  for (double t : nice_ticks(lo, hi, 6)) {
+    f.line({x0, Y(t)}, {x1, Y(t)}, kGrid, 0.3);
+    f.text({x0 - 4, Y(t) + 2.5}, fmt_shortest(t), 6.5, Anchor::End, false, kInk);
+  }
+  for (double t : nice_ticks(0, L, 8)) f.text({X(t), y1 + 11}, fmt_fixed(t, 0), 6.5, Anchor::Middle, false, kInk);
+  std::vector<Pt> line;
+  for (std::size_t k = 0; k < p.s.size(); ++k) line.push_back({X(p.s[k]), Y(p.modelled[k])});
+  f.path(line, false, none(), rgb(20, 60, 140), 1.4);
+  for (auto& o : p.observed) f.path({{X(o.first) - 2.5, Y(o.second)}, {X(o.first), Y(o.second) - 2.5}, {X(o.first) + 2.5, Y(o.second)}, {X(o.first), Y(o.second) + 2.5}},
+                                    true, rgb(200, 90, 20), kInk, 0.4);
+  f.text({(x0 + x1) / 2, y1 + 24}, "Distance along " + p.section + " (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({x0 - 45, (y0 + y1) / 2}, kind + " anomaly (" + unit + ")", 7.5, Anchor::Middle, false, kInk, -90);
+  footer(f, c);
+  return f;
+}
+
+Figure wheeler_figure(const FigureContext& c, const WheelerDiagram& w) {
+  Figure f(842, 595);
+  const auto& inf = c.model->info();
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - Wheeler diagram, section " + w.name,
+        std::string("Distance along the section against geological time") + (w.ordinal ? " (horizon ordinals: no ages given)" : " (Ma)") +
+            "; blank: hiatus (no record); grey: fault cut-out; dashed: horizon ages");
+  const double x0 = 80, x1 = 842 - 190, y0 = 60, y1 = 595 - 70;
+  if (w.columns.empty() || w.ages.empty()) {
+    footer(f, c);
+    return f;
+  }
+  const double half = w.ages.size() > 1 ? 0.5 * (w.ages.back() - w.ages.front()) / static_cast<double>(w.ages.size() - 1) : 0.5;
+  const double tmin = w.ages.front() - half, tmax = w.ages.back() + half, L = std::max(1e-9, w.columns.back().station);
+  auto X = [&](double s) { return x0 + s / L * (x1 - x0); };
+  auto Y = [&](double t) { return y0 + (t - tmin) / (tmax - tmin) * (y1 - y0); };  // young at the top
+  f.rect(x0, y0, x1 - x0, y1 - y0, rgb(255, 255, 255), kInk, 0.6);
+  const double cw = (x1 - x0) / static_cast<double>(std::max<std::size_t>(1, w.columns.size() - 1));
+  std::set<int> units;
+  for (std::size_t k = 0; k < w.columns.size(); ++k)
+    for (auto& iv : w.columns[k].intervals) {
+      const double xa = std::max(x0, X(w.columns[k].station) - 0.5 * cw), xb = std::min(x1, X(w.columns[k].station) + 0.5 * cw);
+      const Color col = iv.unit == kWheelerFault ? rgb(150, 150, 150) : unit_color(c, static_cast<std::size_t>(std::max(0, iv.unit)));
+      f.rect(xa, Y(iv.t_young), xb - xa + 0.3, Y(iv.t_old) - Y(iv.t_young), col, none());
+      units.insert(iv.unit);
+    }
+  for (std::size_t h = 0; h < w.ages.size(); ++h) {
+    f.line({x0, Y(w.ages[h])}, {x1, Y(w.ages[h])}, rgb(90, 90, 90), 0.5, {3, 2});
+    if (h < inf.horizons.size()) f.text({x1 + 4, Y(w.ages[h]) + 2.5}, inf.horizons[h].name, 6.5, Anchor::Start, false, kInk);
+  }
+  f.rect(x0, y0, x1 - x0, y1 - y0, none(), kInk, 0.6);
+  for (double t : nice_ticks(tmin, tmax, 8)) f.text({x0 - 5, Y(t) + 2.5}, fmt_shortest(t), 6.5, Anchor::End, false, kInk);
+  for (double s : nice_ticks(0, L, 8)) f.text({X(s), y1 + 11}, fmt_fixed(s, 0), 6.5, Anchor::Middle, false, kInk);
+  f.text({(x0 + x1) / 2, y1 + 24}, "Distance along " + w.name + " (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({x0 - 40, (y0 + y1) / 2}, w.ordinal ? "Geological time (horizon ordinal)" : "Geological time (Ma)", 7.5, Anchor::Middle, false, kInk, -90);
+  double ly = y0 + 40;
+  f.text({x1 + 70, y0 + 26}, "Units", 7.5, Anchor::Start, true, kInk);
+  if (units.count(kWheelerFault)) {
+    f.rect(x1 + 70, ly - 7, 14, 8, rgb(150, 150, 150), rgb(90, 90, 90), 0.3);
+    f.text({x1 + 88, ly}, "fault cut-out (not a hiatus)", 6.5, Anchor::Start, false, kInk);
+    ly += 12;
+  }
+  for (int u : units) {
+    if (u < 0 || static_cast<std::size_t>(u) >= inf.units.size()) continue;
+    f.rect(x1 + 70, ly - 7, 14, 8, unit_color(c, static_cast<std::size_t>(u)), rgb(90, 90, 90), 0.3);
+    f.text({x1 + 88, ly}, inf.units[static_cast<std::size_t>(u)].name, 6.5, Anchor::Start, false, kInk);
+    ly += 12;
+  }
+  if (w.undefined > 0) f.text({x0, y1 + 36}, std::to_string(w.undefined) + " samples outside the defined region (no column)", 6.5, Anchor::Start, false, kFault);
+  footer(f, c);
+  return f;
+}
 
 Figure posterior_trace_figure(const FigureContext& c, const PosteriorSamples& s) {
   const std::size_t np = s.names.size();

@@ -7,7 +7,10 @@
 #include "stratonix/checks/checks.hpp"
 #include "stratonix/checks/manifest.hpp"
 #include "stratonix/engines/conditioning.hpp"
+#include "stratonix/engines/geophysics.hpp"
 #include "stratonix/engines/posterior.hpp"
+#include "stratonix/repr/geotime.hpp"
+#include "stratonix/repr/topology.hpp"
 #include "stratonix/engines/history.hpp"
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/wells.hpp"
@@ -270,6 +273,19 @@ void write_sheets(const desc::Description& d, const Model& m, const fig::FigureC
   }
 }
 
+/// Horizon ages (Ma) in model order when the description gives one to every horizon, else empty.
+std::vector<double> horizon_ages(const desc::Description& d, const Model& m) {
+  std::vector<double> a;
+  for (auto& h : m.info().horizons) {
+    int k = d.horizon_index(h.name);
+    if (k < 0 || !d.horizons[static_cast<std::size_t>(k)].age.present) return {};
+    a.push_back(d.horizons[static_cast<std::size_t>(k)].age.si());
+  }
+  for (std::size_t k = 1; k < a.size(); ++k)
+    if (!(a[k] > a[k - 1])) return {};
+  return a;
+}
+
 void write_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
                    const std::filesystem::path& folder) {
   auto c = figure_context(d, m, keys);
@@ -288,6 +304,16 @@ void write_figures(const desc::Description& d, const Model& m, const std::vector
   }
   fig::write_figure_set(c, secs, det, folder);
   write_sheets(d, m, c, folder);
+  // stage 4A (STX-TN-14 section 5): Wheeler diagrams along the sections, when every horizon has an age
+  if (auto ages = horizon_ages(d, m); !ages.empty()) {
+    GeologicalTime gt(m, ages);
+    for (auto& [name, pl] : secs) {
+      auto w = wheeler_diagram(gt, name, pl);
+      fig::write_figure(fig::wheeler_figure(c, w), folder, fig::figure_basename(c, "wheeler", name), c.model_name + " - Wheeler diagram " + name,
+                        "Distance along the section against geological time, coloured by unit; hiatuses blank.",
+                        "Geological time from the model's restoration and the stated horizon ages.");
+    }
+  }
 }
 
 std::vector<std::string> resolve_export_ids(const desc::Description& d, const std::vector<std::string>& requested) {
@@ -584,6 +610,65 @@ void write_posterior_tables(const desc::Description& d, const PosteriorResult& p
   write_file(dir / "posterior_summary.csv", u);
 }
 
+/// Stage 4A figures: anomaly maps per kind, and profiles along the sections (STX-TN-14 section 7).
+void write_geophysics_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
+                              const PotentialFieldResult& pf, const std::filesystem::path& folder) {
+  auto c = figure_context(d, m, keys);
+  const auto spec = potential_field_spec(d, m.info());
+  for (int kind = 0; kind < 2; ++kind) {
+    const std::string k = kind == 0 ? "gravity" : "magnetics", unit = kind == 0 ? "mGal" : "nT";
+    std::vector<fig::AnomalyStation> st;
+    double zmean = 0;
+    for (auto& s : pf.stations)
+      if (s.kind == k) {
+        st.push_back({s.p.x, s.p.y, s.observed, s.modelled, s.sigma});
+        zmean += s.p.z;
+      }
+    if (st.empty()) continue;
+    zmean /= static_cast<double>(st.size());
+    const std::string ev = "Densities and susceptibilities as stated in the description; station data as delivered (no corrections applied by Stratonix).";
+    fig::write_figure(fig::anomaly_map_figure(c, k, unit, st, kind == 0 ? pf.chi2_gravity : pf.chi2_magnetics), folder, fig::figure_basename(c, k + "_map", ""),
+                      c.model_name + " - " + k + " anomaly", "Observed and modelled " + k + " anomaly at the stations, and the residual.", ev);
+    // profiles along the description's sections (modelled at the mean station elevation)
+    const auto& dom = m.info().domain;
+    const double band = std::max(spec.cell, 0.05 * std::max(dom.sx, dom.sy));
+    for (auto& sd : d.sections) {
+      Polyline pl;
+      for (std::size_t r = 0; r < sd.polyline.rows(); ++r) pl.push_back({sd.polyline.si(2 * r), sd.polyline.si(2 * r + 1), 0});
+      if (pl.size() < 2) continue;
+      fig::AnomalyProfile prof;
+      prof.section = sd.name;
+      prof.band = band;
+      std::vector<double> cum{0};
+      for (std::size_t i = 1; i < pl.size(); ++i) cum.push_back(cum.back() + std::hypot(pl[i].x - pl[i - 1].x, pl[i].y - pl[i - 1].y));
+      std::vector<Vec3> pts;
+      const int np = 120;
+      for (int q = 0; q <= np; ++q) {
+        const double dd = cum.back() * q / np;
+        std::size_t sg = 1;
+        while (sg + 1 < pl.size() && cum[sg] < dd) ++sg;
+        const double t = cum[sg] > cum[sg - 1] ? (dd - cum[sg - 1]) / (cum[sg] - cum[sg - 1]) : 0;
+        pts.push_back({pl[sg - 1].x + t * (pl[sg].x - pl[sg - 1].x), pl[sg - 1].y + t * (pl[sg].y - pl[sg - 1].y), zmean});
+        prof.s.push_back(dd);
+      }
+      prof.modelled = kind == 0 ? gravity_anomaly(m, spec, pts) : magnetic_anomaly(m, spec, pts);
+      for (auto& a : st) {
+        // nearest point on the line
+        double best = 1e300, bs = 0;
+        for (std::size_t i = 1; i < pl.size(); ++i) {
+          const double ex = pl[i].x - pl[i - 1].x, ey = pl[i].y - pl[i - 1].y, l2 = ex * ex + ey * ey;
+          const double t = l2 > 0 ? std::clamp(((a.x - pl[i - 1].x) * ex + (a.y - pl[i - 1].y) * ey) / l2, 0.0, 1.0) : 0;
+          const double dx = pl[i - 1].x + t * ex - a.x, dy = pl[i - 1].y + t * ey - a.y, dist = std::hypot(dx, dy);
+          if (dist < best) { best = dist; bs = cum[i - 1] + t * std::sqrt(l2); }
+        }
+        if (best <= band) prof.observed.push_back({bs, a.observed});
+      }
+      fig::write_figure(fig::anomaly_profile_figure(c, k, unit, prof), folder, fig::figure_basename(c, k + "_profile", sd.name),
+                        c.model_name + " - " + k + " profile " + sd.name, "Modelled " + k + " anomaly along the section, with the observed stations near it.", ev);
+    }
+  }
+}
+
 /// Stage 3A figures: fitted parameters, and the data misfit per horizon where uncertainties are
 /// stated or the model was conditioned (STX-TN-11 section 6).
 void write_data_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
@@ -610,7 +695,7 @@ void write_data_figures(const desc::Description& d, const Model& m, const std::v
   }
   std::map<std::string, std::vector<fig::MisfitPoint>> per;
   for (auto& r : *mis)
-    if (r.kind != "orientation") per[r.label].push_back({r.p.x, r.p.y, r.misfit, r.normalised});
+    if (r.kind != "orientation" && r.kind != "gravity" && r.kind != "magnetics") per[r.label].push_back({r.p.x, r.p.y, r.misfit, r.normalised});
   for (auto& [h, pts] : per)
     fig::write_figure(fig::misfit_map_figure(c, h, pts), folder, fig::figure_basename(c, "data-misfit", h), c.model_name + " - data misfit on " + h,
                       "Misfit of the model at every datum of " + h + ".", "Data are never altered; their misfit is reported, normalised by the stated uncertainty.");
@@ -734,8 +819,23 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
   }
   if (auto* pr = static_cast<const PosteriorResult*>(o.model->capability("posterior"))) write_posterior_tables(d, *pr, out_dir);
   CheckContext ctx(*o.model, d, make_well_paths(d), d.grid_spacing.si());
+  // stage 4A (STX-TN-14 section 7): gravity and magnetic stations, observed against modelled
+  PotentialFieldResult pf;
+  if (d.geophysics.present && (!d.geophysics.gravity.input.empty() || !d.geophysics.magnetics.input.empty())) {
+    BuildInputs in;
+    io::load_build_inputs(d, in);
+    pf = potential_field_misfit(*o.model, d, in);
+    std::string t = "kind,input,x,y,z,observed,modelled,residual,sigma,unit\n";
+    for (auto& st : pf.stations)
+      t += st.kind + "," + st.input + "," + fmt_fixed(st.p.x, 2) + "," + fmt_fixed(st.p.y, 2) + "," + fmt_fixed(st.p.z, 2) + "," + fmt_fixed(st.observed, 5) + "," +
+           fmt_fixed(st.modelled, 5) + "," + fmt_fixed(st.modelled - st.observed, 5) + "," + (std::isfinite(st.sigma) ? fmt_fixed(st.sigma, 5) : std::string()) + "," +
+           (st.kind == "gravity" ? "mGal" : "nT") + "\n";
+    write_file(out_dir / "geophysics_stations.csv", t);
+    ctx.potential_fields = &pf;
+  }
   CheckReport rep = run_checks(ctx);
   o.checks_passed = rep.passed();
+  write_file(out_dir / "topology.json", ctx.contact_graph().json());  // stage 4A (STX-TN-14 section 6)
   write_file(out_dir / "checks_report.txt", rep.text());
   write_file(out_dir / "checks_report.csv", rep.csv());
   auto keys = key_numbers(d, *o.model, rep, ctx);
@@ -767,6 +867,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     if (opt.figures) write_figures(d, *o.model, keys, out_dir / "figures");
     if (opt.figures && !d.events.empty()) write_restoration(d, *o.model, out_dir / "restoration");
     if (opt.figures) write_data_figures(d, *o.model, keys, out_dir / "figures");
+    if (opt.figures && !pf.stations.empty()) write_geophysics_figures(d, *o.model, keys, pf, out_dir / "figures");
     if (gp) write_grid_outputs(d, *o.model, *gp, keys, out_dir, opt.figures);
     auto ids = resolve_export_ids(d, opt.exports);
     if (!ids.empty()) write_exports(d, *o.model, ids, out_dir / "exports", 0, gp);

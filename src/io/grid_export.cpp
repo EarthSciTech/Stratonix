@@ -48,7 +48,7 @@ std::string write_grdecl(const repr::CornerPointGrid& g, const repr::PropertySet
                          const GrdeclInfo& info, int dec) {
   std::string o;
   for (auto& h : info.header) o += "-- " + h + "\n";
-  o += "-- Stratonix corner-point grid (STX-TN-12): depth positive down (m) = -elevation; i fastest, then j, then k (k = 1 at the top).\n";
+  o += "-- Stratonix corner-point grid: depth positive down (m) = -elevation; i fastest, then j, then k (k = 1 at the top).\n";
   o += "-- Real properties hold " + fmt_fixed(kGrdeclMissing, 2) + " where a value could not be computed (never defaulted); see the reasons below.\n\n";
   o += "MAPUNITS\n  METRES /\n\nGRIDUNIT\n  METRES  /\n\n";
   o += "SPECGRID\n  " + std::to_string(g.nx) + " " + std::to_string(g.ny) + " " + std::to_string(g.nz) + " 1 F /\n\n";

@@ -1142,6 +1142,10 @@
             },
             "balance": {
               "$ref": "#/$defs/param"
+            },
+            "watertight": {
+              "$ref": "#/$defs/param",
+              "description": "Stage 4A (C27): largest distance from a horizon edge to the fault, horizon or boundary that ends it (default half the surface grid spacing)."
             }
           }
         },
@@ -2222,7 +2226,9 @@
               "kind": {
                 "enum": [
                   "points",
-                  "orientations"
+                  "orientations",
+                  "gravity",
+                  "magnetics"
                 ]
               },
               "format": {
@@ -2309,6 +2315,106 @@
               "description": "Seed of the walker streams (default 0)."
             }
           }
+        }
+      }
+    },
+    "geophysics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Stage 4A (STX-TN-14 section 7): gravity and magnetic forward modelling on prisms; anomalies are contrasts against the background values.",
+      "properties": {
+        "cell": {
+          "$ref": "#/$defs/param",
+          "description": "Prism size (m); default the voxel spacing or the largest extent / 64."
+        },
+        "background_density": {
+          "$ref": "#/$defs/param",
+          "description": "Density of every unit not listed (kg/m3)."
+        },
+        "background_susceptibility": {
+          "$ref": "#/$defs/param",
+          "description": "Susceptibility of every unit not listed (SI)."
+        },
+        "inducing_field": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "inclination": {
+              "$ref": "#/$defs/param"
+            },
+            "declination": {
+              "$ref": "#/$defs/param"
+            },
+            "intensity": {
+              "$ref": "#/$defs/param"
+            }
+          }
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "unit"
+            ],
+            "properties": {
+              "unit": {
+                "type": "string",
+                "minLength": 1
+              },
+              "density": {
+                "$ref": "#/$defs/param"
+              },
+              "susceptibility": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "gravity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string",
+              "minLength": 1
+            },
+            "format": {
+              "enum": [
+                "csv_stations"
+              ]
+            },
+            "uncertainty": {
+              "$ref": "#/$defs/param"
+            }
+          },
+          "description": "Gravity stations (mGal) as delivered; their corrections are stated, none applied."
+        },
+        "magnetics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string",
+              "minLength": 1
+            },
+            "format": {
+              "enum": [
+                "csv_stations"
+              ]
+            },
+            "uncertainty": {
+              "$ref": "#/$defs/param"
+            }
+          },
+          "description": "Total-field magnetic stations (nT) as delivered."
         }
       }
     }

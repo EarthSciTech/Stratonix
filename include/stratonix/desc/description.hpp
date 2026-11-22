@@ -258,6 +258,17 @@ struct GridDesc {
   bool tetrahedral = false;
 };
 
+/// Gravity and magnetics (stage 4A, STX-TN-14 section 7).
+struct GeophysicsUnitDesc { std::string unit; Param density, susceptibility; };
+struct StationSetDesc { std::string input, format; Param uncertainty; };
+struct GeophysicsDesc {
+  bool present = false;
+  Param cell, background_density, background_susceptibility;
+  Param inclination, declination, intensity;  ///< inducing field
+  std::vector<GeophysicsUnitDesc> units;
+  StationSetDesc gravity, magnetics;
+};
+
 /// Uncertainty (stage 3C, STX-TN-13 section 6).
 struct UncertainParamDesc { std::string path, distribution; Param mean, sd, min, max, mode, values, weights; };
 struct ScenarioOptionDesc { std::string name; Param weight; std::vector<std::pair<std::string, Node>> set; std::vector<std::string> remove; };
@@ -298,6 +309,7 @@ struct Description {
   FaultRockDesc fault_rock;        ///< stage 2F
   GridDesc grid;                   ///< stage 3B
   UncertaintyDesc uncertainty;     ///< stage 3C
+  GeophysicsDesc geophysics;       ///< stage 4A
   StressDesc stress;               ///< stage 2F
   std::vector<std::string> curvature_horizons;  ///< stage 2F: outputs.curvature.horizons
   Param fracture_threshold;        ///< stage 2F: outputs.curvature.fracture_threshold (1/m)
@@ -313,7 +325,8 @@ struct Description {
   Param frame_point;
   // checks
   Param tol_thickness_min, tol_crossing, tol_offset_outside_tips, tol_throw, tol_wells, tol_unoffset, tol_rollover, tol_area,
-      tol_salt_volume, tol_solid_thickness, tol_restoration, tol_balance;
+      tol_salt_volume, tol_solid_thickness, tol_restoration, tol_balance,
+      tol_watertight;  ///< stage 4A (C27)
   Param scaling_min_ratio, scaling_max_ratio;  ///< checks.fault_scaling (C10)
   std::string closure_horizon;
   Param closure_faults_seal, target_closure, target_area, target_spill_depth, target_tolerance;

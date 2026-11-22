@@ -770,7 +770,7 @@ TransmissibilityResult fault_transmissibility(const Model& m, const CornerPointG
   const CellProperty *kx = props.find("PERMX"), *ky = props.find("PERMY");
   if (!kx || !ky) throw std::invalid_argument("fault transmissibility needs PERMX and PERMY");
   const std::size_t nc = g.ncell();
-  const std::string src = "Manzocchi et al. (1999): fault permeability from SGR and displacement, thickness from the fault-rock ratio; STX-TN-12 section 3";
+  const std::string src = "Manzocchi et al. (1999): fault permeability from SGR and displacement, thickness from the fault-rock ratio";
   r.multx = {"MULTX", "fraction", "literature_derived calibration on the fault-rock inputs", src};
   r.multy = {"MULTY", "fraction", r.multx.evidence, src};
   r.multx.v.assign(nc, 1.0);
@@ -948,7 +948,7 @@ class VolumeWeightedMean final : public UpscalerPlugin {
 }  // namespace stratonix::repr
 
 STRATONIX_REGISTER(ext_corner_point, ::stratonix::registry::Kind::Extractor, "corner_point", "1.0.0",
-                   "Corner-point grid conforming to faults and horizons (STX-TN-12)", [] { return std::make_unique<stratonix::repr::CornerPointBuiltin>(); })
+                   "Corner-point grid conforming to faults and horizons (stage 3B)", [] { return std::make_unique<stratonix::repr::CornerPointBuiltin>(); })
 STRATONIX_REGISTER(ext_tetrahedral, ::stratonix::registry::Kind::Extractor, "tetrahedral", "1.0.0",
                    "Tetrahedral grid from a corner-point grid (six tetrahedra per cell)", [] { return std::make_unique<stratonix::repr::TetrahedralBuiltin>(); })
 STRATONIX_REGISTER(ups_vwm, ::stratonix::registry::Kind::Upscaler, "volume_weighted_mean", "1.0.0",

@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <sstream>
 
 #include "v2_fixture.hpp"
 #include "stratonix/engines/conditioning.hpp"
@@ -547,6 +548,35 @@ TEST_CASE("E9 geological time: horizons map to one time each; the fault offset v
   CHECK(!gt.ordinal());
 }
 
+TEST_CASE("E9b geological time with an erosional unconformity and an onlap: hiatuses where horizons are absent") {
+  std::string text = read_file(fs::path(STX_SOURCE_DIR) / "examples" / "unconformity_onlap_pinchout.yaml");
+  const char* names[] = {"T", "U", "B1", "B2", "C1", "C2", "C3"};
+  const double ages[] = {5, 10, 20, 30, 40, 50, 60};
+  auto m = build_text(text);
+  GeologicalTime gt(*m, std::vector<double>(ages, ages + 7));
+  // along the section: columns with a gap in the record that no fault explains (the model has none)
+  auto w = wheeler_diagram(gt, "EW", {{0, 5000, 0}, {10000, 5000, 0}}, 60, 500);
+  std::size_t gapped = 0;
+  double widest = 0;
+  for (auto& c : w.columns) {
+    std::vector<std::pair<double, double>> iv;
+    for (auto& i : c.intervals) iv.push_back({i.t_young, i.t_old});
+    std::sort(iv.begin(), iv.end());
+    double gap = 0;
+    for (std::size_t k = 1; k < iv.size(); ++k) gap = std::max(gap, iv[k].first - iv[k - 1].second);
+    gapped += gap > 1.0;
+    widest = std::max(widest, gap);
+  }
+  std::size_t with_hiatus = 0;
+  for (double x = 500; x < 10000; x += 1000) with_hiatus += !gt.hiatuses(x, 5000).empty();
+  std::printf("  %zu of 60 columns with a gap in the record (widest %.1f Ma); hiatuses at %zu of 10 positions\n", gapped, widest, with_hiatus);
+  CHECK(gapped >= 5);
+  CHECK(with_hiatus >= 1);
+  for (auto& c : w.columns)
+    for (auto& i : c.intervals) CHECK(i.unit != kWheelerFault);
+  (void)names;
+}
+
 TEST_CASE("E10 topology: the contact graph of a faulted layer cake; C26 passes; watertight within tolerance") {
   auto m = build_text(faulted_layercake());
   auto g = contact_graph(*m, 100);
@@ -573,6 +603,64 @@ TEST_CASE("E10 topology: the contact graph of a faulted layer cake; C26 passes; 
   auto* c27 = find_check(rep, "C27");
   REQUIRE(c27 != nullptr);
   CHECK(c27->passed);
+}
+
+TEST_CASE("E10b a build with horizon ages writes Wheeler diagrams and topology.json; ensemble members report topology changes") {
+  auto dir = tmpdir("wheeler");
+  std::string text = faulted_layercake();
+  const char* ages[] = {"10 Ma", "20 Ma", "30 Ma", "40 Ma"};
+  for (int h = 0; h < 4; ++h) {
+    const std::string a = "{name: H" + std::to_string(h + 1) + "}";
+    const auto at = text.find(a);
+    REQUIRE(at != std::string::npos);
+    text.replace(at, a.size(), "{name: H" + std::to_string(h + 1) + ", age: " + qq(ages[h]) + "}");
+  }
+  text += "checks:\n  warn_only: [C6]\n";
+  const fs::path f = dir / "model.yaml";
+  write_text(f, text);
+  BuildOptions bo;
+  auto out = run_build(f, dir / "build", bo, "test");
+  CHECK(out.checks_passed);
+  CHECK(fs::exists(dir / "build" / "topology.json"));
+  CHECK(read_file(dir / "build" / "topology.json").find("fault:F1") != std::string::npos);
+  bool wheeler = false;
+  if (fs::exists(dir / "build" / "figures"))
+    for (auto& e : fs::directory_iterator(dir / "build" / "figures")) wheeler = wheeler || e.path().filename().string().find("wheeler") != std::string::npos;
+  CHECK(wheeler);
+  // a Wheeler diagram: each column records the four intervals between the horizons without gaps
+  auto m = build_text(text);
+  GeologicalTime gt(*m, {10, 20, 30, 40});
+  auto w = wheeler_diagram(gt, "X", {{0, 5000, 0}, {10000, 5000, 0}}, 40, 300);
+  REQUIRE(w.columns.size() == 40);
+  std::size_t full = 0;
+  for (auto& c : w.columns) {
+    double covered = 0;
+    for (auto& iv : c.intervals) covered += iv.t_old - iv.t_young;
+    full += covered > 0.95 * (45 - 5);
+  }
+  std::printf("  Wheeler: %zu of 40 columns record 5 to 45 Ma without a gap; %zu undefined samples\n", full, w.undefined);
+  CHECK(full >= 38);
+#if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__)
+  // throw above the 200 m unit thickness brings non-neighbouring units into contact across F1
+  write_text(f, text + "uncertainty:\n  members: " + qq("16 ordinal") + "\n  seed: " + qq("3 ordinal") +
+                    "\n  parameters:\n    - {path: faults.F1.throw.max, distribution: uniform, min: " + qq("40 m") + ", max: " + qq("380 m") + "}\n");
+  unc::EnsembleOptions eo;
+  eo.figures = false;
+  auto er = unc::run_ensemble(f, dir / "ens", eo);
+  std::size_t same_small = 0, small = 0, differ_large = 0, large = 0;
+  for (std::size_t k = 1; k < er.members.size(); ++k) {
+    const double t = er.members[k].sample.values[0];
+    if (t < 150) { ++small; same_small += er.members[k].topology == "same"; }
+    if (t > 260) { ++large; differ_large += er.members[k].topology != "same" && !er.members[k].topology.empty(); }
+  }
+  std::printf("  topology: %zu of %zu members differ; same below 150 m: %zu / %zu; differ above 260 m: %zu / %zu\n", er.topology_differs, er.members.size() - 1,
+              same_small, small, differ_large, large);
+  CHECK(small > 0);
+  CHECK(large > 0);
+  CHECK(same_small == small);
+  CHECK(differ_large == large);
+  CHECK(read_file(dir / "ens" / "ensemble" / "members.csv").find(",topology") != std::string::npos);
+#endif
 }
 
 // ---- E11, E12, E13: gravity and magnetics ----------------------------------------------------------
@@ -630,6 +718,15 @@ TEST_CASE("E12 magnetics: a sphere discretised into prisms against the dipole wi
   double dip = dot(B, F);
   std::printf("  sphere %.4f nT, dipole %.4f nT\n", dt, dip);
   CHECK(std::fabs(dt - dip) <= 0.03 * std::fabs(dip));
+  // a station exactly above a prism corner: the singular logarithms cancel between corners; the
+  // value equals the limit approached from beside the corner
+  const Vec3 at{0, 0, 0}, near{1e-4, 1e-4, 0};
+  const double a1 = prism_dt(at, 0, 500, 0, 500, -800, -600, Mv, F), a2 = prism_dt(near, 0, 500, 0, 500, -800, -600, Mv, F);
+  const double g1 = prism_gz(at, 0, 500, 0, 500, -800, -600, 300), g2 = prism_gz(near, 0, 500, 0, 500, -800, -600, 300);
+  std::printf("  above a corner: %.6f nT (beside %.6f), %.6f mGal (beside %.6f)\n", a1, a2, g1, g2);
+  CHECK(std::isfinite(a1));
+  CHECK(std::fabs(a1 - a2) <= 1e-4 * std::fabs(a2) + 1e-6);
+  CHECK(std::fabs(g1 - g2) <= 1e-4 * std::fabs(g2) + 1e-9);
 }
 
 #if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__)
@@ -671,6 +768,71 @@ TEST_CASE("E13 joint inversion: a fold relief is recovered from its own gravity 
   CHECK(std::fabs(r.parameters[0].value - 250) <= 0.05 * 250);
 }
 #endif
+
+TEST_CASE("E13b a build with a geophysics block writes station misfits, C29 and anomaly figures; rule F37") {
+  auto dir = tmpdir("gravity_build");
+  auto truth = build_text(hybrid_yaml(250, 120, ""));
+  PotentialFieldSpec s;
+  s.cell = 250;
+  s.background_density = 2650;
+  for (auto& u : truth->info().units) s.density.push_back(u.name == "U1" ? 2300.0 : kNaN);
+  std::vector<Vec3> st;
+  for (double x = 1000; x <= 9000; x += 1000)
+    for (double y = 1000; y <= 9000; y += 1000) st.push_back({x, y, 0});
+  auto gz = gravity_anomaly(*truth, s, st);
+  std::string csv = "X,Y,Z,value,sigma\n";
+  for (std::size_t i = 0; i < st.size(); ++i) csv += fmt_fixed(st[i].x, 1) + "," + fmt_fixed(st[i].y, 1) + ",0," + fmt_fixed(gz[i], 5) + ",0.05\n";
+  write_text(dir / "gravity.csv", csv);
+  auto geo = [&](const std::string& units, const std::string& bg) {
+    return "checks:\n  warn_only: [C6]\ninputs:\n  - {id: G, path: gravity.csv, role: gravity stations, sharing: shareable, source: test, evidence: interpreted}\n"
+           "geophysics:\n  cell: " + qq("250 m") + bg + "\n  units:\n" + units + "  gravity: {input: G, format: csv_stations}\n"
+           "outputs:\n  sections:\n    - {name: XS, polyline: " + qq("[[500, 5000], [9500, 5000]] m") + "}\n";
+  };
+  const std::string units = "    - {unit: U1, density: " + qq("2300 kg/m3") + "}\n", bg = "\n  background_density: " + qq("2650 kg/m3");
+  const fs::path f = dir / "model.yaml";
+  write_text(f, hybrid_yaml(250, 120, geo(units, bg)));
+  BuildOptions bo;
+  auto out = run_build(f, dir / "build", bo, "test");
+  CHECK(out.checks_passed);
+  REQUIRE(fs::exists(dir / "build" / "geophysics_stations.csv"));
+  const std::string rep = read_file(dir / "build" / "checks_report.csv");
+  CHECK(rep.find("C29") != std::string::npos);
+  bool map = false, prof = false;
+  for (auto& e : fs::directory_iterator(dir / "build" / "figures")) {
+    map = map || e.path().filename().string().find("gravity_map") != std::string::npos;
+    prof = prof || e.path().filename().string().find("gravity_profile_XS") != std::string::npos;
+  }
+  CHECK(map);
+  CHECK(prof);
+  // the truth itself: residuals within rounding
+  double worst = 0;
+  auto lines = read_file(dir / "build" / "geophysics_stations.csv");
+  std::istringstream is(lines);
+  std::string ln;
+  std::getline(is, ln);
+  while (std::getline(is, ln)) {
+    std::vector<std::string> c;
+    std::stringstream ss(ln);
+    std::string x;
+    while (std::getline(ss, x, ',')) c.push_back(x);
+    worst = std::max(worst, std::fabs(std::stod(c[7])));
+  }
+  std::printf("  largest station residual %.6f mGal\n", worst);
+  CHECK(worst < 1e-3);
+  // F37
+  auto rules = [&](const std::string& tail) {
+    desc::Description d;
+    auto r = desc::validate_description_text(hybrid_yaml(250, 120, tail), dir, &d);
+    std::string o;
+    for (auto& is2 : r.issues)
+      if (is2.error) o += is2.rule + " " + is2.path + "; ";
+    return o;
+  };
+  CHECK(rules(geo(units, bg)).empty());
+  CHECK(rules(geo(units, "")).find("F37 geophysics.background_density") != std::string::npos);
+  CHECK(rules(geo("    - {unit: NOPE, density: " + qq("2300 kg/m3") + "}\n", bg)).find("F37 geophysics.units[0].unit") != std::string::npos);
+  CHECK(rules(geo("    - {unit: U1, susceptibility: " + qq("0.01 SI") + "}\n", bg)).find("F37 geophysics.units") != std::string::npos);
+}
 
 // ---- E14: the stage 3A examples with free horizon values, without isochore declarations -----------
 namespace {

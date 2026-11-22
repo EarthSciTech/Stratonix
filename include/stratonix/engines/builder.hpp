@@ -28,7 +28,8 @@ struct DataPoint {
   Vec3 n{0, 0, 0};
   bool oriented = false;
   std::string label;
-  double sigma = -1;  ///< stated uncertainty (m; degrees for orientations); < 0 = none (stage 3A)
+  double sigma = -1;  ///< stated uncertainty (m; degrees for orientations; mGal or nT for stations); < 0 = none (stage 3A)
+  double value = kNaN;  ///< stage 4A: observed anomaly of a gravity (mGal) or magnetic (nT) station
 };
 
 /// Data read from description inputs, keyed by input id (filled by the pipeline's importers).

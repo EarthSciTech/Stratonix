@@ -11,6 +11,7 @@
 // Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
 STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_csv_points);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_csv_orientations);
+STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_csv_stations);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_xyz_points);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_irap_lines);
 STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_petrel_points);
@@ -152,8 +153,47 @@ class CsvDataImporter final : public Importer {
  private:
   bool orient_;
 };
+/// Stage 4A: gravity or magnetic stations, CSV with X, Y, Z (elevation), value (mGal or nT, as
+/// delivered: Stratonix applies no corrections) and optional sigma.
+class CsvStationsImporter final : public Importer {
+ public:
+  std::string data_kind() const override { return "points"; }
+  ImportedData read(const std::filesystem::path& f) const override {
+    auto t = read_csv(read_file(f));
+    auto col = [&](std::initializer_list<const char*> names) -> int {
+      for (std::size_t c = 0; c < t.header.size(); ++c) {
+        std::string h = t.header[c];
+        for (auto& ch : h) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        for (auto* n : names)
+          if (h == n) return static_cast<int>(c);
+      }
+      return -1;
+    };
+    int cx = col({"x"}), cy = col({"y"}), cz = col({"z", "elevation"}), cv = col({"value", "anomaly", "gz", "dt"}), cs = col({"sigma"});
+    if (cx < 0 || cy < 0 || cz < 0 || cv < 0) throw Error(ErrorCode::Parse, "CSV stations: columns X, Y, Z and value are required: " + f.string());
+    ImportedData d;
+    d.kind = "points";
+    d.z_is = "elevation";
+    for (auto& r : t.rows) {
+      auto at = [&](int c) { return parse_double(r.at(static_cast<std::size_t>(c))); };
+      d.points.push_back({at(cx), at(cy), at(cz)});
+      d.labels.push_back(std::string());
+      d.values.push_back(at(cv));
+      if (!std::isfinite(d.values.back())) throw Error(ErrorCode::Parse, "CSV stations: a value is not a number in " + f.string());
+      if (cs >= 0) {
+        double sg = at(cs);
+        if (!(sg > 0)) throw Error(ErrorCode::Parse, "CSV stations: sigma must be positive in " + f.string());
+        d.sigmas.push_back(sg);
+      }
+    }
+    return d;
+  }
+};
 }  // namespace
 
+STRATONIX_REGISTER(imp_csv_stations, registry::Kind::Importer, "csv_stations", "1.0.0",
+                   "CSV gravity or magnetic stations with X, Y, Z, value (mGal or nT) and optional sigma",
+                   [] { return std::make_unique<CsvStationsImporter>(); })
 STRATONIX_REGISTER(imp_csv_points, registry::Kind::Importer, "csv_points", "1.0.0", "CSV points with X, Y, Z and surface columns (GemPy layout)",
                    [] { return std::make_unique<CsvDataImporter>(false); })
 STRATONIX_REGISTER(imp_csv_orientations, registry::Kind::Importer, "csv_orientations", "1.0.0",
@@ -174,6 +214,7 @@ STRATONIX_REGISTER(imp_well_tops, registry::Kind::Importer, "well_tops", "1.0.0"
 void register_importers() {
   STRATONIX_PLUGIN_ANCHOR(imp_csv_points);
   STRATONIX_PLUGIN_ANCHOR(imp_csv_orientations);
+  STRATONIX_PLUGIN_ANCHOR(imp_csv_stations);
   STRATONIX_PLUGIN_ANCHOR(imp_xyz_points);
   STRATONIX_PLUGIN_ANCHOR(imp_irap_lines);
   STRATONIX_PLUGIN_ANCHOR(imp_petrel_points);

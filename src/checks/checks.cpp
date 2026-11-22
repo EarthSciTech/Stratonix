@@ -127,6 +127,19 @@ const GridProducts* CheckContext::grid_products() {
   if (!grid_products_) grid_products_ = std::make_unique<GridProducts>(make_grid_products(d_, m_));
   return grid_products_.get();
 }
+const ContactGraph& CheckContext::contact_graph() {
+  if (!graph_) graph_ = std::make_unique<ContactGraph>(stratonix::contact_graph(m_, topology_spacing()));
+  return *graph_;
+}
+double CheckContext::topology_spacing() const {
+  if (d_.voxel_spacing.present) {
+    auto v = d_.voxel_spacing.si_list();
+    if (!v.empty() && v[0] > 0) return v[0];
+  }
+  const auto& dom = m_.info().domain;
+  return std::max(grid_.dx, std::max({dom.sx, dom.sy, dom.z_top - dom.z_base}) / 64.0);
+}
+
 double CheckContext::tolerance(const std::string& key, std::string* source) const {
   struct T { const char* key; const desc::Param* p; double def; };
   const T table[] = {{"thickness_min", &d_.tol_thickness_min, 0.5}, {"crossing", &d_.tol_crossing, 0.01},
@@ -1106,7 +1119,7 @@ class C21 final : public Check {
     r.unit = "fraction";
     r.value = n ? static_cast<double>(within) / static_cast<double>(n) : 1.0;
     r.tolerance = 0.95;
-    r.tolerance_source = "STX-TN-11 section 7: at least 95 % within 3 sigma";
+    r.tolerance_source = "Stratonix default: at least 95 % within 3 sigma";
     r.passed = r.value >= 0.95 && exact_bad == 0;
     r.detail = std::to_string(within) + " of " + std::to_string(n) + " within 3 sigma (largest |r| / sigma " + fmt_fixed(worst, 2) + ")" +
                (exact ? "; " + std::to_string(exact_bad) + " of " + std::to_string(exact) + " exact data beyond " + fmt_fixed(tol, 3) + " m" : std::string());
@@ -1126,7 +1139,7 @@ class C22 final : public Check {
       r.unit = p.unit;
       r.value = p.value;
       r.tolerance = 0;
-      r.tolerance_source = "STX-TN-11 section 4: strictly inside [" + fmt_shortest(p.min) + ", " + fmt_shortest(p.max) + "] " + p.unit;
+      r.tolerance_source = "Stratonix rule: strictly inside [" + fmt_shortest(p.min) + ", " + fmt_shortest(p.max) + "] " + p.unit;
       r.passed = cr->converged && p.value > p.min && p.value < p.max;
       r.detail = "fitted " + fmt_fixed(p.value, 3) + " +- " + fmt_fixed(p.sigma, 3) + " " + p.unit + " after " + std::to_string(cr->iterations) +
                  " iterations; reduced chi2 " + fmt_fixed(cr->chi2_reduced, 3);
@@ -1137,7 +1150,7 @@ class C22 final : public Check {
       r.warn_only = true;
       r.value = cr->chi2_reduced;
       r.tolerance = 4;
-      r.tolerance_source = "STX-TN-11 section 7: warning above 4";
+      r.tolerance_source = "Stratonix default: warning above 4";
       r.passed = false;
       r.detail = "the stated uncertainties are too small for the misfit, or the model lacks a mechanism";
       out.push_back(r);
@@ -1155,20 +1168,117 @@ class C28 final : public Check {
     if (!pr) return out;
     for (std::size_t k = 0; k < pr->paths.size(); ++k) {
       auto r = base(c, "C28", "posterior split R-hat", pr->paths[k]);
+      r.unit = "ratio";
       r.value = pr->rhat[k];
       r.tolerance = 1.01;
-      r.tolerance_source = "STX-TN-14 section 4: split R-hat below 1.01 (Vehtari et al. 2021)";
+      r.tolerance_source = "Stratonix default: split R-hat below 1.01 (Vehtari et al. 2021)";
       r.passed = pr->rhat[k] < 1.01;
       r.detail = std::to_string(pr->walkers) + " walkers x " + std::to_string(pr->steps) + " steps after " + std::to_string(pr->burn_in) + " burn-in, seed " +
                  std::to_string(pr->seed) + (r.passed ? "" : ": run the sampler longer (conditioning.sampler.steps)");
       out.push_back(r);
       auto e = base(c, "C28", "posterior effective sample size", pr->paths[k]);
+      e.unit = "samples";
       e.value = pr->ess[k];
       e.tolerance = 100;
-      e.tolerance_source = "STX-TN-14 section 4: at least 100 effective samples per parameter";
+      e.tolerance_source = "Stratonix default: at least 100 effective samples per parameter";
       e.passed = pr->ess[k] >= 100;
       e.detail = "integrated autocorrelation time " + fmt_fixed(static_cast<double>(pr->walkers) * pr->steps / std::max(1.0, pr->ess[k]), 1) + " steps";
       out.push_back(e);
+    }
+    return out;
+  }
+};
+
+/// C26: topology (STX-TN-14 section 6): units in contact across a horizon inside one fault block are
+/// adjacent in the column, unless an unconformity (a change of series) or a terminating unit lies
+/// between them. Every explained exception is listed.
+class C26 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    const auto& g = c.contact_graph();
+    const auto& inf = c.model().info();
+    std::vector<std::string> bad, explained;
+    for (auto& e : g.edges) {
+      const auto& a = g.nodes[static_cast<std::size_t>(e.a)];
+      const auto& b = g.nodes[static_cast<std::size_t>(e.b)];
+      if (a.block != b.block || std::abs(a.unit - b.unit) <= 1) continue;
+      auto nm = [&](int u) { return (u >= 0 && static_cast<std::size_t>(u) < inf.units.size()) ? inf.units[static_cast<std::size_t>(u)].name : std::to_string(u); };
+      std::string t = nm(std::min(a.unit, b.unit)) + " on " + nm(std::max(a.unit, b.unit)) + " in block " + std::to_string(a.block) + " (" +
+                      fmt_fixed(e.area / 1e6, 3) + " km2)";
+      (e.surface.rfind("unconformity:", 0) == 0 ? explained : bad).push_back(t);
+    }
+    auto r = base(c, "C26", "topology: units in contact are adjacent in the column", std::to_string(g.nodes.size()) + " nodes, " + std::to_string(g.edges.size()) + " contacts");
+    r.unit = "contacts";
+    r.value = static_cast<double>(bad.size());
+    r.tolerance = 0;
+    r.tolerance_source = "Stratonix rule: no unexplained contact (lattice " + fmt_shortest(g.spacing) + " m)";
+    r.passed = bad.empty();
+    std::string det;
+    for (std::size_t k = 0; k < bad.size() && k < 5; ++k) det += (k ? "; " : "") + bad[k];
+    if (!bad.empty()) det = "unexplained: " + det + (bad.size() > 5 ? " and " + std::to_string(bad.size() - 5) + " more" : "");
+    if (!explained.empty()) {
+      std::string ex;
+      for (std::size_t k = 0; k < explained.size() && k < 5; ++k) ex += (k ? "; " : "") + explained[k];
+      det += std::string(det.empty() ? "" : " | ") + "unconformities or terminations: " + ex + (explained.size() > 5 ? " and more" : "");
+    }
+    r.detail = det.empty() ? "every contact inside a block is between adjacent units" : det;
+    return {r};
+  }
+};
+
+/// C27: watertight horizon surfaces (STX-TN-14 section 6): every horizon edge on the surface grid lies
+/// on a fault, another horizon (unconformity, pinch-out) or the domain boundary within tolerance.
+class C27 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::string src;
+    double tol = 0.5 * c.grid().dx;
+    if (c.description().tol_watertight.present) {
+      tol = c.description().tol_watertight.si();
+      src = std::string("checks.tolerances.watertight (") + desc::evidence_name(c.description().tol_watertight.evidence) + ")";
+    } else {
+      src = "Stratonix default: half the surface spacing";
+    }
+    auto w = watertightness(c.model(), c.grid(), [&](int h) -> const repr::FaultedSurface& { return c.faulted_surface(h); }, tol);
+    auto r = base(c, "C27", "watertight horizon surfaces", "largest gap");
+    r.unit = "m";
+    r.value = w.max_gap;
+    r.tolerance = tol;
+    r.tolerance_source = src;
+    r.passed = w.ok();
+    std::string det;
+    for (std::size_t k = 0; k < w.gaps.size() && k < 3; ++k)
+      det += (k ? "; " : "") + w.gaps[k].surface + " " + fmt_fixed(w.gaps[k].gap, 2) + " m at (" + fmt_fixed(w.gaps[k].at.x, 0) + ", " +
+             fmt_fixed(w.gaps[k].at.y, 0) + ", " + fmt_fixed(w.gaps[k].at.z, 0) + ")";
+    r.detail = det.empty() ? "every horizon edge ends on a fault, a horizon or the domain boundary" : det;
+    return {r};
+  }
+};
+
+/// C29: potential-field misfit (STX-TN-14 section 7): reduced chi-square of the stations reported;
+/// a warning above 2.
+class C29 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const PotentialFieldResult* pf = c.potential_fields;
+    if (!pf) return out;
+    for (int kind = 0; kind < 2; ++kind) {
+      const std::size_t n = kind == 0 ? pf->n_gravity : pf->n_magnetics;
+      if (n == 0) continue;
+      const double chi = kind == 0 ? pf->chi2_gravity : pf->chi2_magnetics;
+      auto r = base(c, "C29", "potential-field misfit", std::string(kind == 0 ? "gravity" : "magnetics") + ", " + std::to_string(n) + " stations");
+      r.unit = "chi2";
+      r.warn_only = true;
+      r.value = chi;
+      r.tolerance = 2;
+      r.tolerance_source = "Stratonix default: warning above a reduced chi-square of 2";
+      double rms = 0;
+      std::size_t m = 0;
+      for (auto& st : pf->stations)
+        if (st.kind == (kind == 0 ? "gravity" : "magnetics")) { rms += std::pow(st.modelled - st.observed, 2); ++m; }
+      rms = m ? std::sqrt(rms / static_cast<double>(m)) : 0;
+      r.passed = !std::isfinite(chi) || chi <= 2;
+      r.detail = std::string("rms misfit ") + fmt_fixed(rms, 4) + (kind == 0 ? " mGal" : " nT") +
+                 (std::isfinite(chi) ? "" : "; no station uncertainty stated, so no chi-square");
+      out.push_back(r);
     }
     return out;
   }
@@ -1188,7 +1298,7 @@ class C23 final : public Check {
     r.unit = "cells";
     r.value = static_cast<double>(gp->defects.nonpositive_volume);
     r.tolerance = 0;
-    r.tolerance_source = "STX-TN-12 section 7: none";
+    r.tolerance_source = "Stratonix rule: none";
     r.passed = gp->defects.nonpositive_volume == 0;
     r.detail = r.passed ? "every active cell has a positive volume" : "first: " + gp->defects.first_nonpositive;
     out.push_back(r);
@@ -1196,7 +1306,7 @@ class C23 final : public Check {
     r2.unit = "cells";
     r2.value = static_cast<double>(gp->defects.inverted);
     r2.tolerance = 0;
-    r2.tolerance_source = "STX-TN-12 section 7: none";
+    r2.tolerance_source = "Stratonix rule: none";
     r2.passed = gp->defects.inverted == 0;
     r2.detail = r2.passed ? "top corners at or above bottom corners; positive Jacobian at every corner" : "first: " + gp->defects.first_inverted;
     out.push_back(r2);
@@ -1239,6 +1349,12 @@ STRATONIX_REGISTER(check_c21, registry::Kind::Check, "C21_data_misfit", "1.0.0",
                    [] { return std::make_unique<C21>(); })
 STRATONIX_REGISTER(check_c22, registry::Kind::Check, "C22_conditioning", "1.0.0", "Conditioning converged inside the admissible ranges",
                    [] { return std::make_unique<C22>(); })
+STRATONIX_REGISTER(check_c26, registry::Kind::Check, "C26_topology", "1.0.0", "Topology: units in contact are adjacent, or an unconformity separates them",
+                   [] { return std::make_unique<C26>(); })
+STRATONIX_REGISTER(check_c27, registry::Kind::Check, "C27_watertight", "1.0.0", "Watertight horizon surfaces",
+                   [] { return std::make_unique<C27>(); })
+STRATONIX_REGISTER(check_c29, registry::Kind::Check, "C29_potential_fields", "1.0.0", "Potential-field misfit: reduced chi-square of the stations (warning above 2)",
+                   [] { return std::make_unique<C29>(); })
 STRATONIX_REGISTER(check_c28, registry::Kind::Check, "C28_posterior", "1.0.0", "Posterior converged: split R-hat below 1.01, effective sample size at least 100",
                    [] { return std::make_unique<C28>(); })
 STRATONIX_REGISTER(check_c23, registry::Kind::Check, "C23_grid", "1.0.0", "Grid: positive volumes, no inverted cells, fault faces on the faults",

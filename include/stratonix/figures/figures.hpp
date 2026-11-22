@@ -16,7 +16,9 @@
 #include "stratonix/figures/canvas.hpp"
 #include "stratonix/model/model.hpp"
 #include "stratonix/repr/faultrock.hpp"
+#include "stratonix/repr/geotime.hpp"
 #include "stratonix/repr/grid.hpp"
+#include "stratonix/repr/geotime.hpp"
 #include "stratonix/repr/repr.hpp"
 
 namespace stratonix::fig {
@@ -101,6 +103,20 @@ struct PosteriorSamples {
   double acceptance = 0;
   bool converged = false;
 };
+/// Stage 4A (STX-TN-14 section 7): gravity or magnetic stations, observed against modelled.
+struct AnomalyStation { double x = 0, y = 0, observed = 0, modelled = 0, sigma = kNaN; };
+/// Three maps: observed, modelled (same colour scale) and residual (modelled - observed).
+Figure anomaly_map_figure(const FigureContext& c, const std::string& kind, const std::string& unit, const std::vector<AnomalyStation>& st, double chi2_reduced);
+struct AnomalyProfile {
+  std::string section;
+  std::vector<double> s, modelled;                  ///< along the line
+  std::vector<std::pair<double, double>> observed;  ///< (s, value) of stations within the band
+  double band = 0;                                  ///< m either side of the line
+};
+Figure anomaly_profile_figure(const FigureContext& c, const std::string& kind, const std::string& unit, const AnomalyProfile& p);
+/// Wheeler diagram (Wheeler 1958): distance along a section against geological time, coloured by
+/// unit; hiatuses blank; horizon ages as dashed lines.
+Figure wheeler_figure(const FigureContext& c, const WheelerDiagram& w);
 /// Trace plot: every walker's path per parameter (at most 16 walkers drawn), with R-hat and ESS.
 Figure posterior_trace_figure(const FigureContext& c, const PosteriorSamples& s);
 /// Corner plot: marginal histograms with the 95 % interval, and pairwise scatter of the thinned

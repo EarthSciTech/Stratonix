@@ -219,6 +219,10 @@ void load_build_inputs(const desc::Description& d, BuildInputs& in) {
   std::vector<desc::ImplicitData> all_data = d.implicit.data;
   for (auto& x : d.conditioning.data)
     if (std::none_of(all_data.begin(), all_data.end(), [&](const desc::ImplicitData& y) { return y.input == x.input; })) all_data.push_back(x);
+  // stage 4A: gravity and magnetic stations
+  for (auto* g : {&d.geophysics.gravity, &d.geophysics.magnetics})
+    if (!g->input.empty() && std::none_of(all_data.begin(), all_data.end(), [&](const desc::ImplicitData& y) { return y.input == g->input; }))
+      all_data.push_back({g->input, "stations", g->format.empty() ? std::string("csv_stations") : g->format, "", desc::Param{}});
   for (auto& x : all_data) {
     auto data = reg.create<Importer>(registry::Kind::Importer, x.format)->read(input_of(x.input)->resolved);
     if (data.z_is == "depth")
@@ -230,6 +234,7 @@ void load_build_inputs(const desc::Description& d, BuildInputs& in) {
       if (i < data.normals.size()) { dp.n = data.normals[i]; dp.oriented = true; }
       dp.label = !x.horizon.empty() ? x.horizon : (i < data.labels.size() ? data.labels[i] : std::string());
       if (i < data.sigmas.size()) dp.sigma = data.sigmas[i];
+      if (i < data.values.size()) dp.value = data.values[i];
       out.push_back(dp);
     }
     if (out.empty()) throw Error(ErrorCode::Build, "input '" + x.input + "' holds no data points");
