@@ -116,7 +116,7 @@ jobs:
       # Stage 4D (STX-TN-17 section 1.7): experimental variograms against GeostatsPy's gamv
       - name: Variograms against GeostatsPy
         run: |
-          python3 -m pip install geostatspy
+          python3 -m pip install geostatspy tqdm statsmodels numba scipy pandas  # imports it does not declare
           python3 tests/tools/geostat_crosscheck.py build/linux-gcc-release/apps/stratonix/stratonix crosscheck_report/geostat
       # Stage 4C: the SEG-Y reader against segyio on files segyio writes and on the example volume
       - name: SEG-Y against segyio
