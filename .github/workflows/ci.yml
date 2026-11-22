@@ -33,7 +33,7 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }} || cmake --build build/${{ matrix.preset }}
       - name: Test
         if: ${{ !(startsWith(github.ref, 'refs/tags/v') && (matrix.preset == 'linux-gcc-debug' || matrix.preset == 'linux-asan')) }}
-        run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure
+        run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure -j 4
       - name: Package
         if: matrix.preset == 'linux-gcc-release'
         run: cd build/${{ matrix.preset }} && cpack
@@ -149,7 +149,7 @@ jobs:
         run: cmake --build build --config ${{ matrix.config }} --parallel
       - name: Test
         if: ${{ !(startsWith(github.ref, 'refs/tags/v') && matrix.config == 'Debug') }}
-        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure -j 4
       - name: Package (zip and NSIS installer)
         if: matrix.config == 'Release'
         run: cd build && cpack -C Release
