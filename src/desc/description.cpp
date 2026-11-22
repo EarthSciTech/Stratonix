@@ -2493,11 +2493,14 @@ struct Typer {
       for (auto& h : d.horizons)
         if (h.surface_z_is.rfind("twt", 0) == 0 && V.present && std::none_of(V.layers.begin(), V.layers.end(), [&](const Description::VelocityLayer& L) { return L.base == h.name; }))
           c.err("stratigraphy.horizons." + h.name, "F45", "a horizon in two-way time is the base of a velocity_model layer");
-      for (auto& [w, r] : V.exclude)
+      for (auto& ex : V.exclude) {
+        const std::string& w = ex.first;
+        const std::string& r = ex.second;
         if (std::none_of(d.wells.begin(), d.wells.end(), [&](const WellDesc& x) { return x.name == w; }))
           c.err("velocity_model.calibration.exclude", "F45", "unknown well '" + w + "'");
         else if (r.empty())
           c.err("velocity_model.calibration.exclude", "F45", "a well is excluded with its reason");
+      }
       for (std::size_t k = 0; k < d.wells.size(); ++k)
         for (auto& [h, p] : d.wells[k].tops_twt)
           if (d.horizon_index(h) < 0) c.err("wells[" + std::to_string(k) + "].tops_twt." + h, "F45", "unknown horizon '" + h + "'");
