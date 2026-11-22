@@ -118,7 +118,8 @@ def main(exe, report, require):
     Mv = F * (k * B0 * 1e-9 / (4e-7 * np.pi))
     if hm is not None:
         gz = hm.prism_gravity((E, N, U), [slab], [300.0], field="g_z")
-        be, bn, bu = hm.prism_magnetic((E, N, U), [slab], [tuple(Mv)])
+        mag = (np.array([Mv[0]]), np.array([Mv[1]]), np.array([Mv[2]]))  # per-prism easting, northing, upward (A/m)
+        be, bn, bu = hm.prism_magnetic((E, N, U), [slab], mag, field="b")
         dt = be * F[0] + bn * F[1] + bu * F[2]
     else:
         gz = np_gz(E, N, U, slab, 300.0)
