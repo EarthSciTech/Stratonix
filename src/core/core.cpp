@@ -73,6 +73,7 @@ std::optional<UnitDef> find_unit(std::string_view name) {
       {"Ma", Dimension::Time, 1.0},
       {"Pa", Dimension::Pressure, 1.0},       {"kPa", Dimension::Pressure, 1.0e3},
       {"MPa", Dimension::Pressure, 1.0e6},    {"bar", Dimension::Pressure, 1.0e5},
+      {"GPa", Dimension::Pressure, 1.0e9},
       {"psi", Dimension::Pressure, 6894.757293168},
       {"MPa/km", Dimension::PressureGradient, 1.0e3}, {"kPa/m", Dimension::PressureGradient, 1.0e3},
       {"bar/m", Dimension::PressureGradient, 1.0e5},  {"psi/ft", Dimension::PressureGradient, 6894.757293168 / 0.3048},
@@ -82,6 +83,11 @@ std::optional<UnitDef> find_unit(std::string_view name) {
       {"m/s2", Dimension::Acceleration, 1.0},
       {"nT", Dimension::MagneticField, 1.0e-9}, {"T", Dimension::MagneticField, 1.0},
       {"SI", Dimension::Dimensionless, 1.0},
+      {"degC", Dimension::Temperature, 1.0},  // stage 4B: temperatures kept in degrees Celsius
+      {"W/m/K", Dimension::ThermalConductivity, 1.0},
+      {"W/m2", Dimension::HeatFlow, 1.0},     {"mW/m2", Dimension::HeatFlow, 1.0e-3},
+      {"W/m3", Dimension::HeatProduction, 1.0}, {"uW/m3", Dimension::HeatProduction, 1.0e-6},
+      {"Pa.s", Dimension::Viscosity, 1.0},    {"mPa.s", Dimension::Viscosity, 1.0e-3}, {"cP", Dimension::Viscosity, 1.0e-3},
   };
   for (auto& u : table)
     if (u.name == name) return u;
@@ -103,6 +109,11 @@ const char* dimension_name(Dimension d) {
     case Dimension::Density: return "density";
     case Dimension::Acceleration: return "acceleration";
     case Dimension::MagneticField: return "magnetic field";
+    case Dimension::Temperature: return "temperature";
+    case Dimension::ThermalConductivity: return "thermal conductivity";
+    case Dimension::HeatFlow: return "heat flow";
+    case Dimension::HeatProduction: return "heat production";
+    case Dimension::Viscosity: return "viscosity";
     default: return "any";
   }
 }

@@ -31,8 +31,21 @@ has its own version (`stratonix_schema`).
     `clinoforms.trajectory`); channel belts and lobes as geobodies in geological-time coordinates
     (`geobodies`, rule F39, net-to-gross in C30); examples `tangential_clinoforms`,
     `channels_and_lobes`.
+  - volumetric restoration to a horizon (linear elasticity on a tetrahedral lattice, faults
+    sliding; `restoration`, check C31, strain maps), bed length along sections at fault-parallel
+    flow (I-026), compaction in each fault block at its maximum burial (I-029), Airy and flexural
+    backstripping (`backstripping`), eroded section from porosity logs (`eroded_section`); rule
+    F40; example `restoration_and_backstripping`.
+  - mechanical stratigraphy with tectonic strain (`mechanics`, I-033), fracture intensity from
+    curvature and Baecher networks (`fractures`, C34), temperature and EASY%Ro through the burial
+    history (`heat`, C32), overpressure from disequilibrium compaction (`pressure`, C33); rules
+    F41, F42; example `basin_heat_pressure_fractures`.
 
 ### Changed
+- Compaction porosity is taken at each block's maximum burial (`burial: block`, the default);
+  `burial: restored` keeps the 2026.3 behaviour.
+- C26: contacts between non-adjacent units inside a block are resolved against the restored
+  column (units thinner than the sample step are no longer reported as skipped).
 - C3 and C4 set aside samples where another fault's plane lies between their probes or
   cut-offs (fault networks); the detail line counts them.
 - A fault that abuts another holds its footwall fixed when the frame point lies on the far side

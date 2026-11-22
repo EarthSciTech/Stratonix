@@ -93,6 +93,12 @@ double ParametricModel::Porosity::mean_porosity(int unit, const Vec3& top, const
   Vec3 p[2] = {top, base}, r[2];
   m->restore(p, r);
   const double sd = m->structure_->surface_depth();
+  if (m->structure_->burial_in_block()) {
+    // stage 4B (STX-TN-15 section 4.3, I-029): each block compacts at its own maximum burial - the
+    // deeper of its present depth (a hanging wall buried further by a fault active during burial)
+    // and its restored depth (a block uplifted since, by a reverse fault or inversion)
+    return m->structure_->mean_porosity(unit, std::max(-r[0].z, -top.z) - sd, std::max(-r[1].z, -base.z) - sd);
+  }
   return m->structure_->mean_porosity(unit, -r[0].z - sd, -r[1].z - sd);
 }
 

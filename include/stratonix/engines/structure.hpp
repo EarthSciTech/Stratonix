@@ -172,6 +172,7 @@ class Structure final : public StratigraphyQuery, public ColumnQuery {
   double salt_t(double x, double y, double* contrib) const;  ///< thickness; per-body contributions
   double salt_net_ = 0, salt_vol_ = 0, weld_area_ = 0;
   int comp_mode_ = 0;                 ///< 0 off, 1 present, 2 depositional
+  bool burial_block_ = true;          ///< stage 4B: porosity at the maximum burial in the fault block
   double surface_depth_ = 0;
   std::vector<int> law_;              ///< per model unit: 0 rigid, 1 exponential, 2 table
   std::vector<double> phi0_, decay_;
@@ -194,6 +195,7 @@ class Structure final : public StratigraphyQuery, public ColumnQuery {
   bool salt_parametric() const { return !salt_.empty(); }
   /// Compaction mode: 0 off, 1 present, 2 depositional; the law of model unit u (0 rigid).
   int compaction_mode() const { return comp_mode_; }
+  bool burial_in_block() const { return burial_block_; }
   /// Mean porosity of unit u between burial depths d1 < d2 below the surface (stage 3B): 1 minus
   /// the grain thickness of its compaction law over the interval; NaN without a law.
   double mean_porosity(int u, double d1, double d2) const;

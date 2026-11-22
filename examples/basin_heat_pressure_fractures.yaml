@@ -1,0 +1,136 @@
+# Stage 4B example (STX-TN-15 sections 5 and 6): mechanics, fractures, heat and pressure on the
+# faulted compaction drape of restoration_and_backstripping.
+# - Mechanical stratigraphy and tectonic strain: horizontal stresses per unit along the wells (I-033).
+# - Fracture intensity in the sandstone from the curvature of its top over the high, and a Baecher
+#   network of two sets in a box on the crest (C34).
+# - Temperature through the burial history with radiogenic heat, and EASY%Ro (C32).
+# - Overpressure from disequilibrium compaction with exponential porosity-permeability laws (C33).
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: basin_heat_pressure_fractures, version: "1.0.0", status: DESIGN,
+        title: "Mechanics, fractures, heat and pressure through burial"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[800, 800] m | user_instruction | worked example: control well, off the high"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1400 m | user_instruction | worked example"
+      H3: "1800 m | user_instruction | worked example"
+      B:  "2200 m | user_instruction | worked example"
+      B2: "2600 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[5000, 5000] m | user_instruction | worked example: planned well on the crest of the high"
+    total_depth: "2800 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons:
+    - {name: H1, intended_offset: true, age: "5 Ma | user_instruction | worked example"}
+    - {name: H2, age: "20 Ma | user_instruction | worked example"}
+    - {name: H3, age: "40 Ma | user_instruction | worked example"}
+    - {name: B,  age: "60 Ma | user_instruction | worked example"}
+    - {name: B2, intended_offset: true, age: "80 Ma | user_instruction | worked example"}
+  units:
+    - {name: Shale_upper, top: H1, base: H2}
+    - {name: Sand, top: H2, base: H3}
+    - {name: Shale_lower, top: H3, base: B}
+    - {name: Basement, top: B, base: B2}
+  series:
+    - {name: Basin_fill, horizons: [H1, H2, H3], base: onlap}
+    - {name: Basement_series, horizons: [B, B2], base: conformable}
+  compaction:
+    geometry: depositional
+    surface_depth: "100 m | user_instruction | worked example: water depth"
+    units:
+      - {unit: Shale_upper, law: exponential, surface_porosity: "0.63 fraction | literature_derived | Sclater and Christie (1980), Table 2, shale", decay: "0.51 1/km | literature_derived | Sclater and Christie (1980), Table 2, shale"}
+      - {unit: Sand, law: exponential, surface_porosity: "0.49 fraction | literature_derived | Sclater and Christie (1980), Table 2, sandstone", decay: "0.27 1/km | literature_derived | Sclater and Christie (1980), Table 2, sandstone"}
+      - {unit: Shale_lower, law: exponential, surface_porosity: "0.63 fraction | literature_derived | Sclater and Christie (1980), Table 2, shale", decay: "0.51 1/km | literature_derived | Sclater and Christie (1980), Table 2, shale"}
+structure:
+  regional: {type: flat}
+  primitives:
+    - {type: dome, name: High, series: Basement_series, crest: "[5000, 5000] m | user_instruction | worked example", radius_major: "3000 m | user_instruction | worked example", relief: {B: "600 m | user_instruction | worked example"}}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example: active during burial"
+    geometry:
+      type: planar
+      reference_point: "[7000, 5000] m | user_instruction | worked example"
+      reference_depth: "1600 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: dips east"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "30000 m | user_instruction | worked example: longer than the model"
+    throw:
+      max: "150 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.1 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+stress:
+  regime:
+    sv_gradient: "22 MPa/km | assumed | worked example: overburden of mean density 2.25 g/cm3"
+    shmax_ratio: "0.85 ratio | assumed | worked example: normal-faulting regime"
+    shmin_ratio: "0.7 ratio | assumed | worked example: normal-faulting regime"
+    shmax_azimuth: "0 deg | assumed | worked example: parallel to the fault"
+  pore_pressure_gradient: "10.1 MPa/km | assumed | worked example: hydrostatic"
+  friction: "0.6 ratio | literature_derived | Byerlee (1978)"
+mechanics:
+  units:
+    - {unit: Shale_upper, young: "8 GPa | literature_derived | Mavko et al. (2009), shale", poisson: "0.33 ratio | literature_derived | Mavko et al. (2009), shale"}
+    - {unit: Sand, young: "20 GPa | literature_derived | Mavko et al. (2009), sandstone", poisson: "0.22 ratio | literature_derived | Mavko et al. (2009), sandstone"}
+    - {unit: Shale_lower, young: "10 GPa | literature_derived | Mavko et al. (2009), shale", poisson: "0.32 ratio | literature_derived | Mavko et al. (2009), shale"}
+  tectonic_strain:
+    min: "0.0001 ratio | assumed | worked example: along Shmin"
+    max: "0.0003 ratio | assumed | worked example: along SHmax"
+fractures:
+  units:
+    - {unit: Sand, p32_0: "0.02 1/m | assumed | worked example: background intensity", a_k: "300 ratio | assumed | worked example: intensity per unit curvature",
+       p32_max: "1 1/m | assumed | worked example"}
+  dfn:
+    unit: Sand
+    area: "[[4500, 4500], [4700, 4700]] m | user_instruction | worked example: a box on the crest of the high"
+    seed: "2026 ordinal | user_instruction | worked example: reproducible network"
+    sets:
+      - {name: NS, pole: "[90, 0] deg | assumed | worked example: steep, striking north (pole trend, plunge)", kappa: "30 ratio | assumed | worked example",
+         exponent: "2.7 ratio | literature_derived | Bonnet et al. (2001): length exponents of 2 to 3", rmin: "1 m | assumed | worked example", rmax: "30 m | assumed | worked example",
+         weight: "0.6 ratio | assumed | worked example"}
+      - {name: EW, pole: "[0, 0] deg | assumed | worked example: steep, striking east", kappa: "20 ratio | assumed | worked example",
+         exponent: "2.7 ratio | literature_derived | Bonnet et al. (2001)", rmin: "1 m | assumed | worked example", rmax: "30 m | assumed | worked example",
+         weight: "0.4 ratio | assumed | worked example"}
+heat:
+  surface_temperature: "8 degC | assumed | worked example: sea floor"
+  basal_heat_flow: "60 mW/m2 | assumed | worked example"
+  history:
+    - {age: "60 Ma | assumed | worked example: rift pulse", basal_heat_flow: "90 mW/m2 | assumed | worked example (McKenzie 1978 form)"}
+    - {age: "30 Ma | assumed | worked example", basal_heat_flow: "65 mW/m2 | assumed | worked example"}
+    - {age: "0 Ma | assumed | worked example", basal_heat_flow: "60 mW/m2 | assumed | worked example"}
+  water_conductivity: "0.6 W/m/K | literature_derived | water at 20 degC"
+  vitrinite: true
+  units:
+    - {unit: Shale_upper, conductivity: "1.8 W/m/K | literature_derived | Beardsmore and Cull (2001), shale grains", heat_production: "1.5 uW/m3 | literature_derived | shale"}
+    - {unit: Sand, conductivity: "4.0 W/m/K | literature_derived | Beardsmore and Cull (2001), quartz-rich sandstone grains", heat_production: "0.8 uW/m3 | literature_derived | sandstone"}
+    - {unit: Shale_lower, conductivity: "1.8 W/m/K | literature_derived | Beardsmore and Cull (2001), shale grains", heat_production: "1.5 uW/m3 | literature_derived | shale"}
+pressure:
+  viscosity: "0.5 mPa.s | literature_derived | brine at about 60 degC"
+  water_density: "1030 kg/m3 | literature_derived | sea water"
+  grain_density: "2650 kg/m3 | literature_derived | quartz"
+  units:
+    - {unit: Shale_upper, law: exponential, k0: "0.001 mD | assumed | worked example: shale at its reference porosity", b: "15 ratio | assumed | worked example", phi0: "0.3 fraction | assumed | worked example"}
+    - {unit: Sand, law: kozeny_carman, k0: "100 mD | assumed | worked example: sandstone at its reference porosity", phi0: "0.25 fraction | assumed | worked example"}
+    - {unit: Shale_lower, law: exponential, k0: "0.0001 mD | assumed | worked example", b: "15 ratio | assumed | worked example", phi0: "0.3 fraction | assumed | worked example"}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[200, 5000], [9800, 5000]] m | user_instruction | worked example: across the high"
+  vertical_exaggeration: "3 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv]

@@ -615,6 +615,92 @@ a `count`, a `seed`, a `thickness`, an `orientation` and an optional `color`:
 
 Example: `channels_and_lobes`.
 
+## 2.20 Restoration, compaction across faults, backstripping and eroded section (2026.4)
+
+**Volumetric restoration** (`restoration.volumetric`) restores the whole model to one horizon.
+- **Keys:** `horizon`, its `datum` (depth), a `pin` [x, y], `young`, `poisson`, and optionally
+  per-unit `units: [{unit, young, poisson}]`, `mesh_size` and `max_strain` (default 10 %).
+- **Mesh:** the model below the horizon is meshed in tetrahedra on a lattice, cut by fault block.
+  Faults slide (their normal gap is held).
+- **Solve:** the horizon is brought flat to its datum by minimising elastic strain energy, in
+  eight increments so rotations are not taken as strain.
+- **Outputs:** `restoration_strain.csv` (the tetrahedra the horizon crosses: dilatation, maximum
+  shear, bed stretch) and two strain maps.
+- **C31:** fails when the largest Green-Lagrange strain exceeds `max_strain`, or the restored
+  horizon's in-plane stretch exceeds `restoration.bed_length_limit` (default 5 %).
+- **Limits:** the lattice does not conform to the faults, so strain peaks in the cells a fault
+  crosses. A doubly curved horizon (a dome) cannot flatten without stretch.
+
+**Bed length along sections.** In models with fault-parallel flow or a `restoration` block, C31
+also reports, for every section, the largest change in bed length of any horizon (present
+against restored).
+
+**Compaction across faults.** `stratigraphy.compaction.burial: block` (the default since
+2026.4) takes each unit's porosity at its maximum burial in its own fault block. That is the
+deeper of its present and restored depths, so a hanging wall buried further by a fault compacts
+more. `burial: restored` keeps the stage 2D column-wise behaviour.
+
+**Backstripping** (`backstripping`) removes the sediment load from the burial history:
+- **Keys:** `basement` horizon, `mantle_density`, `water_density`, `grain_density`, `te` (0 =
+  Airy, up to 100 km; with `young` and `poisson` for flexure), and `steps` (paleo-water depth
+  `water_depth` and `sea_level` per horizon at the surface, and optionally `present`).
+- **Outputs:** tectonic subsidence (Airy, and flexural through the plate's response on a map grid
+  when Te > 0) in `tectonic_subsidence.csv` at the wells, `tectonic_subsidence_maps.csv`, and
+  dashed and dotted curves on the burial-history figures.
+
+**Eroded section** (`eroded_section`) estimates the section removed at an unconformity:
+- **Keys:** a `well`, the `unconformity` horizon, a porosity `log` input (depth below the datum,
+  porosity) and the normal trend (`surface_porosity`, `decay`).
+- **Method:** each sample's equivalent burial on the trend minus its depth below the
+  unconformity, averaged (Magara 1976).
+- **Output:** `eroded_section.csv` gives the residual; an optional `vitrinite_estimate` is
+  reported beside the estimate. Underburial is reported as zero erosion with the reason.
+
+Rule F40 covers all three. Example: `restoration_and_backstripping`.
+
+## 2.21 Mechanics, fractures, heat and pressure (2026.4)
+
+**Mechanical stratigraphy** (`mechanics`) gives units their own horizontal stresses. Each unit
+takes `young`, `poisson` and optionally `ucs` and `biot`, with optional `tectonic_strain: {min,
+max}` (along Shmin and SHmax, from -0.005 to 0.005). With a `stress.regime` (which gives the
+vertical stress, the pore pressure and the SHmax azimuth), the horizontal stresses follow the
+uniaxial-strain relation plus the tectonic strains (Thiercelin and Plumb 1994), unit by unit.
+Slip and dilation tendencies on faults (C20) use the footwall's unit, and `stress_profile.csv`
+lists the stresses along every well.
+
+**Fracture intensity** (`fractures.units`). The law is P32 = `p32_0` + `a_k` |k_max|, clipped
+to `p32_max`, where k_max is the maximum absolute principal curvature of the unit's top horizon.
+It is drawn as a map per unit and tabled in `fracture_intensity.csv`; cells without curvature are
+reported missing.
+
+**Fracture networks** (`fractures.dfn`) place Baecher disks in a box: the `area` over the full
+thickness of the `unit` at its centre.
+- **Sets:** each takes a `pole` [trend, plunge] with a Fisher `kappa`, a truncated power-law
+  radius (`exponent` > 2, `rmin`, `rmax`) and a `weight`.
+- **Generation:** disks are drawn until the in-box area reaches the box's mean P32 from the
+  intensity map. A network above `limit` disks (default 10^6) is refused with the reason.
+- **Outputs:** `dfn_disks.csv`; C34 compares the realised P32 with the target.
+
+**Heat** (`heat`) runs transient conduction along 1D columns through the burial history.
+- **Inputs:** `surface_temperature`, `basal_heat_flow` (or a `history` of ages and flows),
+  `water_conductivity`, and per unit the grain `conductivity` (mixed with water by the geometric
+  mean of porosity) and `heat_production`. Every unit with a compaction law needs them.
+- **Outputs:** temperature (and EASY%Ro with `vitrinite: true`) of every horizon at every step
+  at the wells, present profiles, and maps of the present temperature and %Ro at each horizon.
+- **C32** checks the heat balance of the present column in steady state.
+
+**Pressure** (`pressure`) models overpressure from disequilibrium compaction through the burial
+history, in Gibson's (1958) moving-boundary form.
+- **Inputs:** compressibility from the unit's compaction law in effective stress, and
+  permeability from its law (`exponential`: k0 exp(b (phi - phi0)); `kozeny_carman`), with the
+  `viscosity` and densities.
+- **Outputs:** overpressure per horizon and step at the wells, present profiles with their
+  hydrostatic and lithostatic bounds, and overpressure maps.
+- **C33** fails a pore pressure outside those bounds.
+
+Rule F41 covers heat and pressure, F42 mechanics and fractures. Units: degC, W/m/K, mW/m2, uW/m3,
+mPa.s (cP). Example: `basin_heat_pressure_fractures`.
+
 # 3. Running
 
 | Command | What it does |

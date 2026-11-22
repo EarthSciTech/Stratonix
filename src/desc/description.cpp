@@ -138,6 +138,24 @@ std::vector<const Param*> Description::all_params() const {
                   &geophysics.declination, &geophysics.intensity, &geophysics.gravity.uncertainty, &geophysics.magnetics.uncertainty})
     add(*q);
   for (auto& u : geophysics.units) { add(u.density); add(u.susceptibility); }
+  for (auto* q : {&restoration.datum, &restoration.pin, &restoration.young, &restoration.poisson, &restoration.mesh_size, &restoration.max_strain,
+                  &restoration.bed_length_limit, &backstripping.mantle_density, &backstripping.water_density, &backstripping.grain_density,
+                  &backstripping.te, &backstripping.young, &backstripping.poisson})
+    add(*q);
+  for (auto& u : restoration.units) { add(u.young); add(u.poisson); }
+  for (auto& x : backstripping.steps) { add(x.water_depth); add(x.sea_level); }
+  for (auto& e : eroded_sections) { add(e.surface_porosity); add(e.decay); add(e.vitrinite_estimate); }
+  for (auto& u : mechanics.units) { add(u.young); add(u.poisson); add(u.ucs); add(u.biot); }
+  add(mechanics.strain_min);
+  add(mechanics.strain_max);
+  for (auto& u : fractures.units) { add(u.p32_0); add(u.a_k); add(u.a_e); add(u.p32_max); }
+  for (auto* q : {&fractures.dfn.area, &fractures.dfn.seed, &fractures.dfn.limit}) add(*q);
+  for (auto& s : fractures.dfn.sets) for (auto* q : {&s.pole, &s.kappa, &s.exponent, &s.rmin, &s.rmax, &s.weight}) add(*q);
+  for (auto* q : {&heat.surface_temperature, &heat.basal_heat_flow, &heat.water_conductivity, &heat.column_depth}) add(*q);
+  for (auto& [a, q] : heat.history) { add(a); add(q); }
+  for (auto& u : heat.units) { add(u.conductivity); add(u.heat_production); }
+  for (auto* q : {&pressure.viscosity, &pressure.rho_water, &pressure.rho_grain}) add(*q);
+  for (auto& u : pressure.units) { add(u.k0); add(u.b); add(u.phi0); }
   for (auto& g : geobodies)
     for (auto* q : {&g.count, &g.seed, &g.width, &g.thickness, &g.wavelength, &g.amplitude, &g.orientation, &g.radius, &g.aspect}) add(*q);
   for (auto& b : bodies)
@@ -475,6 +493,7 @@ struct Typer {
     if (const Node* cp = st ? st->get("compaction") : nullptr) {
       const std::string cb = "stratigraphy.compaction";
       d.compaction.geometry = S(cp, "geometry");
+      d.compaction.burial = S(cp, "burial", "block");
       d.compaction.surface_depth = P(cp, "surface_depth", cb, Dimension::Length, true, 1);
       if (const Node* us = cp->get("units"))
         for (std::size_t k = 0; k < us->seq.size(); ++k) {
@@ -915,6 +934,140 @@ struct Typer {
           cd.parameters.push_back({S(&x, "path"), P(&x, "min", b, Dimension::Any, true, 1), P(&x, "max", b, Dimension::Any, true, 1)});
         }
     }
+    if (const Node* rs = root.get("restoration")) {
+      auto& R = d.restoration;
+      R.present = true;
+      R.bed_length_limit = P(rs, "bed_length_limit", "restoration", Dimension::Dimensionless, false, 1);
+      if (const Node* v = rs->get("volumetric")) {
+        const std::string b = "restoration.volumetric";
+        R.volumetric = true;
+        R.horizon = S(v, "horizon");
+        R.datum = P(v, "datum", b, Dimension::Length, true, 1);
+        R.pin = P(v, "pin", b, Dimension::Length, true, 2);
+        R.young = P(v, "young", b, Dimension::Pressure, true, 1);
+        R.poisson = P(v, "poisson", b, Dimension::Dimensionless, true, 1);
+        R.mesh_size = P(v, "mesh_size", b, Dimension::Length, false, 1);
+        R.max_strain = P(v, "max_strain", b, Dimension::Dimensionless, false, 1);
+        if (const Node* us = v->get("units"))
+          for (std::size_t k = 0; k < us->seq.size(); ++k) {
+            const Node& x = us->seq[k];
+            const std::string ub = b + ".units[" + std::to_string(k) + "]";
+            R.units.push_back({S(&x, "unit"), P(&x, "young", ub, Dimension::Pressure, true, 1), P(&x, "poisson", ub, Dimension::Dimensionless, true, 1)});
+          }
+      }
+    }
+    if (const Node* bs2 = root.get("backstripping")) {
+      auto& B = d.backstripping;
+      const std::string b = "backstripping";
+      B.present = true;
+      B.basement = S(bs2, "basement");
+      B.mantle_density = P(bs2, "mantle_density", b, Dimension::Density, true, 1);
+      B.water_density = P(bs2, "water_density", b, Dimension::Density, true, 1);
+      B.grain_density = P(bs2, "grain_density", b, Dimension::Density, true, 1);
+      B.te = P(bs2, "te", b, Dimension::Length, true, 1);
+      B.young = P(bs2, "young", b, Dimension::Pressure, false, 1);
+      B.poisson = P(bs2, "poisson", b, Dimension::Dimensionless, false, 1);
+      if (const Node* ss = bs2->get("steps"))
+        for (std::size_t k = 0; k < ss->seq.size(); ++k) {
+          const Node& x = ss->seq[k];
+          const std::string sb = b + ".steps[" + std::to_string(k) + "]";
+          B.steps.push_back({S(&x, "horizon"), P(&x, "water_depth", sb, Dimension::Length, true, 1), P(&x, "sea_level", sb, Dimension::Length, false, 1)});
+        }
+    }
+    if (const Node* es = root.get("eroded_section"))
+      for (std::size_t k = 0; k < es->seq.size(); ++k) {
+        const Node& x = es->seq[k];
+        const std::string b = "eroded_section[" + std::to_string(k) + "]";
+        d.eroded_sections.push_back({S(&x, "name"), S(&x, "well"), S(&x, "unconformity"), S(&x, "log"),
+                                     P(&x, "surface_porosity", b, Dimension::Dimensionless, true, 1), P(&x, "decay", b, Dimension::InverseLength, true, 1),
+                                     P(&x, "vitrinite_estimate", b, Dimension::Length, false, 1)});
+      }
+    if (const Node* mc = root.get("mechanics")) {
+      auto& M = d.mechanics;
+      M.present = true;
+      if (const Node* us = mc->get("units"))
+        for (std::size_t k = 0; k < us->seq.size(); ++k) {
+          const Node& x = us->seq[k];
+          const std::string b = "mechanics.units[" + std::to_string(k) + "]";
+          M.units.push_back({S(&x, "unit"), P(&x, "young", b, Dimension::Pressure, true, 1), P(&x, "poisson", b, Dimension::Dimensionless, true, 1),
+                             P(&x, "ucs", b, Dimension::Pressure, false, 1), P(&x, "biot", b, Dimension::Dimensionless, false, 1)});
+        }
+      if (const Node* ts = mc->get("tectonic_strain")) {
+        M.strain_min = P(ts, "min", "mechanics.tectonic_strain", Dimension::Dimensionless, true, 1);
+        M.strain_max = P(ts, "max", "mechanics.tectonic_strain", Dimension::Dimensionless, true, 1);
+      }
+    }
+    if (const Node* fr = root.get("fractures")) {
+      auto& F = d.fractures;
+      F.present = true;
+      if (const Node* us = fr->get("units"))
+        for (std::size_t k = 0; k < us->seq.size(); ++k) {
+          const Node& x = us->seq[k];
+          const std::string b = "fractures.units[" + std::to_string(k) + "]";
+          F.units.push_back({S(&x, "unit"), P(&x, "p32_0", b, Dimension::InverseLength, true, 1), P(&x, "a_k", b, Dimension::Dimensionless, true, 1),
+                             P(&x, "a_e", b, Dimension::InverseLength, false, 1), P(&x, "p32_max", b, Dimension::InverseLength, true, 1)});
+        }
+      if (const Node* df = fr->get("dfn")) {
+        auto& N = F.dfn;
+        const std::string b = "fractures.dfn";
+        N.present = true;
+        N.unit = S(df, "unit");
+        N.area = P(df, "area", b, Dimension::Length, true, 2, 2);
+        N.seed = P(df, "seed", b, Dimension::Ordinal, true, 1);
+        N.limit = P(df, "limit", b, Dimension::Ordinal, false, 1);
+        if (const Node* ss = df->get("sets"))
+          for (std::size_t k = 0; k < ss->seq.size(); ++k) {
+            const Node& x = ss->seq[k];
+            const std::string sb = b + ".sets[" + std::to_string(k) + "]";
+            N.sets.push_back({S(&x, "name"), P(&x, "pole", sb, Dimension::Angle, true, 2), P(&x, "kappa", sb, Dimension::Dimensionless, true, 1),
+                              P(&x, "exponent", sb, Dimension::Dimensionless, true, 1), P(&x, "rmin", sb, Dimension::Length, true, 1),
+                              P(&x, "rmax", sb, Dimension::Length, true, 1), P(&x, "weight", sb, Dimension::Dimensionless, true, 1)});
+          }
+      }
+    }
+    if (const Node* ht = root.get("heat")) {
+      auto& T = d.heat;
+      const std::string b = "heat";
+      T.present = true;
+      T.surface_temperature = P(ht, "surface_temperature", b, Dimension::Temperature, true, 1);
+      T.basal_heat_flow = P(ht, "basal_heat_flow", b, Dimension::HeatFlow, true, 1);
+      T.water_conductivity = P(ht, "water_conductivity", b, Dimension::ThermalConductivity, true, 1);
+      T.column_depth = P(ht, "column_depth", b, Dimension::Length, false, 1);
+      if (const Node* v = ht->get("vitrinite")) T.vitrinite = v->type == Node::Type::Bool && v->boolean;
+      if (const Node* hs = ht->get("history"))
+        for (std::size_t k = 0; k < hs->seq.size(); ++k) {
+          const Node& x = hs->seq[k];
+          const std::string hb = b + ".history[" + std::to_string(k) + "]";
+          T.history.push_back({P(&x, "age", hb, Dimension::Time, true, 1), P(&x, "basal_heat_flow", hb, Dimension::HeatFlow, true, 1)});
+        }
+      if (const Node* us = ht->get("units"))
+        for (std::size_t k = 0; k < us->seq.size(); ++k) {
+          const Node& x = us->seq[k];
+          const std::string ub = b + ".units[" + std::to_string(k) + "]";
+          T.units.push_back({S(&x, "unit"), P(&x, "conductivity", ub, Dimension::ThermalConductivity, true, 1),
+                             P(&x, "heat_production", ub, Dimension::HeatProduction, true, 1)});
+        }
+    }
+    if (const Node* pr = root.get("pressure")) {
+      auto& Q = d.pressure;
+      const std::string b = "pressure";
+      Q.present = true;
+      Q.viscosity = P(pr, "viscosity", b, Dimension::Viscosity, true, 1);
+      Q.rho_water = P(pr, "water_density", b, Dimension::Density, true, 1);
+      Q.rho_grain = P(pr, "grain_density", b, Dimension::Density, true, 1);
+      if (const Node* us = pr->get("units"))
+        for (std::size_t k = 0; k < us->seq.size(); ++k) {
+          const Node& x = us->seq[k];
+          const std::string ub = b + ".units[" + std::to_string(k) + "]";
+          PressureUnitDesc u;
+          u.unit = S(&x, "unit");
+          u.law = S(&x, "law");
+          u.k0 = P(&x, "k0", ub, Dimension::Permeability, true, 1);
+          u.b = P(&x, "b", ub, Dimension::Dimensionless, u.law == "exponential", 1);
+          u.phi0 = P(&x, "phi0", ub, Dimension::Dimensionless, true, 1);
+          Q.units.push_back(std::move(u));
+        }
+    }
     if (const Node* gs = root.get("geobodies"))
       for (std::size_t k = 0; k < gs->seq.size(); ++k) {
         const Node& x = gs->seq[k];
@@ -1280,6 +1433,8 @@ struct Typer {
     }
     if (d.compaction.present()) {
       const std::string cb = "stratigraphy.compaction";
+      if (d.compaction.burial != "block" && d.compaction.burial != "restored")
+        c.err("stratigraphy.compaction.burial", "F25", "burial is block (maximum burial in its fault block) or restored (column-wise)");
       if (d.compaction.geometry != "present" && d.compaction.geometry != "depositional")
         c.err(cb + ".geometry", "F25", "geometry must be present or depositional");
       std::set<std::string> seen;
@@ -1307,6 +1462,140 @@ struct Typer {
         } else {
           c.err(ub + ".law", "F25", "law must be exponential or table");
         }
+      }
+    }
+    // Stage 4B: restoration, backstripping and eroded-section estimates (rule F40)
+    if (d.restoration.volumetric) {
+      const auto& R = d.restoration;
+      const std::string b = "restoration.volumetric";
+      if (d.horizon_index(R.horizon) < 0) c.err(b + ".horizon", "F40", "unknown horizon '" + R.horizon + "'");
+      auto nu_ok = [&](const Param& p, const std::string& path) {
+        if (p.present && !(p.si() >= 0 && p.si() < 0.5)) c.err(path, "F40", "Poisson's ratio from 0 to 0.5 (exclusive)");
+      };
+      auto e_ok = [&](const Param& p, const std::string& path) {
+        if (p.present && !(p.si() > 0)) c.err(path, "F40", "Young's modulus must be positive");
+      };
+      nu_ok(R.poisson, b + ".poisson");
+      e_ok(R.young, b + ".young");
+      for (std::size_t k = 0; k < R.units.size(); ++k) {
+        const std::string ub = b + ".units[" + std::to_string(k) + "]";
+        if (d.unit_index(R.units[k].unit) < 0) c.err(ub + ".unit", "F40", "unknown unit '" + R.units[k].unit + "'");
+        nu_ok(R.units[k].poisson, ub + ".poisson");
+        e_ok(R.units[k].young, ub + ".young");
+      }
+      if (R.max_strain.present && !(R.max_strain.si() > 0 && R.max_strain.si() < 1)) c.err(b + ".max_strain", "F40", "the strain limit lies in (0, 1)");
+      if (R.mesh_size.present && !(R.mesh_size.si() > 0)) c.err(b + ".mesh_size", "F40", "the mesh size must be positive");
+    }
+    if (d.restoration.bed_length_limit.present && !(d.restoration.bed_length_limit.si() > 0 && d.restoration.bed_length_limit.si() < 1))
+      c.err("restoration.bed_length_limit", "F40", "the bed-length limit lies in (0, 1)");
+    if (d.backstripping.present) {
+      const auto& B = d.backstripping;
+      const std::string b = "backstripping";
+      if (!d.compaction.present()) c.err(b, "F40", "backstripping needs the compaction laws of stratigraphy.compaction");
+      const int bh = d.horizon_index(B.basement);
+      if (bh < 0) c.err(b + ".basement", "F40", "unknown basement horizon '" + B.basement + "'");
+      if (B.te.present && !(B.te.si() >= 0 && B.te.si() <= 100e3)) c.err(b + ".te", "F40", "Te from 0 (Airy) to 100 km");
+      if (B.te.present && B.te.si() > 0 && (!B.young.present || !B.poisson.present)) c.err(b, "F40", "flexure (Te > 0) needs young and poisson");
+      if (B.mantle_density.present && B.water_density.present && B.grain_density.present &&
+          !(B.mantle_density.si() > B.grain_density.si() && B.grain_density.si() > B.water_density.si()))
+        c.err(b, "F40", "densities: mantle > grain > water");
+      std::set<std::string> given;
+      for (std::size_t k = 0; k < B.steps.size(); ++k) {
+        const auto& s = B.steps[k];
+        if (s.horizon != "present" && d.horizon_index(s.horizon) < 0)
+          c.err(b + ".steps[" + std::to_string(k) + "].horizon", "F40", "unknown horizon '" + s.horizon + "' (or 'present')");
+        given.insert(s.horizon);
+      }
+      // a paleo-water depth for every step (zero allowed, with its evidence class)
+      for (int h = 0; bh >= 0 && h < bh; ++h)
+        if (!given.count(d.horizons[static_cast<std::size_t>(h)].name))
+          c.err(b + ".steps", "F40", "no water depth for the step when " + d.horizons[static_cast<std::size_t>(h)].name + " was at the surface");
+    }
+    for (std::size_t k = 0; k < d.eroded_sections.size(); ++k) {
+      const auto& e = d.eroded_sections[k];
+      const std::string b = "eroded_section[" + std::to_string(k) + "]";
+      if (!d.well(e.well)) c.err(b + ".well", "F40", "unknown well '" + e.well + "'");
+      if (d.horizon_index(e.unconformity) < 0) c.err(b + ".unconformity", "F40", "unknown horizon '" + e.unconformity + "'");
+      if (std::none_of(d.inputs.begin(), d.inputs.end(), [&](const InputDesc& i) { return i.id == e.log; }))
+        c.err(b + ".log", "F40", "unknown input '" + e.log + "' (a porosity log: depth, porosity)");
+      if (e.surface_porosity.present && !(e.surface_porosity.si() > 0 && e.surface_porosity.si() < 1)) c.err(b + ".surface_porosity", "F40", "surface porosity in (0, 1)");
+      if (e.decay.present && !(e.decay.si() > 0)) c.err(b + ".decay", "F40", "the decay must be positive");
+    }
+    // Stage 4B: mechanics and fractures (rule F42), heat and pressure (rule F41)
+    {
+      auto unit_ok = [&](const std::string& u, const std::string& path, const char* rule) {
+        if (d.unit_index(u) < 0) c.err(path, rule, "unknown unit '" + u + "'");
+      };
+      for (std::size_t k = 0; k < d.mechanics.units.size(); ++k) {
+        const auto& u = d.mechanics.units[k];
+        const std::string b = "mechanics.units[" + std::to_string(k) + "]";
+        unit_ok(u.unit, b + ".unit", "F42");
+        if (u.young.present && !(u.young.si() > 0)) c.err(b + ".young", "F42", "Young's modulus must be positive");
+        if (u.poisson.present && !(u.poisson.si() >= 0 && u.poisson.si() < 0.5)) c.err(b + ".poisson", "F42", "Poisson's ratio from 0 to 0.5 (exclusive)");
+        if (u.biot.present && !(u.biot.si() >= 0 && u.biot.si() <= 1)) c.err(b + ".biot", "F42", "Biot's coefficient from 0 to 1");
+      }
+      for (const Param* p : {&d.mechanics.strain_min, &d.mechanics.strain_max})
+        if (p->present && !(p->si() >= -0.005 && p->si() <= 0.005)) c.err("mechanics.tectonic_strain", "F42", "tectonic strains from -0.005 to 0.005");
+      if (d.mechanics.strain_min.present && !d.stress.shmax_azimuth.present)
+        c.err("mechanics.tectonic_strain", "F42", "tectonic strain needs stress.regime.shmax_azimuth (the direction of the larger strain)");
+      for (std::size_t k = 0; k < d.fractures.units.size(); ++k) {
+        const auto& u = d.fractures.units[k];
+        const std::string b = "fractures.units[" + std::to_string(k) + "]";
+        unit_ok(u.unit, b + ".unit", "F42");
+        for (const Param* p : {&u.p32_0, &u.a_k, &u.a_e})
+          if (p->present && p->si() < 0) c.err(b, "F42", "fracture-law coefficients must not be negative");
+        if (u.p32_max.present && !(u.p32_max.si() > 0 && u.p32_max.si() <= 10)) c.err(b + ".p32_max", "F42", "the maximum P32 lies in (0, 10] 1/m");
+      }
+      if (d.fractures.dfn.present) {
+        const auto& N = d.fractures.dfn;
+        unit_ok(N.unit, "fractures.dfn.unit", "F42");
+        if (std::none_of(d.fractures.units.begin(), d.fractures.units.end(), [&](const FractureUnitDesc& u) { return u.unit == N.unit; }))
+          c.err("fractures.dfn.unit", "F42", "the network's unit needs a fracture law under fractures.units");
+        if (N.sets.empty()) c.err("fractures.dfn.sets", "F42", "a network needs at least one set");
+        for (std::size_t k = 0; k < N.sets.size(); ++k) {
+          const auto& s = N.sets[k];
+          const std::string b = "fractures.dfn.sets[" + std::to_string(k) + "]";
+          if (s.kappa.present && s.kappa.si() < 0) c.err(b + ".kappa", "F42", "Fisher kappa must not be negative");
+          if (s.exponent.present && !(s.exponent.si() > 2)) c.err(b + ".exponent", "F42", "the power-law exponent must exceed 2");
+          if (s.rmin.present && s.rmax.present && !(s.rmin.si() > 0 && s.rmin.si() < s.rmax.si())) c.err(b, "F42", "0 < rmin < rmax");
+          if (s.weight.present && !(s.weight.si() > 0)) c.err(b + ".weight", "F42", "a set's weight must be positive");
+        }
+      }
+      if (d.heat.present) {
+        const auto& T = d.heat;
+        auto q_ok = [&](const Param& q, const std::string& path) {
+          if (q.present && !(q.si() >= 0.020 && q.si() <= 0.200)) c.err(path, "F41", "heat flow from 20 to 200 mW/m2");
+        };
+        q_ok(T.basal_heat_flow, "heat.basal_heat_flow");
+        for (std::size_t k = 0; k < T.history.size(); ++k) q_ok(T.history[k].second, "heat.history[" + std::to_string(k) + "].basal_heat_flow");
+        if (!d.compaction.present()) c.err("heat", "F41", "heat needs the burial history of stratigraphy.compaction");
+        for (std::size_t k = 0; k < T.units.size(); ++k) {
+          const auto& u = T.units[k];
+          const std::string b = "heat.units[" + std::to_string(k) + "]";
+          unit_ok(u.unit, b + ".unit", "F41");
+          if (u.conductivity.present && !(u.conductivity.si() >= 0.5 && u.conductivity.si() <= 6)) c.err(b + ".conductivity", "F41", "conductivity from 0.5 to 6 W/m/K");
+          if (u.heat_production.present && !(u.heat_production.si() >= 0 && u.heat_production.si() <= 10e-6))
+            c.err(b + ".heat_production", "F41", "radiogenic heat from 0 to 10 uW/m3");
+        }
+        // every compacting unit needs its thermal properties (no hidden defaults)
+        for (auto& cu : d.compaction.units)
+          if (std::none_of(T.units.begin(), T.units.end(), [&](const HeatUnitDesc& u) { return u.unit == cu.unit; }))
+            c.err("heat.units", "F41", "unit '" + cu.unit + "' has a compaction law but no conductivity and heat production");
+      }
+      if (d.pressure.present) {
+        const auto& Q = d.pressure;
+        if (!d.compaction.present()) c.err("pressure", "F41", "pressure needs the compaction laws of stratigraphy.compaction");
+        for (std::size_t k = 0; k < Q.units.size(); ++k) {
+          const auto& u = Q.units[k];
+          const std::string b = "pressure.units[" + std::to_string(k) + "]";
+          unit_ok(u.unit, b + ".unit", "F41");
+          if (u.law != "exponential" && u.law != "kozeny_carman") c.err(b + ".law", "F41", "law must be exponential or kozeny_carman");
+          if (u.k0.present && !(u.k0.si() >= 1e-23 && u.k0.si() <= 1e-12)) c.err(b + ".k0", "F41", "permeability from 1e-23 to 1e-12 m2 (1e-8 to 1e3 mD)");
+          if (u.phi0.present && !(u.phi0.si() > 0 && u.phi0.si() < 1)) c.err(b + ".phi0", "F41", "reference porosity in (0, 1)");
+        }
+        for (auto& cu : d.compaction.units)
+          if (std::none_of(Q.units.begin(), Q.units.end(), [&](const PressureUnitDesc& u) { return u.unit == cu.unit; }))
+            c.err("pressure.units", "F41", "unit '" + cu.unit + "' has a compaction law but no permeability law");
       }
     }
     // Stage 4B: geobodies (rule F39)

@@ -41,9 +41,10 @@ set_tests_properties(test_v3_uncertainty PROPERTIES TIMEOUT 3600)
 # by Prompts 43 to 47.
 stx_test(test_v4_engine stratonix_package)
 set_tests_properties(test_v4_engine PROPERTIES TIMEOUT 3600)
-# Stage 4B (STX-TN-15): written first; expected to fail until Prompts 49 to 53 build the features
+# Stage 4B analytical tests (STX-TN-15), written before the features (Prompt 48) and made to pass
+# by Prompts 49 to 53.
 stx_test(test_v4_geology stratonix_package)
-set_tests_properties(test_v4_geology PROPERTIES WILL_FAIL TRUE TIMEOUT 3600)
+set_tests_properties(test_v4_geology PROPERTIES TIMEOUT 3600)
 # Stage 4A: the fold-frame command on a sine fold (axis 000, wavelength 4 km)
 add_test(NAME cli_fold_frame COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_fold_frame.json
          "-DARGS=fold-frame;${CMAKE_CURRENT_SOURCE_DIR}/data/fold_bedding.csv" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
@@ -100,7 +101,7 @@ add_test(NAME cli_build_example COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:str
          -DDESC=${PROJECT_SOURCE_DIR}/examples/synthetic_fold_two_faults.yaml -DOUT=${STX_TEST_TMP}/cli_build_example
          -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
 # The worked examples of the user guide build with every check passing.
-foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data hybrid_fault_fold_conditioning fault_system_uncertainty salt_sheet_drape saucer_sill_forced_fold injectite_complex negative_flower thrust_duplex breached_relay growth_fault_decay polygonal_faults tangential_clinoforms channels_and_lobes)
+foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet listric_rollover fault_system_relay_splay thrust_repeated_section strike_slip_offset oblique_fault trishear_fold fault_bend_fold detachment_folds unconformity_onlap_pinchout growth_fault prograding_wedge salt_pillow_withdrawal salt_diapir_crestal_faults compaction_drape rift_inversion_history implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data hybrid_fault_fold_conditioning fault_system_uncertainty salt_sheet_drape saucer_sill_forced_fold injectite_complex negative_flower thrust_duplex breached_relay growth_fault_decay polygonal_faults tangential_clinoforms channels_and_lobes restoration_and_backstripping basin_heat_pressure_fractures)
   add_test(NAME cli_build_${ex} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix>
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)

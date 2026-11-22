@@ -487,6 +487,7 @@
           ],
           "additionalProperties": false,
           "properties": {
+            "burial": {"enum": ["block", "restored"], "description": "Stage 4B: porosity at the maximum burial in the fault block (default) or column-wise in the restored frame (stage 2D)."},
             "geometry": {
               "enum": [
                 "present",
@@ -2468,6 +2469,48 @@
         }
       }
     },
+    "restoration": {
+      "type": "object",
+      "description": "Stage 4B (STX-TN-15 section 4): volumetric restoration of the model to a horizon (decision 18) and the bed-length limit of C31.",
+      "additionalProperties": false,
+      "properties": {
+        "bed_length_limit": {"$ref": "#/$defs/param"},
+        "volumetric": {
+          "type": "object",
+          "required": ["horizon", "datum", "pin", "young", "poisson"],
+          "additionalProperties": false,
+          "properties": {
+            "horizon": {"type": "string"}, "datum": {"$ref": "#/$defs/param"}, "pin": {"$ref": "#/$defs/param"}, "young": {"$ref": "#/$defs/param"}, "poisson": {"$ref": "#/$defs/param"},
+            "mesh_size": {"$ref": "#/$defs/param"}, "max_strain": {"$ref": "#/$defs/param"},
+            "units": {"type": "array", "items": {"type": "object", "required": ["unit", "young", "poisson"], "additionalProperties": false,
+                      "properties": {"unit": {"type": "string"}, "young": {"$ref": "#/$defs/param"}, "poisson": {"$ref": "#/$defs/param"}}}}
+          }
+        }
+      }
+    },
+    "backstripping": {
+      "type": "object",
+      "description": "Stage 4B (STX-TN-15 section 4.4): tectonic subsidence by Airy or flexural backstripping of the burial history.",
+      "required": ["basement", "mantle_density", "water_density", "grain_density", "te", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "basement": {"type": "string"}, "mantle_density": {"$ref": "#/$defs/param"}, "water_density": {"$ref": "#/$defs/param"}, "grain_density": {"$ref": "#/$defs/param"}, "te": {"$ref": "#/$defs/param"},
+        "young": {"$ref": "#/$defs/param"}, "poisson": {"$ref": "#/$defs/param"},
+        "steps": {"type": "array", "items": {"type": "object", "required": ["horizon", "water_depth"], "additionalProperties": false,
+                  "properties": {"horizon": {"type": "string"}, "water_depth": {"$ref": "#/$defs/param"}, "sea_level": {"$ref": "#/$defs/param"}}}}
+      }
+    },
+    "eroded_section": {
+      "type": "array",
+      "description": "Stage 4B (STX-TN-15 section 4.5): eroded section at an unconformity from a porosity log against a normal compaction trend.",
+      "items": {"type": "object", "required": ["name", "well", "unconformity", "log", "surface_porosity", "decay"], "additionalProperties": false,
+                "properties": {"name": {"type": "string"}, "well": {"type": "string"}, "unconformity": {"type": "string"}, "log": {"type": "string"},
+                               "surface_porosity": {"$ref": "#/$defs/param"}, "decay": {"$ref": "#/$defs/param"}, "vitrinite_estimate": {"$ref": "#/$defs/param"}}}
+    },
+    "mechanics": {"type": "object", "additionalProperties": false, "properties": {"units": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["unit", "young", "poisson"], "properties": {"unit": {"type": "string"}, "young": {"$ref": "#/$defs/param"}, "poisson": {"$ref": "#/$defs/param"}, "ucs": {"$ref": "#/$defs/param"}, "biot": {"$ref": "#/$defs/param"}}}}, "tectonic_strain": {"type": "object", "additionalProperties": false, "required": ["min", "max"], "properties": {"min": {"$ref": "#/$defs/param"}, "max": {"$ref": "#/$defs/param"}}}}},
+    "fractures": {"type": "object", "additionalProperties": false, "properties": {"units": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["unit", "p32_0", "a_k", "p32_max"], "properties": {"unit": {"type": "string"}, "p32_0": {"$ref": "#/$defs/param"}, "a_k": {"$ref": "#/$defs/param"}, "a_e": {"$ref": "#/$defs/param"}, "p32_max": {"$ref": "#/$defs/param"}}}}, "dfn": {"type": "object", "additionalProperties": false, "required": ["unit", "area", "seed", "sets"], "properties": {"unit": {"type": "string"}, "area": {"$ref": "#/$defs/param"}, "seed": {"$ref": "#/$defs/param"}, "limit": {"$ref": "#/$defs/param"}, "sets": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "pole", "kappa", "exponent", "rmin", "rmax", "weight"], "properties": {"name": {"type": "string"}, "pole": {"$ref": "#/$defs/param"}, "kappa": {"$ref": "#/$defs/param"}, "exponent": {"$ref": "#/$defs/param"}, "rmin": {"$ref": "#/$defs/param"}, "rmax": {"$ref": "#/$defs/param"}, "weight": {"$ref": "#/$defs/param"}}}}}}}},
+    "heat": {"type": "object", "additionalProperties": false, "required": ["surface_temperature", "basal_heat_flow", "water_conductivity", "units"], "properties": {"surface_temperature": {"$ref": "#/$defs/param"}, "basal_heat_flow": {"$ref": "#/$defs/param"}, "water_conductivity": {"$ref": "#/$defs/param"}, "column_depth": {"$ref": "#/$defs/param"}, "vitrinite": {"type": "boolean"}, "history": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["age", "basal_heat_flow"], "properties": {"age": {"$ref": "#/$defs/param"}, "basal_heat_flow": {"$ref": "#/$defs/param"}}}}, "units": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["unit", "conductivity", "heat_production"], "properties": {"unit": {"type": "string"}, "conductivity": {"$ref": "#/$defs/param"}, "heat_production": {"$ref": "#/$defs/param"}}}}}},
+    "pressure": {"type": "object", "additionalProperties": false, "required": ["viscosity", "water_density", "grain_density", "units"], "properties": {"viscosity": {"$ref": "#/$defs/param"}, "water_density": {"$ref": "#/$defs/param"}, "grain_density": {"$ref": "#/$defs/param"}, "units": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["unit", "law", "k0", "phi0"], "properties": {"unit": {"type": "string"}, "law": {"type": "string", "enum": ["exponential", "kozeny_carman"]}, "k0": {"$ref": "#/$defs/param"}, "b": {"$ref": "#/$defs/param"}, "phi0": {"$ref": "#/$defs/param"}}}}}},
     "geobodies": {
       "type": "array",
       "description": "Stage 4B (STX-TN-15 section 3.3): channel belts and lobes placed inside a unit in geological-time coordinates.",

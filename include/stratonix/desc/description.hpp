@@ -115,6 +115,7 @@ struct CompactionUnitDesc {
 };
 struct CompactionDesc {
   std::string geometry;            ///< present or depositional ("" = no compaction)
+  std::string burial = "block";    ///< stage 4B: block (maximum burial in its fault block) | restored (stage 2D, column-wise)
   Param surface_depth;
   std::vector<CompactionUnitDesc> units;
   bool present() const { return !geometry.empty(); }
@@ -261,6 +262,45 @@ struct GridDesc {
   std::string pillars = "fault_conforming";  ///< stage 4B: fault_conforming | vertical (dense intersecting networks)
 };
 
+/// Restoration (stage 4B, STX-TN-15 section 4): volumetric restoration of the whole model to a
+/// horizon (decision 18) and the bed-length limit of C31.
+struct RestorationUnitDesc { std::string unit; Param young, poisson; };
+struct RestorationDesc {
+  bool present = false, volumetric = false;
+  std::string horizon;
+  Param datum, pin, young, poisson, mesh_size, max_strain, bed_length_limit;
+  std::vector<RestorationUnitDesc> units;
+};
+/// Backstripping (STX-TN-15 section 4.4).
+struct BackstripStepDesc { std::string horizon; Param water_depth, sea_level; };
+struct BackstripDesc {
+  bool present = false;
+  std::string basement;
+  Param mantle_density, water_density, grain_density, te, young, poisson;
+  std::vector<BackstripStepDesc> steps;
+};
+/// Eroded-section estimates from porosity logs (STX-TN-15 section 4.5).
+struct ErodedSectionDesc { std::string name, well, unconformity, log; Param surface_porosity, decay, vitrinite_estimate; };
+/// Mechanical stratigraphy and tectonic strain (stage 4B, STX-TN-15 section 5.3, I-033).
+struct MechanicsUnitDesc { std::string unit; Param young, poisson, ucs, biot; };
+struct MechanicsDesc { bool present = false; std::vector<MechanicsUnitDesc> units; Param strain_min, strain_max; };
+/// Fracture intensity per unit and discrete fracture networks (STX-TN-15 sections 5.1, 5.2).
+struct FractureUnitDesc { std::string unit; Param p32_0, a_k, a_e, p32_max; };
+struct FractureSetDesc { std::string name; Param pole, kappa, exponent, rmin, rmax, weight; };  ///< pole: [trend, plunge]
+struct DfnDesc { bool present = false; std::string unit; Param area, seed, limit; std::vector<FractureSetDesc> sets; };
+struct FracturesDesc { bool present = false; std::vector<FractureUnitDesc> units; DfnDesc dfn; };
+/// Heat (STX-TN-15 section 6.1).
+struct HeatUnitDesc { std::string unit; Param conductivity, heat_production; };
+struct HeatDesc {
+  bool present = false;
+  Param surface_temperature, basal_heat_flow, water_conductivity, column_depth;
+  std::vector<std::pair<Param, Param>> history;  ///< (age, basal heat flow)
+  std::vector<HeatUnitDesc> units;
+  bool vitrinite = false;
+};
+/// Overpressure from disequilibrium compaction (STX-TN-15 section 6.2).
+struct PressureUnitDesc { std::string unit, law; Param k0, b, phi0; };  ///< exponential: k0 exp(b (phi - phi0)); kozeny_carman: k0 (phi/phi0)^3 ((1-phi0)/(1-phi))^2
+struct PressureDesc { bool present = false; Param viscosity, rho_water, rho_grain; std::vector<PressureUnitDesc> units; };
 /// Geobodies (stage 4B, STX-TN-15 section 3.3): channel belts and lobes placed inside a unit in
 /// geological-time coordinates, so they follow the unit's deformation.
 struct GeobodyDesc {
@@ -339,6 +379,13 @@ struct Description {
   GeophysicsDesc geophysics;       ///< stage 4A
   std::vector<BodyDesc> bodies;    ///< stage 4B
   std::vector<GeobodyDesc> geobodies;  ///< stage 4B: channel belts and lobes inside units
+  RestorationDesc restoration;     ///< stage 4B
+  BackstripDesc backstripping;     ///< stage 4B
+  std::vector<ErodedSectionDesc> eroded_sections;  ///< stage 4B
+  MechanicsDesc mechanics;         ///< stage 4B
+  FracturesDesc fractures;         ///< stage 4B
+  HeatDesc heat;                   ///< stage 4B
+  PressureDesc pressure;           ///< stage 4B
   StressDesc stress;               ///< stage 2F
   std::vector<std::string> curvature_horizons;  ///< stage 2F: outputs.curvature.horizons
   Param fracture_threshold;        ///< stage 2F: outputs.curvature.fracture_threshold (1/m)

@@ -30,6 +30,23 @@ int unit_at(const std::vector<double>& b, double d) {
 }
 }  // namespace
 
+void stress_at(const StressInput& s, int unit, double z, double S6[6], double& pp) {
+  for (int k = 0; k < 6; ++k) S6[k] = s.g[k] * z;
+  pp = s.pp * z;
+  if (!s.lateral || unit < 0 || static_cast<std::size_t>(unit) >= s.unit_mech.size()) return;
+  const auto& m = s.unit_mech[static_cast<std::size_t>(unit)];
+  const double E = m[0], nu = m[1], al = std::isfinite(m[2]) ? m[2] : 1.0;
+  if (!std::isfinite(E) || !std::isfinite(nu)) return;
+  // uniaxial strain plus tectonic strain (Thiercelin and Plumb 1994), sigma_v from the regime
+  const double sv = S6[2], base = nu / (1 - nu) * (sv - al * pp) + al * pp, c = E / (1 - nu * nu);
+  const double sH = base + c * (s.e_H + nu * s.e_h), sh = base + c * (s.e_h + nu * s.e_H);
+  const double sn = std::sin(s.azimuth), cs = std::cos(s.azimuth);  // SHmax along (sin, cos)
+  S6[0] = sH * sn * sn + sh * cs * cs;
+  S6[1] = sH * cs * cs + sh * sn * sn;
+  S6[3] = (sH - sh) * sn * cs;
+  S6[4] = S6[5] = 0;
+}
+
 FaultRockPoint fault_rock_at(const Model& m, int fault, const Vec3& p, const FaultRockInput& in, const StressInput& s) {
   FaultRockPoint out;
   const auto& inf = m.info();
@@ -115,8 +132,9 @@ FaultRockPoint fault_rock_at(const Model& m, int fault, const Vec3& p, const Fau
   // stress and fault response
   if (s.present) {
     const double z = std::max(0.0, -p.z);
-    const double S[9] = {s.g[0] * z, s.g[3] * z, s.g[4] * z, s.g[3] * z, s.g[1] * z, s.g[5] * z, s.g[4] * z, s.g[5] * z, s.g[2] * z};
-    const double pp = s.pp * z;
+    double S6[6], pp;
+    stress_at(s, out.fw_unit, z, S6, pp);  // the footwall's unit carries the stress at the fault (stage 4B)
+    const double S[9] = {S6[0], S6[3], S6[4], S6[3], S6[1], S6[5], S6[4], S6[5], S6[2]};
     const Vec3 t{S[0] * n.x + S[1] * n.y + S[2] * n.z, S[3] * n.x + S[4] * n.y + S[5] * n.z, S[6] * n.x + S[7] * n.y + S[8] * n.z};
     out.sigma_n = dot(t, n);
     out.tau = norm(t - n * out.sigma_n);

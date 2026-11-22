@@ -9,6 +9,10 @@
 #include "stratonix/engines/conditioning.hpp"
 #include "stratonix/engines/geophysics.hpp"
 #include "stratonix/engines/posterior.hpp"
+#include "stratonix/engines/restoration3d.hpp"
+#include "stratonix/engines/fractures.hpp"
+#include "stratonix/engines/thermal.hpp"
+#include "stratonix/repr/faultrock.hpp"
 #include "stratonix/repr/geotime.hpp"
 #include "stratonix/repr/topology.hpp"
 #include "stratonix/engines/history.hpp"
@@ -130,6 +134,60 @@ std::string summary_csv(const std::vector<std::pair<std::string, std::string>>& 
   return s;
 }
 
+// ---- stage 4B (STX-TN-15 section 4): restoration, backstripping and eroded-section helpers -------
+namespace {
+BackstripSpec backstrip_spec(const desc::Description& d) {
+  const auto& B = d.backstripping;
+  BackstripSpec s;
+  s.basement = d.horizon_index(B.basement);
+  s.rho_m = B.mantle_density.si();
+  s.rho_w = B.water_density.si();
+  s.rho_g = B.grain_density.si();
+  s.te = B.te.si();
+  if (B.young.present) s.young = B.young.si();
+  if (B.poisson.present) s.poisson = B.poisson.si();
+  s.water_depth.assign(d.horizons.size(), kNaN);
+  s.sea_level.assign(d.horizons.size(), kNaN);
+  bool present_given = false;
+  for (auto& x : B.steps) {
+    if (x.horizon == "present") {
+      s.water_depth_present = x.water_depth.si();
+      s.sea_level_present = x.sea_level.present ? x.sea_level.si() : 0.0;
+      present_given = true;
+      continue;
+    }
+    const int h = d.horizon_index(x.horizon);
+    if (h < 0) continue;
+    s.water_depth[static_cast<std::size_t>(h)] = x.water_depth.si();
+    s.sea_level[static_cast<std::size_t>(h)] = x.sea_level.present ? x.sea_level.si() : 0.0;
+  }
+  if (!present_given && !d.horizons.empty()) {  // the present step takes the top horizon's water depth
+    s.water_depth_present = std::isfinite(s.water_depth[0]) ? s.water_depth[0] : 0.0;
+    s.sea_level_present = std::isfinite(s.sea_level[0]) ? s.sea_level[0] : 0.0;
+  }
+  return s;
+}
+/// Elevation of horizon h on a vertical at (x, y): where the unit changes from h to h + 1 downward.
+double horizon_elevation(const Model& m, int h, double x, double y) {
+  const auto& dom = m.info().domain;
+  const int n = 600;
+  std::vector<Vec3> pts(n);
+  for (int k = 0; k < n; ++k) pts[static_cast<std::size_t>(k)] = {x, y, dom.z_top - (dom.z_top - dom.z_base) * (k + 0.5) / n};
+  EvalResult er;
+  m.evaluate(pts, kEvalUnit, er);
+  for (int k = 1; k < n; ++k)
+    if (er.unit[static_cast<std::size_t>(k - 1)] <= h && er.unit[static_cast<std::size_t>(k)] > h) {
+      double a = pts[static_cast<std::size_t>(k - 1)].z, b = pts[static_cast<std::size_t>(k)].z;
+      for (int it = 0; it < 30; ++it) {
+        const double zm = 0.5 * (a + b);
+        (m.unit_at({x, y, zm}) <= h ? a : b) = zm;
+      }
+      return 0.5 * (a + b);
+    }
+  return kNaN;
+}
+}  // namespace
+
 fig::FigureContext figure_context(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys) {
   fig::FigureContext c;
   c.model = &m;
@@ -159,6 +217,7 @@ fig::FigureContext figure_context(const desc::Description& d, const Model& m, co
       if (m.info().units[u].name == n) c.isopach_units.push_back(static_cast<int>(u));
   // Burial history at every well head (stage 2D), when the description has compaction.
   if (auto* st = static_cast<const Structure*>(m.capability("structure")); st && st->compaction_mode() != 0) {
+    BackstripMaps maps;  // stage 4B: flexural maps, computed once for all wells when needed
     for (auto& w : c.wells) {
       auto hist = st->burial_history(w.x(), w.y());
       if (hist.empty()) continue;
@@ -174,13 +233,31 @@ fig::FigureContext figure_context(const desc::Description& d, const Model& m, co
         for (auto& stp : hist) b.ages.push_back(stp.age);
       for (std::size_t h = 0; h < hist.back().depth.size(); ++h)
         if (!std::isnan(hist.back().depth[h])) b.horizons.push_back(static_cast<int>(h));
+      if (d.backstripping.present) {
+        // stage 4B: tectonic subsidence on the same steps (steps without the basement stay blank)
+        const BackstripSpec bs = backstrip_spec(d);
+        auto ts = backstrip_column(*st, bs, w.x(), w.y());
+        b.tectonic_airy.assign(hist.size(), kNaN);
+        b.tectonic_flexural.assign(hist.size(), kNaN);
+        for (auto& t : ts)
+          for (std::size_t k = 0; k < hist.size(); ++k)
+            if (hist[k].label == t.label) b.tectonic_airy[k] = t.airy;
+        if (bs.te > 0) {
+          if (maps.labels.empty()) maps = backstrip_maps(*st, bs, m.info().domain, 32);
+          for (std::size_t q = 0; q < maps.labels.size(); ++q)
+            for (std::size_t k = 0; k < hist.size(); ++k)
+              if (hist[k].label == maps.labels[q]) b.tectonic_flexural[k] = backstrip_map_value(maps, maps.flexural[q], m.info().domain, w.x(), w.y());
+        } else {
+          b.tectonic_flexural.clear();
+        }
+      }
       c.burial.push_back(std::move(b));
     }
   }
   c.fault_rock = d.fault_rock.present;
   if (d.fault_rock.present || d.stress.present) {
     c.rock = fault_rock_input(d, m);
-    c.stress = stress_input(d);
+    c.stress = stress_input(d, m);
   }
   for (auto& hn : d.curvature_horizons)
     for (std::size_t h = 0; h < m.info().horizons.size(); ++h)
@@ -362,7 +439,7 @@ std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Mo
   c.fault_rock = d.fault_rock.present;
   if (d.fault_rock.present || d.stress.present) {
     c.rock = fault_rock_input(d, m);
-    c.stress = stress_input(d);
+    c.stress = stress_input(d, m);
   }
   for (auto& sr : d.series) c.series.push_back({sr.name, sr.base, sr.horizons});
   if (d.implicit.present) c.isochore_horizons = d.implicit.isochore_horizons;
@@ -448,7 +525,7 @@ std::vector<std::pair<std::string, std::string>> fault_rock_rows(const desc::Des
     k.push_back({"Stress: cohesion", st.cohesion.present ? lab(st.cohesion) : "0 (not given)"});
   }
   const auto in = fault_rock_input(d, m);
-  const auto sin = stress_input(d);
+  const auto sin = stress_input(d, m);
   const double spacing = std::max(m.info().domain.spacing * 2, 50.0);
   for (std::size_t f = 0; f < m.info().faults.size(); ++f) {
     auto pts = repr::fault_rock_surface(m, repr::fault_surface(m, static_cast<int>(f), spacing), in, sin);
@@ -851,6 +928,307 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     write_file(out_dir / "geophysics_stations.csv", t);
     ctx.potential_fields = &pf;
   }
+  // stage 4B (STX-TN-15 section 4.2): volumetric restoration of the model to a horizon (C31)
+  VolumetricResult vr;
+  if (d.restoration.volumetric) {
+    const auto& R = d.restoration;
+    VolumetricSpec vs;
+    vs.horizon = R.horizon;
+    vs.datum_z = -R.datum.si();
+    vs.young = R.young.si();
+    vs.poisson = R.poisson.si();
+    vs.pin_given = true;
+    vs.pin_x = R.pin.si(0);
+    vs.pin_y = R.pin.si(1);
+    if (R.mesh_size.present) vs.mesh_size = R.mesh_size.si();
+    if (R.max_strain.present) vs.max_strain = R.max_strain.si();
+    const auto& units = o.model->info().units;
+    vs.unit_props.assign(units.size(), {vs.young, vs.poisson});
+    for (auto& u : R.units)
+      for (std::size_t k = 0; k < units.size(); ++k)
+        if (units[k].name == u.unit) vs.unit_props[k] = {u.young.si(), u.poisson.si()};
+    vr = volumetric_restore(*o.model, vs);
+    ctx.volumetric = &vr;
+    std::string t = "present_x,present_y,present_z,restored_x,restored_y,restored_z,dilatation,max_shear,max_principal,bed_stretch,unit\n";
+    for (auto& sm : vr.samples)
+      if (sm.at_horizon)
+        t += fmt_fixed(sm.present.x, 2) + "," + fmt_fixed(sm.present.y, 2) + "," + fmt_fixed(sm.present.z, 2) + "," + fmt_fixed(sm.restored.x, 2) + "," +
+             fmt_fixed(sm.restored.y, 2) + "," + fmt_fixed(sm.restored.z, 2) + "," + fmt_fixed(sm.dilatation, 6) + "," + fmt_fixed(sm.max_shear, 6) + "," +
+             fmt_fixed(sm.max_abs, 6) + "," + fmt_fixed(sm.bed_stretch, 6) + "," + (sm.unit >= 0 && static_cast<std::size_t>(sm.unit) < units.size() ? units[static_cast<std::size_t>(sm.unit)].name : "") + "\n";
+    write_file(out_dir / "restoration_strain.csv", t);
+    o.log.value("restoration.volumetric", vr.ok ? "max strain " + fmt_fixed(vr.max_strain, 5) + ", flatness " + fmt_fixed(vr.flatness_rms, 3) + " m rms, " +
+                                                      std::to_string(vr.tetrahedra) + " tetrahedra, " + std::to_string(vr.cg_iterations) + " CG iterations"
+                                                : "not restored: " + vr.reason);
+  }
+  // stage 4B (section 4.4): tectonic subsidence at the wells (and maps with flexure)
+  if (d.backstripping.present)
+    if (auto* st = static_cast<const Structure*>(o.model->capability("structure")); st && st->compaction_mode() != 0) {
+      const BackstripSpec bs = backstrip_spec(d);
+      std::string t = "location,step,age_Ma,sediment_m,mean_density_kg_m3,water_depth_m,sea_level_m,tectonic_airy_m,tectonic_flexural_m\n";
+      BackstripMaps maps;
+      if (bs.te > 0) maps = backstrip_maps(*st, bs, o.model->info().domain, 32);
+      for (auto& w : make_well_paths(d))
+        for (auto& ts : backstrip_column(*st, bs, w.x(), w.y())) {
+          double fl = kNaN;
+          for (std::size_t q = 0; q < maps.labels.size(); ++q)
+            if (maps.labels[q] == ts.label) fl = backstrip_map_value(maps, maps.flexural[q], o.model->info().domain, w.x(), w.y());
+          t += w.name() + "," + ts.label + "," + (std::isfinite(ts.age) ? fmt_shortest(ts.age) : std::string()) + "," + fmt_fixed(ts.sediment, 2) + "," +
+               fmt_fixed(ts.density, 1) + "," + fmt_fixed(ts.water_depth, 2) + "," + fmt_fixed(ts.sea_level, 2) + "," + fmt_fixed(ts.airy, 2) + "," +
+               (std::isfinite(fl) ? fmt_fixed(fl, 2) : std::string()) + "\n";
+        }
+      write_file(out_dir / "tectonic_subsidence.csv", t);
+      if (!maps.labels.empty()) {
+        std::string mt = "step,x,y,tectonic_airy_m,tectonic_flexural_m\n";
+        const auto& dom = o.model->info().domain;
+        for (std::size_t q = 0; q < maps.labels.size(); ++q)
+          for (std::size_t j = 0; j < maps.n; ++j)
+            for (std::size_t i = 0; i < maps.n; ++i)
+              mt += maps.labels[q] + "," + fmt_fixed(dom.x0 + (i + 0.5) * dom.sx / maps.n, 1) + "," + fmt_fixed(dom.y0 + (j + 0.5) * dom.sy / maps.n, 1) + "," +
+                    fmt_fixed(maps.airy[q][j * maps.n + i], 2) + "," + fmt_fixed(maps.flexural[q][j * maps.n + i], 2) + "\n";
+        write_file(out_dir / "tectonic_subsidence_maps.csv", mt);
+      }
+    }
+  // stage 4B (section 4.5): eroded section at unconformities from porosity logs
+  if (!d.eroded_sections.empty()) {
+    std::string t = "name,well,unconformity,unconformity_depth_m,samples,eroded_m,residual_rms_m,vitrinite_estimate_m,note\n";
+    for (auto& e : d.eroded_sections) {
+      const desc::InputDesc* in = nullptr;
+      for (auto& x : d.inputs)
+        if (x.id == e.log) in = &x;
+      const desc::WellDesc* w = d.well(e.well);
+      if (!in || !w) continue;
+      const auto tab = io::read_csv(read_file(in->resolved));
+      const double zu = horizon_elevation(*o.model, d.horizon_index(e.unconformity), w->head.si(0), w->head.si(1));
+      const double du = -zu;  // depth of the unconformity below the datum (log depths are below the datum)
+      std::vector<std::pair<double, double>> log;
+      for (auto& row : tab.rows)
+        if (row.size() >= 2) {
+          const double z = std::stod(row[0]) - du, phi = std::stod(row[1]);
+          if (z > 0 && phi > 0) log.push_back({z, phi});
+        }
+      std::string note;
+      double est = kNaN, rms = kNaN;
+      if (log.empty() || !std::isfinite(du)) {
+        note = "no log samples below the unconformity";
+      } else {
+        const double phi0 = e.surface_porosity.si(), c = e.decay.si();
+        double sum = 0, ss = 0;
+        for (auto& [z, phi] : log) sum += -std::log(phi / phi0) / c - z;
+        const double raw = sum / static_cast<double>(log.size());
+        for (auto& [z, phi] : log) {
+          const double r = -std::log(phi / phi0) / c - z - raw;
+          ss += r * r;
+        }
+        rms = std::sqrt(ss / static_cast<double>(log.size()));
+        est = std::max(0.0, raw);
+        note = raw < 0 ? "underburied against the normal trend (" + fmt_fixed(raw, 1) + " m): reported as zero erosion" : "Magara (1976) shift of the normal trend";
+      }
+      t += e.name + "," + e.well + "," + e.unconformity + "," + fmt_fixed(du, 2) + "," + std::to_string(log.size()) + "," +
+           (std::isfinite(est) ? fmt_fixed(est, 1) : std::string()) + "," + (std::isfinite(rms) ? fmt_fixed(rms, 1) : std::string()) + "," +
+           (e.vitrinite_estimate.present ? fmt_fixed(e.vitrinite_estimate.si(), 1) : std::string()) + "," + note + "\n";
+      if (std::isfinite(est)) o.log.value("eroded_section." + e.name, fmt_fixed(est, 1) + " m (residual " + fmt_fixed(rms, 1) + " m rms)");
+    }
+    write_file(out_dir / "eroded_section.csv", t);
+  }
+  // stage 4B (sections 5 and 6): mechanics, fractures, heat and pressure
+  CheckContext::BasinResults basin;
+  std::vector<std::pair<std::string, Grid2D>> basin_maps;  // figures written after the checks
+  {
+    const Model& m = *o.model;
+    const auto& inf = m.info();
+    const auto wells = make_well_paths(d);
+    auto* st = static_cast<const Structure*>(m.capability("structure"));
+    const bool columns = st && st->compaction_mode() != 0;
+    auto unit_props = [&](ColumnProps& cp) {
+      const std::size_t nu = inf.units.size();
+      cp.conductivity.assign(nu, kNaN);
+      cp.heat_production.assign(nu, kNaN);
+      cp.perm_law.assign(nu, 0);
+      cp.k0.assign(nu, kNaN);
+      cp.b.assign(nu, kNaN);
+      cp.phi0.assign(nu, kNaN);
+      for (auto& u : d.heat.units) {
+        const int k = model_unit_of(d, m, u.unit);
+        if (k >= 0) { cp.conductivity[static_cast<std::size_t>(k)] = u.conductivity.si(); cp.heat_production[static_cast<std::size_t>(k)] = u.heat_production.si(); }
+      }
+      for (auto& u : d.pressure.units) {
+        const int k = model_unit_of(d, m, u.unit);
+        if (k < 0) continue;
+        cp.perm_law[static_cast<std::size_t>(k)] = u.law == "kozeny_carman" ? 2 : 1;
+        cp.k0[static_cast<std::size_t>(k)] = u.k0.si();
+        cp.b[static_cast<std::size_t>(k)] = u.b.present ? u.b.si() : kNaN;
+        cp.phi0[static_cast<std::size_t>(k)] = u.phi0.si();
+      }
+    };
+    const Domain& dom = inf.domain;
+    const std::size_t nm = 16;  // map columns per side
+    auto map_grid = [&]() { return Grid2D(GridSpec{dom.x0 + dom.sx / nm / 2, dom.y0 + dom.sy / nm / 2, dom.sx / nm, dom.sy / nm, nm, nm}); };
+    if (d.heat.present && columns) {
+      ThermalColumnSpec ts;
+      ts.t_surface = d.heat.surface_temperature.si();
+      ts.q_base = d.heat.basal_heat_flow.si();
+      for (auto& [a, q] : d.heat.history) ts.q_history.push_back({a.si(), q.si()});
+      ts.k_water = d.heat.water_conductivity.si();
+      if (d.heat.column_depth.present) ts.column_depth = d.heat.column_depth.si();
+      ts.vitrinite = d.heat.vitrinite;
+      unit_props(ts.props);
+      std::string t = "location,step,age_Ma,horizon,temperature_degC" + std::string(ts.vitrinite ? ",ro_percent" : "") + "\n";
+      std::string prof = "location,depth_m,temperature_degC\n";
+      for (auto& w : wells) {
+        auto th = thermal_history(*st, ts, w.x(), w.y());
+        basin.heat_balance.push_back({w.name(), th.balance_error});
+        for (std::size_t k = 0; k < th.labels.size(); ++k)
+          for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
+            if (!std::isfinite(th.temperature[k][h])) continue;
+            t += w.name() + "," + th.labels[k] + "," + (std::isfinite(th.ages[k]) ? fmt_shortest(th.ages[k]) : std::string()) + "," + inf.horizons[h].name + "," +
+                 fmt_fixed(th.temperature[k][h], 2) + (ts.vitrinite ? "," + (std::isfinite(th.ro[k][h]) ? fmt_fixed(th.ro[k][h], 3) : std::string()) : "") + "\n";
+          }
+        for (std::size_t i = 0; i < th.present_depth.size(); i += 4) prof += w.name() + "," + fmt_fixed(th.present_depth[i], 1) + "," + fmt_fixed(th.present_temperature[i], 2) + "\n";
+        o.log.value("heat." + w.name() + ".surface_heat_flow_mW_m2", fmt_fixed(1e3 * th.surface_flow_present, 2));
+      }
+      write_file(out_dir / "temperature_history.csv", t);
+      write_file(out_dir / "temperature_profile.csv", prof);
+      // present temperature (and %Ro) at each horizon on a coarse map
+      std::vector<Grid2D> gt(inf.horizons.size(), map_grid()), gr(inf.horizons.size(), map_grid());
+      std::vector<ThermalHistory> cols(nm * nm);
+      parallel_for(nm * nm, 4, [&](std::size_t a0, std::size_t a1) {
+        for (std::size_t q = a0; q < a1; ++q) cols[q] = thermal_history(*st, ts, gt[0].spec.x(q % nm), gt[0].spec.y(q / nm));
+      });
+      for (std::size_t q = 0; q < nm * nm; ++q)
+        for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
+          const auto& c = cols[q];
+          gt[h].v[q] = c.temperature.empty() ? kNaN : c.temperature.back()[h];
+          gr[h].v[q] = c.ro.empty() ? kNaN : c.ro.back()[h];
+        }
+      for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
+        basin_maps.push_back({"temperature:" + inf.horizons[h].name, gt[h]});
+        if (ts.vitrinite) basin_maps.push_back({"ro:" + inf.horizons[h].name, gr[h]});
+      }
+    }
+    if (d.pressure.present && columns) {
+      PressureColumnSpec ps;
+      ps.viscosity = d.pressure.viscosity.si();
+      ps.rho_w = d.pressure.rho_water.si();
+      ps.rho_g = d.pressure.rho_grain.si();
+      unit_props(ps.props);
+      std::string t = "location,step,age_Ma,horizon,overpressure_MPa\n", prof = "location,depth_m,pore_MPa,hydrostatic_MPa,lithostatic_MPa\n";
+      for (auto& w : wells) {
+        auto ph = pressure_history(*st, ps, w.x(), w.y());
+        for (std::size_t k = 0; k < ph.labels.size(); ++k)
+          for (std::size_t h = 0; h < inf.horizons.size(); ++h)
+            if (std::isfinite(ph.overpressure[k][h]))
+              t += w.name() + "," + ph.labels[k] + "," + (std::isfinite(ph.ages[k]) ? fmt_shortest(ph.ages[k]) : std::string()) + "," + inf.horizons[h].name + "," +
+                   fmt_fixed(ph.overpressure[k][h] / 1e6, 4) + "\n";
+        CheckContext::BasinResults::Bounds b;
+        b.location = w.name();
+        for (std::size_t i = 0; i < ph.present_depth.size(); ++i) {
+          const double p = ph.present_pore[i], hy = ph.present_hydrostatic[i], li = ph.present_lithostatic[i];
+          if (p < hy - 1e3) { ++b.below; b.worst = std::max(b.worst, hy - p); }
+          if (i > 0 && p > li + 1e3) { ++b.above; b.worst = std::max(b.worst, p - li); }
+          if (i % 4 == 0)
+            prof += w.name() + "," + fmt_fixed(ph.present_depth[i], 1) + "," + fmt_fixed(p / 1e6, 4) + "," + fmt_fixed(hy / 1e6, 4) + "," + fmt_fixed(li / 1e6, 4) + "\n";
+        }
+        basin.pressure.push_back(b);
+      }
+      write_file(out_dir / "pressure_history.csv", t);
+      write_file(out_dir / "pressure_profile.csv", prof);
+      std::vector<Grid2D> gp(inf.horizons.size(), map_grid());
+      std::vector<PressureHistory> cols(nm * nm);
+      parallel_for(nm * nm, 4, [&](std::size_t a0, std::size_t a1) {
+        for (std::size_t q = a0; q < a1; ++q) cols[q] = pressure_history(*st, ps, gp[0].spec.x(q % nm), gp[0].spec.y(q / nm));
+      });
+      for (std::size_t q = 0; q < nm * nm; ++q)
+        for (std::size_t h = 0; h < inf.horizons.size(); ++h) gp[h].v[q] = cols[q].overpressure.empty() ? kNaN : cols[q].overpressure.back()[h] / 1e6;
+      for (std::size_t h = 0; h < inf.horizons.size(); ++h) basin_maps.push_back({"overpressure:" + inf.horizons[h].name, gp[h]});
+    }
+    // stress along the wells with the mechanical stratigraphy (stage 4B, I-033)
+    if (d.mechanics.present && d.stress.present) {
+      const auto sin = stress_input(d, m);
+      std::string t = "location,depth_m,unit,sigma_v_MPa,pore_MPa,sigma_h_MPa,sigma_H_MPa\n";
+      for (auto& w : wells)
+        for (double z = 50; z < -dom.z_base; z += 50) {
+          const int u = m.unit_at({w.x(), w.y(), -z});
+          double S6[6], pp;
+          repr::stress_at(sin, u, z, S6, pp);
+          const double a = 0.5 * (S6[0] + S6[1]), r = std::sqrt(0.25 * (S6[0] - S6[1]) * (S6[0] - S6[1]) + S6[3] * S6[3]);
+          t += w.name() + "," + fmt_fixed(z, 1) + "," + (u >= 0 && static_cast<std::size_t>(u) < inf.units.size() ? inf.units[static_cast<std::size_t>(u)].name : "") + "," +
+               fmt_fixed(S6[2] / 1e6, 3) + "," + fmt_fixed(pp / 1e6, 3) + "," + fmt_fixed((a - r) / 1e6, 3) + "," + fmt_fixed((a + r) / 1e6, 3) + "\n";
+        }
+      write_file(out_dir / "stress_profile.csv", t);
+    }
+    // fracture intensity per unit from the curvature of its top horizon, and the network
+    if (d.fractures.present) {
+      const std::size_t nf = 60;
+      GridSpec gs{dom.x0 + dom.sx / nf / 2, dom.y0 + dom.sy / nf / 2, dom.sx / nf, dom.sy / nf, nf, nf};
+      std::string t = "unit,x,y,kmax_abs_1_per_m,p32_1_per_m\n";
+      for (auto& fu : d.fractures.units) {
+        const int ui = d.unit_index(fu.unit);
+        if (ui < 0) continue;
+        const int h = d.horizon_index(d.units[static_cast<std::size_t>(ui)].top);
+        if (h < 0) continue;
+        const auto cg = repr::curvature(m, h, gs, 0.0);
+        FractureLaw law{fu.p32_0.si(), fu.a_k.si(), fu.a_e.present ? fu.a_e.si() : 0.0, fu.p32_max.si()};
+        Grid2D g(gs);
+        double sum = 0;
+        std::size_t cnt = 0;
+        for (std::size_t q = 0; q < g.v.size(); ++q) {
+          const double k1 = cg.kmax.v[q], k2 = cg.kmin.v[q];
+          if (!std::isfinite(k1) || !std::isfinite(k2)) { g.v[q] = kNaN; continue; }  // missing: no curvature here
+          const double k = std::max(std::fabs(k1), std::fabs(k2));
+          g.v[q] = fracture_intensity(k, 0.0, law);
+          t += fu.unit + "," + fmt_fixed(gs.x(q % nf), 1) + "," + fmt_fixed(gs.y(q / nf), 1) + "," + fmt_fixed(k, 8) + "," + fmt_fixed(g.v[q], 5) + "\n";
+          if (d.fractures.dfn.present && fu.unit == d.fractures.dfn.unit) {
+            const auto& A = d.fractures.dfn.area;
+            const double x = gs.x(q % nf), y = gs.y(q / nf);
+            if (x >= A.si(0) && x <= A.si(2) && y >= A.si(1) && y <= A.si(3)) { sum += g.v[q]; ++cnt; }
+          }
+        }
+        basin_maps.push_back({"p32:" + fu.unit, g});
+        if (d.fractures.dfn.present && fu.unit == d.fractures.dfn.unit) {
+          const auto& N = d.fractures.dfn;
+          basin.dfn = true;
+          basin.dfn_unit = fu.unit;
+          basin.dfn_target = cnt ? sum / static_cast<double>(cnt) : 0.0;
+          const double cx = 0.5 * (N.area.si(0) + N.area.si(2)), cy = 0.5 * (N.area.si(1) + N.area.si(3));
+          const double zt = horizon_elevation(m, h, cx, cy), zb = horizon_elevation(m, d.horizon_index(d.units[static_cast<std::size_t>(ui)].base), cx, cy);
+          BBox box;
+          box.add({N.area.si(0), N.area.si(1), zb});
+          box.add({N.area.si(2), N.area.si(3), zt});
+          std::vector<FractureSet> sets;
+          for (auto& s : N.sets) {
+            const double tr = s.pole.si(0), pl = s.pole.si(1);
+            FractureSet fs;
+            fs.mean_pole = {std::sin(tr) * std::cos(pl), std::cos(tr) * std::cos(pl), -std::sin(pl)};
+            fs.kappa = s.kappa.si();
+            fs.exponent = s.exponent.si();
+            fs.rmin = s.rmin.si();
+            fs.rmax = s.rmax.si();
+            fs.weight = s.weight.si();
+            sets.push_back(fs);
+          }
+          if (!std::isfinite(zt) || !std::isfinite(zb) || !(zt > zb)) {
+            basin.dfn_reason = "the unit has no thickness at the area's centre";
+          } else {
+            const auto lim = N.limit.present ? static_cast<std::size_t>(N.limit.si()) : std::size_t{1000000};
+            auto r = sample_dfn(box, basin.dfn_target, sets, static_cast<std::uint64_t>(N.seed.si()), lim);
+            basin.dfn_ok = r.ok;
+            basin.dfn_reason = r.reason;
+            if (r.ok) {
+              basin.dfn_count = r.disks.size();
+              basin.dfn_realised = realised_p32(r.disks, box);
+              std::string dt = "x,y,z,normal_x,normal_y,normal_z,radius_m,set\n";
+              for (auto& dk : r.disks)
+                dt += fmt_fixed(dk.c.x, 2) + "," + fmt_fixed(dk.c.y, 2) + "," + fmt_fixed(dk.c.z, 2) + "," + fmt_fixed(dk.n.x, 5) + "," + fmt_fixed(dk.n.y, 5) + "," +
+                      fmt_fixed(dk.n.z, 5) + "," + fmt_fixed(dk.r, 3) + "," + N.sets[static_cast<std::size_t>(dk.set)].name + "\n";
+              write_file(out_dir / "dfn_disks.csv", dt);
+            }
+          }
+        }
+      }
+      write_file(out_dir / "fracture_intensity.csv", t);
+    }
+    if (!basin.heat_balance.empty() || !basin.pressure.empty() || basin.dfn) ctx.basin = &basin;
+  }
   CheckReport rep = run_checks(ctx);
   o.checks_passed = rep.passed();
   write_file(out_dir / "topology.json", ctx.contact_graph().json());  // stage 4A (STX-TN-14 section 6)
@@ -886,6 +1264,57 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     if (opt.figures && !d.events.empty()) write_restoration(d, *o.model, out_dir / "restoration");
     if (opt.figures) write_data_figures(d, *o.model, keys, out_dir / "figures");
     if (opt.figures && !pf.stations.empty()) write_geophysics_figures(d, *o.model, keys, pf, out_dir / "figures");
+    if (opt.figures && !basin_maps.empty()) {
+      // stage 4B: present temperature, %Ro, overpressure per horizon and fracture intensity per unit
+      auto c = figure_context(d, *o.model, keys);
+      for (auto& [key, g] : basin_maps) {
+        const auto colon = key.find(':');
+        const std::string kind = key.substr(0, colon), name = key.substr(colon + 1);
+        double vmin = 1e300, vmax = -1e300;
+        for (double v : g.v)
+          if (std::isfinite(v)) { vmin = std::min(vmin, v); vmax = std::max(vmax, v); }
+        if (vmin > vmax) continue;
+        const std::string what = kind == "temperature" ? "present temperature at " + name : kind == "ro" ? "vitrinite reflectance (EASY%Ro) at " + name
+                                 : kind == "overpressure" ? "present overpressure at " + name : "fracture intensity P32 of " + name;
+        const std::string bar = kind == "temperature" ? "Temperature (degC)" : kind == "ro" ? "%Ro" : kind == "overpressure" ? "Overpressure (MPa)" : "P32 (1/m)";
+        const std::string sub = kind == "p32" ? "From the maximum absolute principal curvature of the unit's top horizon by the stated fracture law; grey where it is missing"
+                                              : "1D columns through the burial history on a " + std::to_string(g.spec.nx) + " x " + std::to_string(g.spec.ny) + " map";
+        fig::write_figure(fig::scalar_map_figure(c, what, sub, bar, g, vmin, vmax), out_dir / "figures", fig::figure_basename(c, kind + "_map", name),
+                          c.model_name + " - " + what, what + ".", "Properties as stated in the description.");
+      }
+    }
+    if (opt.figures && vr.ok) {
+      // stage 4B: strain maps of the restored horizon (by present map position)
+      auto c = figure_context(d, *o.model, keys);
+      const auto& dom = o.model->info().domain;
+      // one map cell per mesh cell, so every cell holds the tetrahedra the horizon crosses there
+      const std::size_t n = std::clamp<std::size_t>(static_cast<std::size_t>(std::llround(std::max(dom.sx, dom.sy) / std::max(1.0, vr.mesh_spacing))), 8, 200);
+      for (int kind = 0; kind < 2; ++kind) {
+        Grid2D g(GridSpec{dom.x0 + dom.sx / n / 2, dom.y0 + dom.sy / n / 2, dom.sx / n, dom.sy / n, n, n});
+        std::vector<double> sum(n * n, 0.0), cnt(n * n, 0.0);
+        double vmin = 1e300, vmax = -1e300;
+        for (auto& sm : vr.samples) {
+          if (!sm.at_horizon) continue;
+          const auto i = static_cast<std::size_t>(std::clamp((sm.present.x - dom.x0) / dom.sx * n, 0.0, n - 1.0));
+          const auto j = static_cast<std::size_t>(std::clamp((sm.present.y - dom.y0) / dom.sy * n, 0.0, n - 1.0));
+          const double v = kind == 0 ? sm.max_shear : sm.dilatation;
+          sum[j * n + i] += v;
+          cnt[j * n + i] += 1;
+        }
+        for (std::size_t q = 0; q < n * n; ++q) {
+          g.v[q] = cnt[q] > 0 ? sum[q] / cnt[q] : kNaN;
+          if (cnt[q] > 0) { vmin = std::min(vmin, g.v[q]); vmax = std::max(vmax, g.v[q]); }
+        }
+        const std::string what = kind == 0 ? "maximum shear" : "dilatation";
+        fig::write_figure(fig::scalar_map_figure(c, "restoration strain of " + d.restoration.horizon + ": " + what,
+                                                 "Volumetric restoration to " + fmt_fixed(d.restoration.datum.si(), 0) + " m depth (linear elasticity, faults sliding); "
+                                                 "Green-Lagrange strain of the tetrahedra the horizon crosses, mean per cell",
+                                                 kind == 0 ? "Maximum shear" : "Dilatation", g, vmin, vmax),
+                          out_dir / "figures", fig::figure_basename(c, "restoration_strain", d.restoration.horizon + (kind == 0 ? "_shear" : "_dilatation")),
+                          c.model_name + " - restoration strain (" + what + ")", "Strain of the volumetric restoration at the restored horizon.",
+                          "Elastic properties as stated in the description; strain is reported, never hidden.");
+      }
+    }
     if (gp) write_grid_outputs(d, *o.model, *gp, keys, out_dir, opt.figures);
     auto ids = resolve_export_ids(d, opt.exports);
     if (!ids.empty()) write_exports(d, *o.model, ids, out_dir / "exports", 0, gp);

@@ -1,0 +1,115 @@
+# Stage 4B example (STX-TN-15 section 4): restoration and basin analysis on the compaction drape of
+# worked example 19, cut by a normal fault.
+# - Compaction in each fault block at its own maximum burial (I-029): the hanging wall compacts more.
+# - Volumetric restoration of H2 to 1400 m: linear elasticity, the fault sliding, strain reported (C31).
+# - Flexural backstripping (Te 10 km) of the burial history: tectonic subsidence at the wells.
+# - The section eroded at H1, from a porosity log at W1 against the shale trend (700 m in the log).
+# DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+inputs:
+  - {id: w1_porosity, path: data/restoration_backstripping/w1_porosity.csv, role: porosity log, sharing: shareable, source: "shale trend with 700 m removed (tools/make_restoration_example.py, no noise)", evidence: interpreted}
+model: {name: restoration_and_backstripping, version: "1.0.0", status: DESIGN,
+        title: "Restoration, compaction across a fault and backstripping"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[800, 800] m | user_instruction | worked example: control well, off the high"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1400 m | user_instruction | worked example"
+      H3: "1800 m | user_instruction | worked example"
+      B:  "2200 m | user_instruction | worked example"
+      B2: "2600 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[5000, 5000] m | user_instruction | worked example: planned well on the crest of the high"
+    total_depth: "2800 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons:
+    - {name: H1, intended_offset: true, age: "5 Ma | user_instruction | worked example"}
+    - {name: H2, age: "20 Ma | user_instruction | worked example"}
+    - {name: H3, age: "40 Ma | user_instruction | worked example"}
+    - {name: B,  age: "60 Ma | user_instruction | worked example"}
+    - {name: B2, intended_offset: true, age: "80 Ma | user_instruction | worked example"}
+  units:
+    - {name: Shale_upper, top: H1, base: H2}
+    - {name: Sand, top: H2, base: H3}
+    - {name: Shale_lower, top: H3, base: B}
+    - {name: Basement, top: B, base: B2}
+  series:
+    - {name: Basin_fill, horizons: [H1, H2, H3], base: onlap}
+    - {name: Basement_series, horizons: [B, B2], base: conformable}
+  compaction:
+    geometry: depositional
+    surface_depth: "100 m | user_instruction | worked example: water depth"
+    units:
+      - {unit: Shale_upper, law: exponential, surface_porosity: "0.63 fraction | literature_derived | Sclater and Christie (1980), Table 2, shale", decay: "0.51 1/km | literature_derived | Sclater and Christie (1980), Table 2, shale"}
+      - {unit: Sand, law: exponential, surface_porosity: "0.49 fraction | literature_derived | Sclater and Christie (1980), Table 2, sandstone", decay: "0.27 1/km | literature_derived | Sclater and Christie (1980), Table 2, sandstone"}
+      - {unit: Shale_lower, law: exponential, surface_porosity: "0.63 fraction | literature_derived | Sclater and Christie (1980), Table 2, shale", decay: "0.51 1/km | literature_derived | Sclater and Christie (1980), Table 2, shale"}
+structure:
+  regional: {type: flat}
+  primitives:
+    - {type: dome, name: High, series: Basement_series, crest: "[5000, 5000] m | user_instruction | worked example", radius_major: "3000 m | user_instruction | worked example", relief: {B: "600 m | user_instruction | worked example"}}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example: active during burial"
+    geometry:
+      type: planar
+      reference_point: "[7000, 5000] m | user_instruction | worked example"
+      reference_depth: "1600 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: dips east"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "30000 m | user_instruction | worked example: longer than the model"
+    throw:
+      max: "150 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.1 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+frame: {fixed: {well: W1}}
+restoration:
+  bed_length_limit: "0.08 fraction | user_instruction | worked example: the drape over the high is doubly curved and cannot flatten without stretch (about 6 % at the crest)"
+  volumetric:
+    horizon: H2
+    datum: "1400 m | user_instruction | worked example: H2 restored flat at its depth at W1"
+    pin: "[800, 800] m | user_instruction | worked example: at the control well"
+    young: "10 GPa | literature_derived | shale and sandstone, order of magnitude (Mavko et al. 2009)"
+    poisson: "0.25 ratio | literature_derived | Mavko et al. (2009)"
+    max_strain: "0.1 fraction | user_instruction | worked example"
+backstripping:
+  basement: B
+  mantle_density: "3300 kg/m3 | literature_derived | Allen and Allen (2013)"
+  water_density: "1030 kg/m3 | literature_derived | sea water"
+  grain_density: "2650 kg/m3 | literature_derived | quartz"
+  te: "10 km | assumed | worked example: effective elastic thickness"
+  young: "70 GPa | literature_derived | Watts (2001)"
+  poisson: "0.25 ratio | literature_derived | Watts (2001)"
+  steps:
+    - {horizon: H3, water_depth: "300 m | assumed | worked example: paleo-water depth"}
+    - {horizon: H2, water_depth: "200 m | assumed | worked example"}
+    - {horizon: H1, water_depth: "100 m | assumed | worked example"}
+    - {horizon: present, water_depth: "100 m | user_instruction | worked example: present water depth"}
+eroded_section:
+  - name: H1_unconformity
+    well: W1
+    unconformity: H1
+    log: w1_porosity
+    surface_porosity: "0.63 fraction | literature_derived | Sclater and Christie (1980), Table 2, shale"
+    decay: "0.51 1/km | literature_derived | Sclater and Christie (1980), Table 2, shale"
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[200, 5000], [9800, 5000]] m | user_instruction | worked example: across the high"
+  isopachs: [Shale_upper, Sand]
+  vertical_exaggeration: "3 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv]

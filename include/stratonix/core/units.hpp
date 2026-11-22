@@ -9,7 +9,9 @@ namespace stratonix {
 
 /// Physical dimension of a parameter.
 enum class Dimension { Length, Angle, Dimensionless, Ordinal, Flag, Area, InverseLength, Time, Pressure, PressureGradient, Permeability,
-                       Density, Acceleration, MagneticField, Any };  ///< stage 4A: kg/m3, mGal, nT
+                       Density, Acceleration, MagneticField,  ///< stage 4A: kg/m3, mGal, nT
+                       Temperature, ThermalConductivity, HeatFlow, HeatProduction, Viscosity,  ///< stage 4B: degC, W/m/K, mW/m2, uW/m3, mPa.s
+                       Any };
 
 struct UnitDef {
   std::string_view name;

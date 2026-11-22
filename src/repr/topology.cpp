@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <map>
 #include <set>
 #include <sstream>
@@ -85,6 +86,7 @@ ContactGraph contact_graph(const Model& m, double spacing) {
   for (std::size_t id = 0; id < N; ++id) ++cells[{block[id], unit[id]}];
   ContactGraph g;
   g.spacing = spacing;
+  const auto* cq = static_cast<const ColumnQuery*>(m.capability("column"));
   for (auto& u : inf.units) g.unit_names.push_back(u.name);
   std::map<std::pair<BlockCode, int>, int> index;
   for (auto& [key, n] : cells) {
@@ -153,14 +155,51 @@ ContactGraph contact_graph(const Model& m, double spacing) {
       for (int k = 0; k <= ns; ++k) s.push_back(P + (Q - P) * (static_cast<double>(k) / ns));
       EvalResult er;
       m.evaluate(s, kEvalUnit | kEvalBlock, er);
-      BlockCode pb = er.block[0];
-      int pu = er.unit[0];
-      for (int k = 1; k <= ns; ++k) {
-        if (er.unit[static_cast<std::size_t>(k)] == pu && er.block[static_cast<std::size_t>(k)] == pb) continue;
-        add(pb, pu, er.block[static_cast<std::size_t>(k)], er.unit[static_cast<std::size_t>(k)], a);
-        pu = er.unit[static_cast<std::size_t>(k)];
-        pb = er.block[static_cast<std::size_t>(k)];
-      }
+      // between two samples that still skip a unit (one thinner than the sample step), bisect down
+      // to 5 cm so every unit crossed is found in order
+      std::function<void(const Vec3&, BlockCode, int, const Vec3&, BlockCode, int)> walk =
+          [&](const Vec3& A, BlockCode ab, int au, const Vec3& B, BlockCode bb, int bu) {
+            if (au == bu && ab == bb) return;
+            if (ab != bb || std::abs(au - bu) <= 1 || norm(B - A) < 0.5) { add(ab, au, bb, bu, a); return; }
+            // with a restored column: the units between are present there (thicker than 1 cm) or not;
+            // present ones are merely thinner than the sample step - their contacts are adjacent ones
+            const int nst = static_cast<int>(inf.horizons.size()) + 1;
+            if (cq && au >= 0 && bu >= 0 && au < nst && bu < nst) {
+              const Vec3 M = (A + B) * 0.5;
+              Vec3 r;
+              m.restore(std::span<const Vec3>(&M, 1), std::span<Vec3>(&r, 1));
+              std::vector<double> e(inf.horizons.size());
+              cq->column(r.x, r.y, e.data());
+              const int lo = std::min(au, bu), hi = std::max(au, bu), dir = au < bu ? 1 : -1;
+              int prev = au;
+              for (int u = au + dir; u != bu; u += dir) {
+                if (u <= lo || u >= hi) continue;
+                const double th = e[static_cast<std::size_t>(u) - 1] - e[static_cast<std::size_t>(u)];
+                if (th > 0.01) { add(ab, prev, ab, u, a); prev = u; }
+              }
+              add(ab, prev, bb, bu, a);
+              return;
+            }
+            // 15 interior samples in one batch, then the same between each consecutive pair
+            const int nsub = 16;
+            std::vector<Vec3> q;
+            for (int t = 1; t < nsub; ++t) q.push_back(A + (B - A) * (static_cast<double>(t) / nsub));
+            EvalResult em;
+            m.evaluate(q, kEvalUnit | kEvalBlock, em);
+            Vec3 pa = A;
+            BlockCode pbb = ab;
+            int puu = au;
+            for (std::size_t t = 0; t < q.size(); ++t) {
+              walk(pa, pbb, puu, q[t], em.block[t], em.unit[t]);
+              pa = q[t];
+              pbb = em.block[t];
+              puu = em.unit[t];
+            }
+            walk(pa, pbb, puu, B, bb, bu);
+          };
+      for (int k = 1; k <= ns; ++k)
+        walk(s[static_cast<std::size_t>(k - 1)], er.block[static_cast<std::size_t>(k - 1)], er.unit[static_cast<std::size_t>(k - 1)],
+             s[static_cast<std::size_t>(k)], er.block[static_cast<std::size_t>(k)], er.unit[static_cast<std::size_t>(k)]);
       return;
     }
     add(block[p], unit[p], block[q], unit[q], a);

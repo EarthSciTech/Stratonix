@@ -243,6 +243,7 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
   // Compaction (STX-TN-08 section 3).
   if (d.compaction.present()) {
     comp_mode_ = d.compaction.geometry == "depositional" ? 2 : 1;
+    burial_block_ = d.compaction.burial != "restored";
     surface_depth_ = d.compaction.surface_depth.si();
     for (auto& cu : d.compaction.units) {
       const auto& ud = d.units[static_cast<std::size_t>(d.unit_index(cu.unit))];

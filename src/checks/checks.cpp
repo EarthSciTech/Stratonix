@@ -13,6 +13,7 @@
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/bodies.hpp"
 #include "stratonix/engines/depositional.hpp"
+#include "stratonix/engines/restoration3d.hpp"
 #include "stratonix/engines/conditioning.hpp"
 #include "stratonix/engines/posterior.hpp"
 #include "stratonix/engines/history.hpp"
@@ -1077,7 +1078,7 @@ std::vector<std::vector<repr::FaultRockPoint>> fault_rock_nodes(CheckContext& c,
   std::vector<std::vector<repr::FaultRockPoint>> out;
   const auto& d = c.description();
   const auto in = fault_rock_input(d, c.model());
-  const auto st = stress_input(d);
+  const auto st = stress_input(d, c.model());
   const double spacing = std::max(c.model().info().domain.spacing * 2, 50.0);
   for (std::size_t f = 0; f < c.model().info().faults.size(); ++f) {
     auto fs = repr::fault_surface(c.model(), static_cast<int>(f), spacing);
@@ -1104,7 +1105,7 @@ class C19 final : public Check {
       r.unit = "fraction";
       r.value = n ? static_cast<double>(bad) / static_cast<double>(n) : 0.0;
       r.tolerance = 0;
-      r.tolerance_source = "STX-TN-10 section 6 (exact)";
+      r.tolerance_source = "Stratonix rule (exact)";
       r.passed = bad == 0;
       r.detail = std::to_string(n) + " nodes; " + std::to_string(bad) + " disagree";
       out.push_back(r);
@@ -1135,7 +1136,7 @@ class C20 final : public Check {
       r.unit = "count";
       r.value = static_cast<double>(bad);
       r.tolerance = 0;
-      r.tolerance_source = "STX-TN-10 section 6 (by definition)";
+      r.tolerance_source = "Stratonix rule: bounded by definition";
       r.passed = bad == 0;
       r.detail = std::to_string(n) + " nodes; largest Ts / Ts_max " + fmt_fixed(worst, 3);
       out.push_back(r);
@@ -1336,6 +1337,130 @@ class C30 final : public Check {
   }
 };
 
+/// C31: restoration strain and bed length (STX-TN-15 section 4). The volumetric restoration's
+/// largest strain and the restored horizon's largest in-plane stretch against their limits; and,
+/// in models with fault-parallel flow or a restoration block, the bed length of every horizon along
+/// every section, present against restored (I-026).
+class C31 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const auto& d = c.description();
+    const double blim = d.restoration.bed_length_limit.present ? d.restoration.bed_length_limit.si() : 0.05;
+    const std::string bsrc = d.restoration.bed_length_limit.present ? "restoration.bed_length_limit" : "Stratonix default (5 %)";
+    if (const VolumetricResult* v = c.volumetric) {
+      const double lim = d.restoration.max_strain.present ? d.restoration.max_strain.si() : 0.1;
+      auto r = base(c, "C31", "restoration strain", d.restoration.horizon + " to its datum (volumetric)");
+      r.unit = "fraction";
+      r.value = v->max_strain;
+      r.tolerance = lim;
+      r.tolerance_source = d.restoration.max_strain.present ? "restoration.volumetric.max_strain" : "Stratonix default (10 %)";
+      r.passed = v->ok && v->max_strain <= lim;
+      r.detail = v->ok ? "Green-Lagrange, largest principal; mean " + fmt_fixed(v->mean_strain, 5) + "; restored horizon flat within " +
+                             fmt_fixed(v->flatness_rms, 3) + " m rms; " + std::to_string(v->tetrahedra) + " tetrahedra, " +
+                             std::to_string(v->fault_contacts) + " fault contacts"
+                       : "not restored: " + v->reason;
+      out.push_back(r);
+      if (v->ok) {
+        auto b = base(c, "C31", "restored bed length", d.restoration.horizon + " (volumetric)");
+        b.unit = "fraction";
+        b.value = v->horizon_stretch_max;
+        b.tolerance = blim;
+        b.tolerance_source = bsrc;
+        b.passed = v->horizon_stretch_max <= blim;
+        b.detail = "largest in-plane stretch of the restored horizon, present against restored";
+        out.push_back(b);
+      }
+    }
+    // bed length along sections (fault-parallel flow, I-026, or any restoration block)
+    bool fpf = false;
+    if (auto* net = static_cast<const FaultNetwork*>(c.model().capability("faults")))
+      for (auto& f : net->faults()) fpf = fpf || (f.curved && f.curved->fpf);
+    if (!fpf && !d.restoration.present) return out;
+    const auto& inf = c.model().info();
+    for (auto& sd : d.sections) {
+      if (!sd.polyline.present || sd.polyline.rows() < 2) continue;
+      Polyline pl;
+      for (std::size_t q = 0; q < sd.polyline.rows(); ++q) pl.push_back({sd.polyline.si(2 * q), sd.polyline.si(2 * q + 1), 0});
+      auto s = repr::make_section(c.model(), sd.name, pl, std::max(5.0, c.fault_spacing() / 4), 2.0);
+      double worst = 0;
+      std::string hn;
+      for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
+        double present = 0, restored = 0;
+        for (auto& seg : repr::horizon_segments(c.model(), s, static_cast<int>(h))) {
+          if (seg.size() < 2) continue;
+          std::vector<Vec3> r(seg.size());
+          c.model().restore(seg, r);
+          for (std::size_t q = 1; q < seg.size(); ++q) {
+            present += norm(seg[q] - seg[q - 1]);
+            restored += norm(r[q] - r[q - 1]);
+          }
+        }
+        if (!(restored > 0)) continue;
+        const double ch = present / restored - 1;
+        if (std::fabs(ch) > std::fabs(worst)) { worst = ch; hn = inf.horizons[h].name; }
+      }
+      if (hn.empty()) continue;
+      auto r = base(c, "C31", "bed length along a section", sd.name);
+      r.unit = "fraction";
+      r.value = std::fabs(worst);
+      r.tolerance = blim;
+      r.tolerance_source = bsrc;
+      r.passed = std::fabs(worst) <= blim;
+      r.detail = "largest change, present against restored: " + fmt_fixed(100 * worst, 3) + " % at " + hn + (fpf ? " (fault-parallel flow)" : "");
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
+/// C32 heat balance, C33 pressure bounds, C34 fracture network (STX-TN-15 sections 5 and 6).
+class C32 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    if (!c.basin) return out;
+    for (auto& [loc, err] : c.basin->heat_balance) {
+      auto r = base(c, "C32", "heat balance", loc);
+      r.unit = "fraction";
+      r.value = err;
+      r.tolerance = 0.01;
+      r.tolerance_source = "Stratonix rule: in steady state the surface heat flow is the basal flow plus the radiogenic heat (1 %)";
+      r.passed = err <= 0.01;
+      r.detail = "present column in steady state, finite volumes";
+      out.push_back(r);
+    }
+    for (auto& b : c.basin->pressure) {
+      auto r = base(c, "C33", "pore pressure between hydrostatic and lithostatic", b.location);
+      r.unit = "MPa";
+      r.value = b.worst / 1e6;
+      r.tolerance = 0;
+      r.tolerance_source = "Stratonix rule: hydrostatic <= pore pressure <= lithostatic";
+      r.passed = b.below == 0 && b.above == 0;
+      r.detail = b.below + b.above == 0 ? "present profile within its bounds"
+                                         : std::to_string(b.below) + " nodes below hydrostatic, " + std::to_string(b.above) +
+                                               " above lithostatic: inputs the model cannot honour";
+      out.push_back(r);
+    }
+    if (c.basin->dfn) {
+      auto r = base(c, "C34", "fracture network", c.basin->dfn_unit);
+      r.unit = "fraction";
+      r.tolerance = 0.1;
+      r.tolerance_source = "Stratonix rule: realised P32 within 10 % of the target (warning)";
+      if (!c.basin->dfn_ok) {
+        r.passed = false;
+        r.detail = "not sampled: " + c.basin->dfn_reason;
+      } else {
+        r.value = c.basin->dfn_target > 0 ? std::fabs(c.basin->dfn_realised / c.basin->dfn_target - 1) : 0.0;
+        r.warn_only = true;
+        r.passed = r.value <= 0.1;
+        r.detail = std::to_string(c.basin->dfn_count) + " disks; realised P32 " + fmt_fixed(c.basin->dfn_realised, 4) + " 1/m against " +
+                   fmt_fixed(c.basin->dfn_target, 4) + " 1/m";
+      }
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 /// C29: potential-field misfit (STX-TN-14 section 7): reduced chi-square of the stations reported;
 /// a warning above 2.
 class C29 final : public Check {
@@ -1438,6 +1563,10 @@ STRATONIX_REGISTER(check_c27, registry::Kind::Check, "C27_watertight", "1.0.0", 
                    [] { return std::make_unique<C27>(); })
 STRATONIX_REGISTER(check_c30, registry::Kind::Check, "C30_bodies", "1.0.0", "Bodies: positive volume, emplacement age, thin bodies reported",
                    [] { return std::make_unique<C30>(); })
+STRATONIX_REGISTER(check_c32, registry::Kind::Check, "C32_basin", "1.0.0", "Heat balance, pore-pressure bounds and fracture-network intensity",
+                   [] { return std::make_unique<C32>(); })
+STRATONIX_REGISTER(check_c31, registry::Kind::Check, "C31_restoration", "1.0.0", "Restoration strain and bed length within their limits",
+                   [] { return std::make_unique<C31>(); })
 STRATONIX_REGISTER(check_c29, registry::Kind::Check, "C29_potential_fields", "1.0.0", "Potential-field misfit: reduced chi-square of the stations (warning above 2)",
                    [] { return std::make_unique<C29>(); })
 STRATONIX_REGISTER(check_c28, registry::Kind::Check, "C28_posterior", "1.0.0", "Posterior converged: split R-hat below 1.01, effective sample size at least 100",
@@ -1619,6 +1748,24 @@ GridProducts make_grid_products(const desc::Description& d, const Model& m) {
   for (auto& f : m.info().faults) gp.fault_names.push_back(f.name);
   return gp;
 }
+repr::StressInput stress_input(const desc::Description& d, const Model& m) {
+  repr::StressInput s = stress_input(d);
+  if (!s.present || !d.mechanics.present) return s;
+  // stage 4B: mechanical stratigraphy per model unit
+  s.lateral = true;
+  s.unit_mech.assign(m.info().units.size(), {kNaN, kNaN, kNaN});
+  for (auto& u : d.mechanics.units) {
+    const int k = model_unit_of(d, m, u.unit);
+    if (k >= 0) s.unit_mech[static_cast<std::size_t>(k)] = {u.young.si(), u.poisson.si(), u.biot.present ? u.biot.si() : 1.0};
+  }
+  if (d.mechanics.strain_min.present) {
+    s.e_h = d.mechanics.strain_min.si();
+    s.e_H = d.mechanics.strain_max.si();
+  }
+  if (d.stress.shmax_azimuth.present) s.azimuth = d.stress.shmax_azimuth.si();
+  return s;
+}
+
 repr::StressInput stress_input(const desc::Description& d) {
   repr::StressInput s;
   const auto& st = d.stress;

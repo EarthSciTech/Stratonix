@@ -45,6 +45,8 @@ struct FigureContext {
     std::vector<std::string> step_labels;
     std::vector<double> ages;                ///< per step; empty when ages are not given
     std::vector<std::vector<double>> depth;  ///< [step][horizon]
+    /// stage 4B: tectonic subsidence per step (Airy; flexural when Te > 0), empty when not computed
+    std::vector<double> tectonic_airy, tectonic_flexural;
   };
   std::vector<Burial> burial;
   /// Fault rock and stress (stage 2F, STX-TN-10): Allan diagram and fault-surface attributes.
@@ -150,6 +152,9 @@ Figure sobol_figure(const FigureContext& c, const std::string& key, const std::v
                     const EnsembleLabel& l);
 /// Probability map (fraction of the ok members) on a regular lattice.
 Figure probability_map_figure(const FigureContext& c, const std::string& what, const Grid2D& p, const EnsembleLabel& l);
+/// Stage 4B: a scalar map over the domain (grey where undefined), with a colour bar from vmin to vmax.
+Figure scalar_map_figure(const FigureContext& c, const std::string& title, const std::string& subtitle, const std::string& bar_label, const Grid2D& g,
+                         double vmin, double vmax);
 /// 3D view of the grid's outer faces coloured by zone.
 Figure grid_view3d_figure(const FigureContext& c, const repr::CornerPointGrid& g, double azimuth_deg, double elevation_deg);
 Figure fault_plane_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<double>& displacement,

@@ -688,6 +688,17 @@ Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b) {
     for (auto& p : pl) f.rect(p.x - 1.5, p.y - 1.5, 3, 3, dark, none());
     es.push_back({"Horizons", inf.horizons[static_cast<std::size_t>(h)].name, none(), true, dark, 1.3});
   }
+  // stage 4B: tectonic subsidence from backstripping, on the same depth axis
+  for (int kind = 0; kind < 2; ++kind) {
+    const auto& v = kind == 0 ? b.tectonic_airy : b.tectonic_flexural;
+    if (v.size() != b.depth.size()) continue;
+    std::vector<Pt> pl;
+    for (std::size_t k = 0; k < v.size(); ++k)
+      if (std::isfinite(v[k]) && v[k] <= dmax) pl.push_back({X(k), Y(std::max(0.0, v[k]))});
+    if (pl.size() < 2) continue;
+    f.path(pl, false, none(), kInk, 1.6, kind == 0 ? std::vector<double>{5, 2} : std::vector<double>{1.5, 1.5});
+    es.push_back({"Backstripping", kind == 0 ? "Tectonic subsidence, Airy (dashed)" : "Tectonic subsidence, flexural (dotted)", none(), true, kInk, 1.6});
+  }
   double ly = legend(f, 842 - 200, py, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
   key_box(f, c, 842 - 200, ly, 190);
   footer(f, c);
@@ -2261,6 +2272,54 @@ Figure probability_map_figure(const FigureContext& c, const std::string& what, c
   f.text({rx + 18, ry + 12}, "1", 6.5, Anchor::Start, false, kInk);
   f.text({rx + 18, ry + 88}, "0.5", 6.5, Anchor::Start, false, kInk);
   f.text({rx + 18, ry + 166}, "0", 6.5, Anchor::Start, false, kInk);
+  key_box(f, c, rx, ry + 186, 180);
+  footer(f, c);
+  return f;
+}
+
+Figure scalar_map_figure(const FigureContext& c, const std::string& ttl, const std::string& subtitle, const std::string& bar_label, const Grid2D& p,
+                         double vmin, double vmax) {
+  Figure f(842, 595);
+  const auto& d = c.model->info().domain;
+  double side = std::min(595.0 - 110, 842.0 - 280);
+  double sc = side / std::max(d.sx, d.sy);
+  double mx0 = 60, my0 = 60, mw = d.sx * sc, mh = d.sy * sc;
+  auto P = [&](double x, double y) { return Pt{mx0 + (x - d.x0) * sc, my0 + mh - (y - d.y0) * sc}; };
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - " + ttl, subtitle);
+  if (!(vmax > vmin)) vmax = vmin + 1;
+  const auto& g = p.spec;
+  f.clip(mx0, my0, mw, mh);
+  for (std::size_t j = 0; j < g.ny; ++j)
+    for (std::size_t i = 0; i < g.nx; ++i) {
+      const double v = p.v[g.index(i, j)];
+      Pt a = P(g.x(i) - g.dx / 2, g.y(j) + g.dy / 2), b = P(g.x(i) + g.dx / 2, g.y(j) - g.dy / 2);
+      Color col = std::isfinite(v) ? viridis_like(std::clamp((v - vmin) / (vmax - vmin), 0.0, 1.0)) : rgb(220, 220, 220);
+      f.rect(a.x, a.y, b.x - a.x, b.y - a.y, col, col, 0.2);
+    }
+  for (auto& w : c.wells) {
+    Pt q = P(w.x(), w.y());
+    f.path({{q.x - 2.5, q.y}, {q.x, q.y - 2.5}, {q.x + 2.5, q.y}, {q.x, q.y + 2.5}}, true, rgb(255, 255, 255), kWell, 0.9);
+    f.text({q.x + 4, q.y - 3}, w.name(), 7, Anchor::Start, true, kWell);
+  }
+  f.unclip();
+  f.rect(mx0, my0, mw, mh, none(), kInk, 0.6);
+  for (double t : nice_ticks(d.x0, d.x0 + d.sx, 6)) f.text({P(t, d.y0).x, my0 + mh + 11}, km_or_m(t), 6.5, Anchor::Middle, false, kInk);
+  for (double t : nice_ticks(d.y0, d.y0 + d.sy, 6)) f.text({mx0 - 5, P(d.x0, t).y + 2.5}, km_or_m(t), 6.5, Anchor::End, false, kInk);
+  f.text({mx0 + mw / 2, my0 + mh + 24}, "Easting (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({mx0 - 40, my0 + mh / 2}, "Northing (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  double rx = 842 - 200, ry = 60;
+  f.text({rx, ry}, bar_label, 7.5, Anchor::Start, true, kInk);
+  for (int k = 0; k < 100; ++k) f.rect(rx, ry + 6 + k * 1.6, 14, 1.7, viridis_like(1 - k / 99.0), none());
+  f.rect(rx, ry + 6, 14, 160, none(), kInk, 0.4);
+  // three significant figures on the colour bar
+  auto sig3 = [](double v) {
+    if (v == 0 || !std::isfinite(v)) return fmt_fixed(v, 0);
+    const int dec = std::clamp(2 - static_cast<int>(std::floor(std::log10(std::fabs(v)))), 0, 8);
+    return fmt_fixed(v, dec);
+  };
+  f.text({rx + 18, ry + 12}, sig3(vmax), 6.5, Anchor::Start, false, kInk);
+  f.text({rx + 18, ry + 88}, sig3(0.5 * (vmin + vmax)), 6.5, Anchor::Start, false, kInk);
+  f.text({rx + 18, ry + 166}, sig3(vmin), 6.5, Anchor::Start, false, kInk);
   key_box(f, c, rx, ry + 186, 180);
   footer(f, c);
   return f;

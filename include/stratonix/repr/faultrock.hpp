@@ -2,6 +2,7 @@
 // clay smear potential, fault-zone thickness, seal capacity, stress, slip and dilation tendency,
 // and horizon curvature with fracture trends. Inputs are plain values (no description types).
 #pragma once
+#include <array>
 #include <string>
 #include <vector>
 
@@ -22,7 +23,15 @@ struct StressInput {
   double g[6] = {0, 0, 0, 0, 0, 0};  ///< total stress per metre of depth (Pa/m): xx, yy, zz, xy, xz, yz (east, north, up)
   double pp = 0;                     ///< pore pressure per metre of depth (Pa/m)
   double friction = kNaN, cohesion = 0;
+  /// stage 4B (STX-TN-15 section 5.3, I-033): mechanical stratigraphy. Per model unit (E Pa, nu,
+  /// Biot alpha; NaN = the regime ratios), the horizontal stresses follow the uniaxial-strain
+  /// relation plus the tectonic strains e_h, e_H (e_H along `azimuth`, rad) (Thiercelin and Plumb 1994).
+  bool lateral = false;
+  std::vector<std::array<double, 3>> unit_mech;
+  double e_h = 0, e_H = 0, azimuth = 0;
 };
+/// Stress tensor (Pa; xx, yy, zz, xy, xz, yz) and pore pressure at depth z (m) in a model unit.
+void stress_at(const StressInput& s, int unit, double z, double S6[6], double& pp);
 /// Attributes at one point of a fault surface. Missing values are NaN, with the reasons in `missing`.
 struct FaultRockPoint {
   int fw_unit = -1, hw_unit = -1;

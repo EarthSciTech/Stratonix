@@ -86,6 +86,19 @@ class CheckContext {
   const GridProducts* grid_products();
   /// Stage 4A: station misfits of the geophysics block (C29), set by the pipeline; nullptr = none.
   const PotentialFieldResult* potential_fields = nullptr;
+  /// Stage 4B: the volumetric restoration of the restoration block (C31), set by the pipeline.
+  const struct VolumetricResult* volumetric = nullptr;
+  /// Stage 4B: heat, pressure and fracture-network results for C32 to C34, set by the pipeline.
+  struct BasinResults {
+    std::vector<std::pair<std::string, double>> heat_balance;  ///< location, relative error of the steady present column
+    struct Bounds { std::string location; int below = 0, above = 0; double worst = 0; };  ///< Pa outside the bounds
+    std::vector<Bounds> pressure;
+    bool dfn = false, dfn_ok = false;
+    std::string dfn_unit, dfn_reason;
+    double dfn_target = 0, dfn_realised = 0;
+    std::size_t dfn_count = 0;
+  };
+  const BasinResults* basin = nullptr;
   /// Stage 4A: the contact graph (C26, topology.json), computed once at topology_spacing().
   const ContactGraph& contact_graph();
   /// outputs.voxel_spacing (x) when given, else max(surface spacing, largest extent / 64).
@@ -132,5 +145,7 @@ void register_check_plugins();
 /// Fault-rock and stress inputs from a description (stage 2F, STX-TN-10), in SI units.
 repr::FaultRockInput fault_rock_input(const desc::Description& d, const Model& m);
 repr::StressInput stress_input(const desc::Description& d);
+/// With the description's mechanical stratigraphy (stage 4B) mapped onto the model's units.
+repr::StressInput stress_input(const desc::Description& d, const Model& m);
 
 }  // namespace stratonix
