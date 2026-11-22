@@ -142,6 +142,8 @@ Checks C26 to C40, rules F34 to F50 come with them. The C API stays 1.2.
   before the applications, which move to v5, and the platform, which moves to v6.
 - CI: after a release is published by the release job, the citation and container workflows are
   started explicitly, since a release made with the workflow token raises no release event.
+- SEG-Y files without the revision 2 byte-order marker are read little-endian when their sample
+  format code says so (found by the cross-check against segyio).
 - The LAS reader reads files as lasio does where the standard leaves room (UTF-16, curves without
   a mnemonic or colon, extra or missing data columns, decimal commas, LAS 3.0 files with LAS 2.0
   section names), each reported; the index is never treated as null.

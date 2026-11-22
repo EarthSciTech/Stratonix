@@ -75,6 +75,15 @@ SegyVolume read_segy(const std::filesystem::path& file, const SegyLayout& layout
     const std::uint32_t be = (std::uint32_t(b[3296]) << 24) | (std::uint32_t(b[3297]) << 16) | (std::uint32_t(b[3298]) << 8) | b[3299];
     v.little_endian = be == 0x04030201u;
     if (be == 0x02010403u || be == 0x03040102u) throw Error(ErrorCode::Unsupported, file.string() + ": pair-wise byte-swapped SEG-Y is not read");
+    // without the marker (revisions 0 and 1, and writers that omit it): the sample format code
+    // (bytes 3225-3226, 1 to 16) read both ways tells the byte order
+    if (be != 0x01020304u && be != 0x04030201u) {
+      const unsigned fb = (unsigned(b[3224]) << 8) | b[3225], fl = (unsigned(b[3225]) << 8) | b[3224];
+      if ((fb < 1 || fb > 16) && fl >= 1 && fl <= 16) {
+        v.little_endian = true;
+        v.report.push_back("byte order: little-endian, from the sample format code (no revision 2 marker)");
+      }
+    }
   }
   Bin B{b, v.little_endian};
   const int rev = static_cast<int>(B.u(3200 + 300, 2));

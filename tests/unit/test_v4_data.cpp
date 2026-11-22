@@ -160,7 +160,7 @@ struct SegyOut {
   }
 };
 std::vector<std::uint8_t> make_segy(int revision, bool little, int nil, int nxl, int ns, double dt_us,
-                                    const std::function<float(int, int, int)>& amp) {
+                                    const std::function<float(int, int, int)>& amp, bool marker = true) {
   SegyOut s;
   s.little = little;
   s.b.assign(3600, 0);
@@ -171,7 +171,7 @@ std::vector<std::uint8_t> make_segy(int revision, bool little, int nil, int nxl,
   s.put(3200 + 20, static_cast<std::uint64_t>(ns), 2);
   s.put(3200 + 24, static_cast<std::uint64_t>(fmt), 2);
   s.put(3200 + 300, revision >= 2 ? 0x0200 : 0x0100, 2);   // revision 2.0 or 1.0
-  if (little) s.put(3200 + 96, 0x01020304, 4);              // byte-order marker (revision 2)
+  if (little && marker) s.put(3200 + 96, 0x01020304, 4);    // byte-order marker (revision 2)
   for (int i = 0; i < nil; ++i)
     for (int j = 0; j < nxl; ++j) {
       const std::size_t t0 = s.b.size();
@@ -483,6 +483,15 @@ TEST_CASE("D10 SEG-Y revision 1 (IBM float) and 2.0 (IEEE, little-endian) read b
     CHECK(worst < 1e-6);
     CHECK_NEAR(v.sample(1025.0, 2025.0, 0.040), amp(1, 1, 10), 1e-6);
   }
+  // little-endian without the revision 2 marker (as segyio writes it): the byte order comes from
+  // the sample format code (found by the CI cross-check against segyio)
+  const auto p = tmp("d10_little_nomarker.sgy");
+  write_bytes(p, make_segy(1, true, 3, 4, 50, 4000, amp, false));
+  auto v = io::read_segy(p);
+  CHECK(v.little_endian);
+  CHECK(v.format == 1);
+  REQUIRE(v.traces.size() == 12);
+  CHECK(std::fabs(v.traces[5].s[10] - amp(1, 1, 10)) < 1e-6);
 }
 
 TEST_CASE("D11 horizon picks and fault sticks keep their domain; no domain is refused") {
