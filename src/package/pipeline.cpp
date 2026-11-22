@@ -148,6 +148,8 @@ fig::FigureContext figure_context(const desc::Description& d, const Model& m, co
       if (du.name == u.name) { role = du.role; color = du.color; label = du.label; }
     for (auto& b : d.bodies)  // stage 4B: bodies carry their own colour
       if (b.name == u.name) { role = "Bodies"; color = b.color; }
+    for (auto& g : d.geobodies)  // stage 4B: geobody sets too, listed as facies
+      if (g.name == u.name) { role = "Geobodies"; color = g.color; }
     c.unit_roles.push_back(role);
     c.unit_colors.push_back(color);
     c.unit_labels.push_back(label);

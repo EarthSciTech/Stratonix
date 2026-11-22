@@ -1,0 +1,54 @@
+# Stage 4B example (STX-TN-15 section 3.2): the wedge of worked example 16 with tangential
+# clinoforms and a rising shelf-break trajectory. Four clinoforms, 300 m high at the first break,
+# prograde eastwards 1,500 m per surface; the break rises at 3 degrees (about 79 m per clinoform),
+# so the topsets aggrade, and the foresets flatten tangentially into the bottomsets that downlap
+# onto B. The erosional surface E truncates the youngest topset (toplap). DESIGN model; every parameter
+# carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: tangential_clinoforms, version: "1.0.0", status: DESIGN,
+        title: "Tangential clinoforms with a rising shelf-break trajectory"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 2500] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, landward"
+    tops:
+      H1: "800 m | user_instruction | worked example"
+      E:  "1200 m | user_instruction | worked example: above the rising topsets of K1 to K3"
+      B:  "1700 m | user_instruction | worked example"
+      BB: "1900 m | user_instruction | worked example"
+  - name: W2
+    role: planned
+    head: "[5000, 5000] m | user_instruction | worked example: planned well through the foresets"
+    total_depth: "2100 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: E}, {name: K4}, {name: K3}, {name: K2}, {name: K1}, {name: B}, {name: BB}]
+  units:
+    - {name: Cover, top: H1, base: E}
+    - {name: Above_K4, top: E, base: K4}
+    - {name: Wedge_4, top: K4, base: K3}
+    - {name: Wedge_3, top: K3, base: K2}
+    - {name: Wedge_2, top: K2, base: K1}
+    - {name: Wedge_1, top: K1, base: B}
+    - {name: Base_unit, top: B, base: BB}
+  series:
+    - {name: S3, horizons: [H1, E], base: erosional}
+    - {name: S2, horizons: [K4, K3, K2, K1], base: conformable,
+       clinoforms: {profile: tangential, height: "300 m | user_instruction | worked example: at the first break",
+                    trajectory: "3 deg | assumed | worked example: rising shelf-break trajectory (Helland-Hansen and Hampson 2009)", width: "2500 m | user_instruction | worked example: foreset width", direction: "90 deg | user_instruction | worked example: progrades east",
+                    first_break: "[2500, 5000] m | user_instruction | worked example: break of K1", progradation: "1500 m | user_instruction | worked example: per surface"}}
+    - {name: S1, horizons: [B, BB], base: conformable}
+structure:
+  regional: {type: flat}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[200, 5000], [9800, 5000]] m | user_instruction | worked example: along the progradation direction"
+  vertical_exaggeration: "4 ratio | user_instruction | worked example"
+  exports: [petrel, vtk]

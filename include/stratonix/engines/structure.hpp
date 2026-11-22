@@ -143,7 +143,8 @@ class Structure final : public StratigraphyQuery, public ColumnQuery {
   struct SeriesInfo {
     std::size_t first = 0, last = 0;  ///< youngest and oldest horizon
     int base = 0;                     ///< 0 conformable, 1 erosional, 2 onlap
-    bool clino = false, sigmoid = true;
+    bool clino = false, sigmoid = true, tangential = false;  ///< stage 4B: tangential foresets
+    double rise = 0;                  ///< stage 4B: shelf-break rise per metre of progradation (tan of the trajectory)
     double height = 0, width = 1, ax = 0, ay = 1, bx = 0, by = 0, rate = 0;
   };
   std::vector<SeriesInfo> series_;

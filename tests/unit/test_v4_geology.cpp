@@ -241,6 +241,21 @@ TEST_CASE("G10 oblique clinoforms: shelf break advances by the spacing, foresets
   for (auto& k : c) CHECK(std::fabs(k.foreset_dip_deg - 4) < 0.1);
 }
 
+TEST_CASE("G10b sigmoidal and tangential foresets dip at the label; a rising trajectory lifts the shelf break") {
+  for (const char* shape : {"sigmoidal", "tangential"}) {
+    ClinoformSpec s;
+    s.count = 4;
+    s.spacing = 500;
+    s.foreset_dip_deg = 3;
+    s.trajectory_deg = 2;
+    s.shape = shape;
+    auto c = clinoform_set(s);
+    REQUIRE(c.size() == 4);
+    for (auto& k : c) CHECK(std::fabs(k.foreset_dip_deg - 3) < 0.1);
+    for (std::size_t i = 1; i < c.size(); ++i) CHECK(std::fabs(c[i].shelf_break_z - c[i - 1].shelf_break_z - 500 * std::tan(2 * kPi / 180)) < 1e-9);
+  }
+}
+
 TEST_CASE("G11 channel-belt net-to-gross of a known placement") {
   UnitBox u{0, 0, 10000, 10000, -1100, -1000};
   ChannelSpec s;

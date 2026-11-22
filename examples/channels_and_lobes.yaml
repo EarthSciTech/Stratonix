@@ -1,0 +1,91 @@
+# Stage 4B example (STX-TN-15 section 3.3): geobodies inside their units. A sinuous channel belt
+# (40 channels, 250 m wide, 12 m thick, parabolic) fills part of Fluvial, and 60 elliptical lobes
+# (radius 1,200 m, aspect 2, 15 m thick at the centre) part of Fan. Both sets are placed in geological-time
+# coordinates - restored position and fraction of the unit's thickness - so they are folded over the
+# anticline and offset by the fault with their units. DESIGN model; every parameter carries value,
+# unit, evidence and source.
+stratonix_schema: 1
+model: {name: channels_and_lobes, version: "1.0.0", status: DESIGN,
+        title: "Channel belt and lobes in a folded, faulted succession"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 2500] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, fixed block"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1150 m | user_instruction | worked example"
+      H3: "1250 m | user_instruction | worked example"
+      H4: "1500 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]   # the fault cuts top and base on purpose
+  units:
+    - {name: Fluvial, top: H1, base: H2}
+    - {name: Fan, top: H2, base: H3}
+    - {name: Shale, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+  primitives:
+    - type: anticline
+      name: A1
+      crest: "[5000, 5000] m | user_instruction | worked example"
+      axis_azimuth: "20 deg | user_instruction | worked example"
+      half_width_left: "3000 m | user_instruction | worked example"
+      half_width_right: "3000 m | user_instruction | worked example"
+      relief:
+        H1: "200 m | user_instruction | worked example"
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example"
+    geometry:
+      type: planar
+      reference_point: "[7000, 5000] m | user_instruction | worked example"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "10 deg | user_instruction | worked example: dips east-south-east"
+      dip: "60 deg | user_instruction | worked example"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "30000 m | user_instruction | worked example: longer than the model"
+    throw:
+      max: "80 m | user_instruction | worked example"
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.1 fraction | user_instruction | worked example"}
+    slip_mode: dip_slip
+    hanging_wall: {type: rigid}
+geobodies:
+  - name: Channels
+    type: channels
+    unit: Fluvial
+    color: "#e0b040"
+    count: "40 ordinal | user_instruction | worked example"
+    seed: "2026 ordinal | user_instruction | worked example: reproducible placement"
+    width: "250 m | literature_derived | Gibling (2006): fluvial channel-body widths of hundreds of metres"
+    thickness: "12 m | user_instruction | worked example"
+    wavelength: "3000 m | user_instruction | worked example: meander wavelength"
+    amplitude: "600 m | user_instruction | worked example"
+    orientation: "90 deg | user_instruction | worked example: flow to the east"
+    shape: parabolic
+  - name: Lobes
+    type: lobes
+    unit: Fan
+    color: "#6a9fd4"
+    count: "60 ordinal | user_instruction | worked example"
+    seed: "7 ordinal | user_instruction | worked example: reproducible placement"
+    radius: "1200 m | literature_derived | Prelat et al. (2009): lobe lengths of kilometres"
+    aspect: "2 ratio | user_instruction | worked example: elongate along the flow"
+    thickness: "15 m | user_instruction | worked example: at the centre"
+    orientation: "90 deg | user_instruction | worked example"
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[500, 5000], [9500, 5000]] m | user_instruction | worked example: across the fold and the fault"
+  vertical_exaggeration: "10 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv]

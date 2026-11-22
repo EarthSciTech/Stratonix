@@ -70,6 +70,7 @@ struct SeriesDesc {
   Param tilt_dip, tilt_azimuth;
   std::string clino_profile;       ///< "" or sigmoidal / oblique (section 5)
   Param clino_height, clino_width, clino_direction, clino_first_break, clino_progradation;
+  Param clino_trajectory;          ///< stage 4B: shelf-break trajectory (angle of rise, 0 to 15 degrees)
 };
 /// Growth strata (STX-TN-07 section 4): movement between onset and end.
 struct GrowthDesc { std::string onset, end; bool present() const { return !onset.empty(); } };
@@ -260,6 +261,12 @@ struct GridDesc {
   std::string pillars = "fault_conforming";  ///< stage 4B: fault_conforming | vertical (dense intersecting networks)
 };
 
+/// Geobodies (stage 4B, STX-TN-15 section 3.3): channel belts and lobes placed inside a unit in
+/// geological-time coordinates, so they follow the unit's deformation.
+struct GeobodyDesc {
+  std::string name, type, unit, color, shape = "rectangular";  ///< type: channels | lobes
+  Param count, seed, width, thickness, wavelength, amplitude, orientation, radius, aspect;
+};
 /// Bodies (stage 4B, STX-TN-15 section 1): salt sheets, sills, saucer sills, dykes, injectites.
 struct BodyDesc {
   std::string name, type;          ///< salt_sheet | sill | saucer_sill | dyke | injectite
@@ -331,6 +338,7 @@ struct Description {
   UncertaintyDesc uncertainty;     ///< stage 3C
   GeophysicsDesc geophysics;       ///< stage 4A
   std::vector<BodyDesc> bodies;    ///< stage 4B
+  std::vector<GeobodyDesc> geobodies;  ///< stage 4B: channel belts and lobes inside units
   StressDesc stress;               ///< stage 2F
   std::vector<std::string> curvature_horizons;  ///< stage 2F: outputs.curvature.horizons
   Param fracture_threshold;        ///< stage 2F: outputs.curvature.fracture_threshold (1/m)

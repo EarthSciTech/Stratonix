@@ -451,8 +451,12 @@
                   "profile": {
                     "enum": [
                       "sigmoidal",
-                      "oblique"
+                      "oblique",
+                      "tangential"
                     ]
+                  },
+                  "trajectory": {
+                    "$ref": "#/$defs/param"
                   },
                   "height": {
                     "$ref": "#/$defs/param"
@@ -2461,6 +2465,31 @@
             }
           },
           "description": "Total-field magnetic stations (nT) as delivered."
+        }
+      }
+    },
+    "geobodies": {
+      "type": "array",
+      "description": "Stage 4B (STX-TN-15 section 3.3): channel belts and lobes placed inside a unit in geological-time coordinates.",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "unit", "count", "seed", "thickness", "orientation"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+          "type": {"type": "string", "enum": ["channels", "lobes"]},
+          "unit": {"type": "string"},
+          "color": {"type": "string"},
+          "shape": {"type": "string", "enum": ["rectangular", "parabolic"]},
+          "count": {"$ref": "#/$defs/param"},
+          "seed": {"$ref": "#/$defs/param"},
+          "width": {"$ref": "#/$defs/param"},
+          "thickness": {"$ref": "#/$defs/param"},
+          "wavelength": {"$ref": "#/$defs/param"},
+          "amplitude": {"$ref": "#/$defs/param"},
+          "orientation": {"$ref": "#/$defs/param"},
+          "radius": {"$ref": "#/$defs/param"},
+          "aspect": {"$ref": "#/$defs/param"}
         }
       }
     },

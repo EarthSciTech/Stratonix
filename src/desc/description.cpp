@@ -138,6 +138,8 @@ std::vector<const Param*> Description::all_params() const {
                   &geophysics.declination, &geophysics.intensity, &geophysics.gravity.uncertainty, &geophysics.magnetics.uncertainty})
     add(*q);
   for (auto& u : geophysics.units) { add(u.density); add(u.susceptibility); }
+  for (auto& g : geobodies)
+    for (auto* q : {&g.count, &g.seed, &g.width, &g.thickness, &g.wavelength, &g.amplitude, &g.orientation, &g.radius, &g.aspect}) add(*q);
   for (auto& b : bodies)
     for (auto* q : {&b.age, &b.footprint, &b.base_offset, &b.base_depth, &b.thickness, &b.taper, &b.centre, &b.depth, &b.radius, &b.accommodation,
                     &b.uplift_decay, &b.climb, &b.outer_radius, &b.trace, &b.width, &b.top_depth, &b.sheets, &b.length, &b.length_sd, &b.thickness_sd,
@@ -168,7 +170,7 @@ std::vector<const Param*> Description::all_params() const {
     for (auto* q : {&u.surface_porosity, &u.decay, &u.table_depths, &u.table_porosity}) add(*q);
   for (auto& sr : series)
     for (auto* q : {&sr.tilt_dip, &sr.tilt_azimuth, &sr.clino_height, &sr.clino_width, &sr.clino_direction, &sr.clino_first_break,
-                    &sr.clino_progradation})
+                    &sr.clino_progradation, &sr.clino_trajectory})
       add(*q);
   for (auto& p : primitives) {
     for (auto* q : {&p.crest, &p.axis_azimuth, &p.plunge, &p.half_length, &p.half_width_left,
@@ -466,6 +468,7 @@ struct Typer {
           sd.clino_direction = P(cf, "direction", cb, Dimension::Angle, true, 1);
           sd.clino_first_break = P(cf, "first_break", cb, Dimension::Length, true, 2);
           sd.clino_progradation = P(cf, "progradation", cb, Dimension::Length, true, 1);
+          sd.clino_trajectory = P(cf, "trajectory", cb, Dimension::Angle, false, 1);
         }
         d.series.push_back(std::move(sd));
       }
@@ -912,6 +915,28 @@ struct Typer {
           cd.parameters.push_back({S(&x, "path"), P(&x, "min", b, Dimension::Any, true, 1), P(&x, "max", b, Dimension::Any, true, 1)});
         }
     }
+    if (const Node* gs = root.get("geobodies"))
+      for (std::size_t k = 0; k < gs->seq.size(); ++k) {
+        const Node& x = gs->seq[k];
+        const std::string b = "geobodies[" + std::to_string(k) + "]";
+        GeobodyDesc g;
+        g.name = S(&x, "name");
+        g.type = S(&x, "type");
+        g.unit = S(&x, "unit");
+        g.color = S(&x, "color");
+        g.shape = S(&x, "shape", "rectangular");
+        const bool ch = g.type == "channels", lb = g.type == "lobes";
+        g.count = P(&x, "count", b, Dimension::Ordinal, true, 1);
+        g.seed = P(&x, "seed", b, Dimension::Ordinal, true, 1);
+        g.thickness = P(&x, "thickness", b, Dimension::Length, true, 1);
+        g.orientation = P(&x, "orientation", b, Dimension::Angle, true, 1);
+        g.width = P(&x, "width", b, Dimension::Length, ch, 1);
+        g.wavelength = P(&x, "wavelength", b, Dimension::Length, false, 1);
+        g.amplitude = P(&x, "amplitude", b, Dimension::Length, false, 1);
+        g.radius = P(&x, "radius", b, Dimension::Length, lb, 1);
+        g.aspect = P(&x, "aspect", b, Dimension::Dimensionless, lb, 1);
+        d.geobodies.push_back(std::move(g));
+      }
     if (const Node* bs = root.get("bodies"))
       for (std::size_t k = 0; k < bs->seq.size(); ++k) {
         const Node& x = bs->seq[k];
@@ -1187,6 +1212,9 @@ struct Typer {
           if (sr.clino_progradation.present && sr.clino_progradation.si() < 0)
             c.err(b + ".clinoforms.progradation", "F23", "progradation must not be negative");
           if (sr.base == "onlap") c.err(b + ".base", "F23", "clinoforms downlap onto the series below: give base conformable or erosional");
+          if (sr.clino_trajectory.present && !(sr.clino_trajectory.si() >= 0 && sr.clino_trajectory.si() <= deg2rad(15)))
+            c.err(b + ".clinoforms.trajectory", "F23", "the shelf-break trajectory rises at 0 to 15 degrees (a falling trajectory would cut the "
+                                                       "older topsets: not built)");
         }
       }
       if (next == nh + 1) {
@@ -1279,6 +1307,29 @@ struct Typer {
         } else {
           c.err(ub + ".law", "F25", "law must be exponential or table");
         }
+      }
+    }
+    // Stage 4B: geobodies (rule F39)
+    {
+      std::set<std::string> gnames;
+      for (std::size_t k = 0; k < d.geobodies.size(); ++k) {
+        const auto& g = d.geobodies[k];
+        const std::string b = "geobodies[" + std::to_string(k) + "]";
+        if (g.name.empty() || !gnames.insert(g.name).second || d.unit_index(g.name) >= 0)
+          c.err(b + ".name", "F39", "every geobody set needs a unique name that no unit has");
+        if (g.type != "channels" && g.type != "lobes") c.err(b + ".type", "F39", "type must be channels or lobes (got '" + g.type + "')");
+        const int u = d.unit_index(g.unit);
+        if (u < 0) c.err(b + ".unit", "F39", "unknown unit '" + g.unit + "'");
+        else if (d.horizon_index(d.units[static_cast<std::size_t>(u)].top) < 0 || d.horizon_index(d.units[static_cast<std::size_t>(u)].base) < 0)
+          c.err(b + ".unit", "F39", "geobodies lie in a unit between two horizons");
+        if (g.shape != "rectangular" && g.shape != "parabolic") c.err(b + ".shape", "F39", "shape must be rectangular or parabolic");
+        if (g.count.present && !(g.count.si() >= 1 && g.count.si() <= 500)) c.err(b + ".count", "F39", "from 1 to 500 geobodies per set");
+        if (g.thickness.present && !(g.thickness.si() > 0)) c.err(b + ".thickness", "F39", "thickness must be positive");
+        const double w = g.type == "lobes" && g.radius.present && g.aspect.present ? 2 * g.radius.si() / g.aspect.si() : (g.width.present ? g.width.si() : kNaN);
+        if (std::isfinite(w) && g.thickness.present && g.thickness.si() > 0 && !(w / g.thickness.si() >= 5 && w / g.thickness.si() <= 500))
+          c.err(b, "F39", "width-to-thickness ratio from 5 to 500 (got " + fmt_fixed(w / g.thickness.si(), 1) + ")");
+        if (g.type == "lobes" && g.aspect.present && !(g.aspect.si() >= 1)) c.err(b + ".aspect", "F39", "aspect (major / minor axis) of at least 1");
+        if (g.amplitude.present && g.amplitude.si() > 0 && !g.wavelength.present) c.err(b + ".wavelength", "F39", "a sinuous channel belt needs a wavelength");
       }
     }
     // STX-TN-15 (F38): bodies

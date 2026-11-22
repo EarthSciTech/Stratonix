@@ -277,6 +277,8 @@ Structure::Structure(const desc::Description& d, const BuildInputs& in, BuildLog
     if (!sd.clino_profile.empty()) {
       si.clino = true;
       si.sigmoid = sd.clino_profile == "sigmoidal";
+      si.tangential = sd.clino_profile == "tangential";
+      si.rise = sd.clino_trajectory.present ? std::tan(sd.clino_trajectory.si()) : 0.0;
       si.height = sd.clino_height.si();
       si.width = sd.clino_width.si();
       si.ax = std::sin(sd.clino_direction.si());
@@ -973,8 +975,13 @@ double Structure::clino_offset(std::size_t h, double x, double y) const {
   const SeriesInfo& S = series_[static_cast<std::size_t>(hseries_[h])];
   const double i = static_cast<double>(S.last - h);  // 0 for the oldest surface
   const double u = ((x - S.bx) * S.ax + (y - S.by) * S.ay - i * S.rate) / S.width;
-  const double p = S.sigmoid ? 0.5 * (1 - std::tanh(2 * u)) : std::min(1.0, std::max(0.0, 0.5 - u));
-  return S.height * p;
+  // oblique: linear foreset; sigmoidal: tanh; tangential (stage 4B): exponential foreset with the
+  // oblique profile's slope at the break, flattening into the bottomset
+  const double p = S.sigmoid ? 0.5 * (1 - std::tanh(2 * u)) : S.tangential ? (u <= -0.5 ? 1.0 : std::exp(-(u + 0.5)))
+                                                                         : std::min(1.0, std::max(0.0, 0.5 - u));
+  // a rising shelf-break trajectory (stage 4B): each younger clinoform's topset stands higher by
+  // rise x progradation, so the topsets aggrade
+  return (S.height + i * S.rate * S.rise) * p;
 }
 
 double Structure::event_fraction(std::size_t h, double from, double to) const {

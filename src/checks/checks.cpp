@@ -12,6 +12,7 @@
 #include "stratonix/engines/faults.hpp"
 #include "stratonix/engines/structure.hpp"
 #include "stratonix/engines/bodies.hpp"
+#include "stratonix/engines/depositional.hpp"
 #include "stratonix/engines/conditioning.hpp"
 #include "stratonix/engines/posterior.hpp"
 #include "stratonix/engines/history.hpp"
@@ -1306,6 +1307,19 @@ class C27 final : public Check {
 class C30 final : public Check {
   std::vector<CheckResult> run(CheckContext& c) const override {
     std::vector<CheckResult> out;
+    // stage 4B: geobody sets (channel belts, lobes) - their net-to-gross in the host unit
+    if (auto* gs = static_cast<const std::vector<GeobodyReport>*>(c.model().capability("geobodies")))
+      for (auto& g : *gs) {
+        auto r = base(c, "C30", "geobody net-to-gross", g.name + " (" + g.type + " in " + g.host + ")");
+        r.unit = "fraction";
+        r.value = g.ntg;
+        r.tolerance = 1;
+        r.tolerance_source = "Stratonix rule: a set occupies part of its unit (0 < net-to-gross < 1)";
+        r.passed = g.ntg > 0 && g.ntg < 1;
+        r.detail = std::to_string(g.count) + " placed in the unit's geological-time box (" + fmt_fixed(g.box_thickness, 1) +
+                   " m high); closed form without overlap or clipping " + fmt_fixed(g.ntg_closed, 4);
+        out.push_back(r);
+      }
     auto* bs = static_cast<const std::vector<BodyReport>*>(c.model().capability("bodies"));
     if (!bs) return out;
     for (auto& b : *bs) {

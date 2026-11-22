@@ -254,7 +254,8 @@ Examples: `trishear_fold`, `fault_bend_fold`, `detachment_folds`.
 - **Series** (`stratigraphy.series`) group horizons. Each series' `base` is `conformable`,
   `erosional` (truncates older series: unconformities) or `onlap` (younger beds end against it).
   `tilt: {dip, azimuth}` tilts a series before the younger ones are laid on it.
-- **Clinoforms** (`clinoforms: {profile, height, width, direction, first_break, progradation}`)
+- **Clinoforms** (`clinoforms: {profile, height, width, direction, first_break, progradation}`;
+  since 2026.4 also `profile: tangential` and `trajectory`, below)
   build prograding sigmoidal or oblique surfaces that downlap and toplap.
 - **Isochores** (`isochore: {from, thickness, trend}`) place a horizon by its thickness from
   another, with a `linear` or `radial` trend; the thickness never goes below zero (pinch-out).
@@ -580,6 +581,39 @@ each other. The default is `fault_conforming`.
 
 Examples: `polygonal_faults`, `negative_flower`, `thrust_duplex`, `breached_relay`,
 `growth_fault_decay`.
+
+## 2.19 Clinoform trajectories and geobodies (2026.4)
+
+**Clinoforms.** A series' `clinoforms` block also takes:
+- `profile: tangential`, a foreset that leaves the break at the oblique profile's slope and
+  flattens exponentially into the bottomset;
+- `trajectory`, the angle of rise of the shelf-break trajectory (0 to 15 degrees, rule F23). Each
+  younger clinoform's topset stands higher by `progradation` x tan(trajectory), so the topsets
+  aggrade. A falling trajectory would cut the older topsets and is not built.
+
+Example: `tangential_clinoforms`.
+
+**Geobodies.** A top-level `geobodies` list places sets of channel belts or lobes inside a unit
+between two horizons. Each set takes a `name`, a `type` (`channels` or `lobes`), the host `unit`,
+a `count`, a `seed`, a `thickness`, an `orientation` and an optional `color`:
+
+| `type` | Keys | Geometry |
+| --- | --- | --- |
+| `channels` | `width`, `wavelength`, `amplitude` (0 = straight), `shape` (`rectangular` or `parabolic`) | sine centrelines across the model, seeded offsets, levels and phases; sinuosity at most 3 |
+| `lobes` | `radius` (semi-major axis), `aspect` (major / minor, at least 1) | ellipses in plan with a flat base and a lens-shaped top, seeded centres and levels |
+
+- **Placement.** Sets are placed in geological-time coordinates: the restored position of a
+  point and its fraction of the unit's restored thickness. They follow the unit's folding,
+  faulting and thickness changes.
+- **Overlap.** A later set takes a point before an earlier one; within a set, bodies overlap.
+- **Model.** Each set becomes a unit of its own (listed under "Geobodies" in figure legends).
+- **Checks.** C30 reports each set's net-to-gross in its unit, with the closed-form value beside
+  it.
+- **Rules.** Rule F39 covers names, types, ranges (width-to-thickness 5 to 500) and the host unit.
+- **Model types.** Geobodies need a model with a restored stratigraphic column (parametric,
+  implicit and conditioned models have one).
+
+Example: `channels_and_lobes`.
 
 # 3. Running
 

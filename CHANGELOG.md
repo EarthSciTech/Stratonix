@@ -27,6 +27,10 @@ has its own version (`stratonix_schema`).
     rigid, decay and linear-between-faults hanging walls (I-027, I-030, planar faults);
     `grid.pillars: vertical`; examples `polygonal_faults`, `negative_flower`, `thrust_duplex`,
     `breached_relay`, `growth_fault_decay`.
+  - tangential clinoforms and rising shelf-break trajectories (`clinoforms.profile: tangential`,
+    `clinoforms.trajectory`); channel belts and lobes as geobodies in geological-time coordinates
+    (`geobodies`, rule F39, net-to-gross in C30); examples `tangential_clinoforms`,
+    `channels_and_lobes`.
 
 ### Changed
 - C3 and C4 set aside samples where another fault's plane lies between their probes or
