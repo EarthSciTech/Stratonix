@@ -5,8 +5,34 @@ has its own version (`stratonix_schema`).
 
 ## [Unreleased]
 
+## [2026.4] - 2026-11-23 - Version 4: geological engine and real data
+
+Version 4 adds:
+
+- a geological engine: discrete implicit fields, fold frames, displacement fields, Bayesian
+  conditioning, geological time and topology, gravity and magnetics (stage 4A);
+- geological completeness: bodies, fault systems, depositional geometries, restoration,
+  fractures, heat and pressure through time (4B);
+- the data real projects start from: wells with logs, surveys and ages, seismic interpretation
+  in time and its depth conversion, coordinates, geological maps, interpretation uncertainty and
+  RESQML in the release packages (4C);
+- properties, uncertainty and scale: geostatistics in geological time, fault-following grids,
+  total-effect sensitivity, caching and Python bindings (4D).
+
+Checks C26 to C40, rules F34 to F50 come with them. The C API stays 1.2.
+
+### Migration notes for description files
+- Nothing to change. The schema stays `stratonix_schema: 1`; every new key is optional, and a
+  description written for 2026.3 builds unchanged apart from the checks added in 2026.4 (C26 to
+  C40 run where their blocks are present; C26 and C27 run on every model).
+- `implicit.data` is no longer required when a `geological_map` gives the data.
+- Horizons may be given in two-way time (`surface.z_is: twt_ms | twt_s`) with a `velocity_model`.
+- Behaviour changes to know: C1 no longer counts a unit held at the domain's top or base as
+  zero thickness; C27 reports gaps resolved to 1 mm; compaction porosity is taken at each block's
+  maximum burial (`burial: restored` keeps 2026.3).
+
 ### Added
-- Stage 4A (STX-TN-14), in progress:
+- Stage 4A (STX-TN-14), the geological engine:
   - discrete implicit field with free horizon values (`implicit.solver.type: discrete`,
     `implicit.horizon_values: free`; rules F34, F35);
   - fold frames fitted to bedding (`implicit.folds`, `stratonix fold-frame`);
@@ -18,7 +44,7 @@ has its own version (`stratonix_schema`).
     members of a Bayesian description from its posterior.
   - geological-time coordinates and Wheeler diagrams; topology (`topology.json`, checks C26,
     C27); gravity and magnetics (`geophysics` block, check C29, rule F37).
-- Stage 4B (STX-TN-15), in progress:
+- Stage 4B (STX-TN-15), geological completeness:
   - bodies: salt sheets, sills, saucer sills, dykes and sand injectites (`bodies`, check C30,
     rule F38); examples `salt_sheet_drape`, `saucer_sill_forced_fold`, `injectite_complex`.
   - fault systems (`fault_systems`: polygonal networks, flower structures, duplexes of
@@ -42,32 +68,24 @@ has its own version (`stratonix_schema`).
     F41, F42; example `basin_heat_pressure_fractures`. Fracture intensity is also written as grid
     properties `P32` and `P32_DFN` (realised network intensity per cell), and temperature and
     overpressure are drawn over the burial curves at each well.
-
-- Speed, scale and Python (stage 4D, Prompt 61): Python bindings over the C API (ctypes, decision
-  25) built as wheels for Windows and Linux and tested against the command line's outputs, published
-  to PyPI on a release tag with the owner's token; an input cache for ensembles and build caching
-  in the library (same bytes cached or not); GRDECL written as it is made; parallel builds checked
-  byte for byte at 1, 2 and 8 threads; C27 bisects to 1 mm (its reported gap changes in the last
-  decimals; golden hashes of the synthetic package updated for that reason alone). Not met:
-  ensembles are not yet 5 times faster per member than v3 (2.28 s against 1.88 s on the
-  fault-system example: v4's topology and watertightness checks cost more than the savings), and a
-  50-million-cell grid needs about 21 GB (420 bytes a cell), not the 8 GB stated.
-- Fault-following grids and total-effect sensitivity (stage 4D, Prompt 60): `grid.pillars:
-  fault_following` puts one pillar column per fault on its trace in every row (I-035; stair-step
-  fall-backs reported by C25); Saltelli designs with first-order and total-effect indices and
-  bootstrap intervals (`uncertainty.sensitivity`, F50, I-036), shown together in the sensitivity
-  figure; the Ishigami function's indices fall within their intervals (test S10); examples
-  `fault_following_grid` and `sensitivity_one_fault`.
-- Geostatistical properties (stage 4D, Prompt 59): variograms (experimental, models, weighted
-  least-squares fit), normal scores with declustering, sequential Gaussian and indicator
-  simulation (multiple-grid path, servosystem) and object-based channels and lobes, in
-  geological-time coordinates, conditioned to upscaled logs (`grid.geostatistics`, F49, C39,
-  C40); seeded and reproducible byte for byte on every platform; realisations as ensemble
-  members; variogram and histogram figures; `stratonix variogram`; experimental variograms
-  equal GeostatsPy's gamv in CI; example `geostat_properties`.
-- Stage 4D opened (Prompt 58): interfaces for geostatistics (variograms, sequential Gaussian and
-  indicator simulation, object facies), fault-following grids, total-effect sensitivity, build
-  caching, streamed grids and parallel builds; tests S1 to S13 written first (expected to fail).
+- Stage 4C opened (STX-TN-16): interfaces for well logs (LAS 2.0 and 3.0, DLIS), deviation
+  surveys, ages and well correlation, log upscaling, SEG-Y volumes, horizon picks and fault
+  sticks, layer-cake time-to-depth conversion, coordinate transformations and geological maps;
+  `test_v4_data` D1 to D18, expected to fail until Prompts 55 to 57.
+- Wells with logs, surveys and ages (stage 4C, Prompt 55): LAS 2.0 and 3.0 and DLIS (RP66 V1)
+  read as delivered with units and nulls from the files; deviation surveys from CSV by a stated
+  method and azimuth reference (rule F44); ages in wells and correlation by age; logs upscaled to
+  grid cells (`grid.upscaled_logs`); well log and correlation panels; checks C35 (well data) and
+  C38 (age consistency); `stratonix read-log`; example `wells_logs_ages`. CI compares the LAS
+  reader with lasio and the DLIS reader with dlisio.
+- Interpretation in time and real coordinates (stage 4C, Prompt 56): horizons in two-way time
+  converted by a layer-cake velocity model v0 + k z calibrated to wells (`velocity_model`, C36,
+  blind wells, leave-one-out residuals); SEG-Y revisions 0 to 2.1 and seismic sections in depth
+  with the model over them; horizon picks and fault sticks (Charisma, CSV, IESX, Petrel ASCII);
+  PROJ transformations of inputs with their stated accuracy; geological maps (shapefile, GeoJSON,
+  GeoPackage) with bedding measurements and elevation models (GeoTIFF, ESRI ASCII) as data for the
+  implicit builder (`geological_map`); rules F45 to F47; units m/s, 1/s, ms; example
+  `time_depth_conversion`. C1 no longer counts a unit held at the domain's top or base.
 - Interpretation uncertainty and interchange (stage 4C, Prompt 57): pick and velocity errors carried
   into depth as seeded correlated fields in every ensemble member (`uncertainty.interpretation`,
   F48), v0 errors conditioned to the calibration wells; velocity parameters as uncertain or
@@ -78,24 +96,31 @@ has its own version (`stratonix_schema`).
   validated otherwise); the Windows and Linux release packages include the RESQML exporter, PROJ
   and SQLite, and list their optional components (`COMPONENTS.txt`, `stratonix version`);
   `stratonix read-seismic`; SEG-Y cross-checked against segyio in CI.
-- Interpretation in time and real coordinates (stage 4C, Prompt 56): horizons in two-way time
-  converted by a layer-cake velocity model v0 + k z calibrated to wells (`velocity_model`, C36,
-  blind wells, leave-one-out residuals); SEG-Y revisions 0 to 2.1 and seismic sections in depth
-  with the model over them; horizon picks and fault sticks (Charisma, CSV, IESX, Petrel ASCII);
-  PROJ transformations of inputs with their stated accuracy; geological maps (shapefile, GeoJSON,
-  GeoPackage) with bedding measurements and elevation models (GeoTIFF, ESRI ASCII) as data for the
-  implicit builder (`geological_map`); rules F45 to F47; units m/s, 1/s, ms; example
-  `time_depth_conversion`. C1 no longer counts a unit held at the domain's top or base.
-- Wells with logs, surveys and ages (stage 4C, Prompt 55): LAS 2.0 and 3.0 and DLIS (RP66 V1)
-  read as delivered with units and nulls from the files; deviation surveys from CSV by a stated
-  method and azimuth reference (rule F44); ages in wells and correlation by age; logs upscaled to
-  grid cells (`grid.upscaled_logs`); well log and correlation panels; checks C35 (well data) and
-  C38 (age consistency); `stratonix read-log`; example `wells_logs_ages`. CI compares the LAS
-  reader with lasio and the DLIS reader with dlisio.
-- Stage 4C opened (STX-TN-16): interfaces for well logs (LAS 2.0 and 3.0, DLIS), deviation
-  surveys, ages and well correlation, log upscaling, SEG-Y volumes, horizon picks and fault
-  sticks, layer-cake time-to-depth conversion, coordinate transformations and geological maps;
-  `test_v4_data` D1 to D18, expected to fail until Prompts 55 to 57.
+- Stage 4D opened (Prompt 58): interfaces for geostatistics (variograms, sequential Gaussian and
+  indicator simulation, object facies), fault-following grids, total-effect sensitivity, build
+  caching, streamed grids and parallel builds; tests S1 to S13 written first (expected to fail).
+- Geostatistical properties (stage 4D, Prompt 59): variograms (experimental, models, weighted
+  least-squares fit), normal scores with declustering, sequential Gaussian and indicator
+  simulation (multiple-grid path, servosystem) and object-based channels and lobes, in
+  geological-time coordinates, conditioned to upscaled logs (`grid.geostatistics`, F49, C39,
+  C40); seeded and reproducible byte for byte on every platform; realisations as ensemble
+  members; variogram and histogram figures; `stratonix variogram`; experimental variograms
+  equal GeostatsPy's gamv in CI; example `geostat_properties`.
+- Fault-following grids and total-effect sensitivity (stage 4D, Prompt 60): `grid.pillars:
+  fault_following` puts one pillar column per fault on its trace in every row (I-035; stair-step
+  fall-backs reported by C25); Saltelli designs with first-order and total-effect indices and
+  bootstrap intervals (`uncertainty.sensitivity`, F50, I-036), shown together in the sensitivity
+  figure; the Ishigami function's indices fall within their intervals (test S10); examples
+  `fault_following_grid` and `sensitivity_one_fault`.
+- Speed, scale and Python (stage 4D, Prompt 61): Python bindings over the C API (ctypes, decision
+  25) built as wheels for Windows and Linux and tested against the command line's outputs, published
+  to PyPI on a release tag with the owner's token; an input cache for ensembles and build caching
+  in the library (same bytes cached or not); GRDECL written as it is made; parallel builds checked
+  byte for byte at 1, 2 and 8 threads; C27 bisects to 1 mm (its reported gap changes in the last
+  decimals; golden hashes of the synthetic package updated for that reason alone). Not met:
+  ensembles are not yet 5 times faster per member than v3 (2.28 s against 1.88 s on the
+  fault-system example: v4's topology and watertightness checks cost more than the savings), and a
+  50-million-cell grid needs about 21 GB (420 bytes a cell), not the 8 GB stated.
 
 ### Changed
 - C27 (watertight surfaces) checks the present-day model only; restored states are covered by
@@ -117,6 +142,21 @@ has its own version (`stratonix_schema`).
   before the applications, which move to v5, and the platform, which moves to v6.
 - CI: after a release is published by the release job, the citation and container workflows are
   started explicitly, since a release made with the workflow token raises no release event.
+- The LAS reader reads files as lasio does where the standard leaves room (UTF-16, curves without
+  a mnemonic or colon, extra or missing data columns, decimal commas, LAS 3.0 files with LAS 2.0
+  section names), each reported; the index is never treated as null.
+
+### Fixed
+- FESAPI is found from a Windows path with backslashes; PROJ is found where it ships no CMake
+  package (Ubuntu 22.04).
+
+### Known limitations
+- Ensembles are not 5 times faster per member than v3 (I-049) and a 50-million-cell grid needs
+  about 21 GB (I-050).
+- A model from a public geological map (Hamersley, `examples/experimental`) does not pass its
+  checks (I-048).
+- RESQML exports are validated against the Energistics schemas only when the owner supplies them
+  to CI (I-034).
 
 ## [2026.3] - 2026-11-15 - Version 3: data, grids and uncertainty
 

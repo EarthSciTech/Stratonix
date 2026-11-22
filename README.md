@@ -4,7 +4,22 @@ Stratonix is a general 2D/3D geomodelling toolkit written in C++. It builds stru
 (horizons and fault planes) from a parametric design, checks them, and exports them in formats
 other software can load, Petrel first.
 
-Release 2026.3 (version 3) adds:
+Release 2026.4 (version 4) adds:
+
+- a geological engine: discrete implicit fields with free horizon values, fold frames, fault
+  displacement fields, Bayesian conditioning with posterior ensembles, geological-time
+  coordinates and topology checks, gravity and magnetics;
+- geological completeness: salt sheets, sills, dykes and injectites, fault systems (polygonal
+  networks, flower structures, duplexes), clinoforms, channel belts and lobes, volumetric
+  restoration and backstripping, fractures, heat and pressure through time;
+- real data: LAS and DLIS logs, deviation surveys, ages and well correlation, SEG-Y and
+  interpretation in time with its depth conversion, coordinate transformations, geological maps,
+  interpretation uncertainty in ensembles, RESQML in the release packages;
+- properties, uncertainty and scale: geostatistics in geological time conditioned to wells,
+  grids that follow fault traces, total-effect sensitivity, caching, and Python bindings
+  (`pip install stratonix`).
+
+Release 2026.3 (version 3) added:
 
 - models conditioned to data: a large-data implicit solver, one field per stratigraphic series,
   fault throws and profiles estimated from data, per-point data uncertainty, and parametric
@@ -26,8 +41,8 @@ Release 2026.2 (version 2) added:
 - faults as rock: Allan diagrams, shale gouge ratio, clay smear, seal capacity, slip and
   dilation tendency, and horizon curvature with fracture trends.
 
-Next come applications (v4: petroleum, CO2 and hydrogen storage, geothermal, groundwater) and a
-graphical application with bindings (v5).
+Next come applications (v5: petroleum, CO2 and hydrogen storage, geothermal, groundwater) and the
+platform (v6: browser viewer, desktop application, Petrel plug-in).
 
 - Library: `libstratonix` (namespace `stratonix`), one static library per layer.
 - Program: `stratonix` (`stratonix.exe` on Windows).

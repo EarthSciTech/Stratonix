@@ -23,6 +23,26 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Tolerance from the description or the built-in default; `source` receives where it came from.
 - `const GridProducts* grid_products();`  
   Grid products of the description's grid block (nullptr without one); computed once.
+- `repr::FaultedSurfaceCache* surfaces() { return surfaces_.get(); }`  
+  The faulted surfaces of this model, shared with the figures and exports of the build.
+- `void add_grid_property(repr::CellProperty p);`  
+  Stage 4B: add a cell property computed by the pipeline (P32, P32_DFN) before the checks run.
+- `const PotentialFieldResult* potential_fields = nullptr;`  
+  Stage 4A: station misfits of the geophysics block (C29), set by the pipeline; nullptr = none.
+- `const struct VolumetricResult* volumetric = nullptr;`  
+  Stage 4B: the volumetric restoration of the restoration block (C31), set by the pipeline.
+- `struct BasinResults`  
+  Stage 4B: heat, pressure and fracture-network results for C32 to C34, set by the pipeline.
+- `struct WellDataResults`  
+  Stage 4C (STX-TN-16 section 6): well data (C35) and age consistency (C38), set by the pipeline.
+- `struct TimeDepthResults`  
+  Stage 4C: time-depth ties after conversion (C36), set by the pipeline.
+- `struct GeostatResults`  
+  Stage 4D: geostatistical properties (C39 conditioning, C40 statistics), set by the pipeline.
+- `const ContactGraph& contact_graph();`  
+  Stage 4A: the contact graph (C26, topology.json), computed once at topology_spacing().
+- `double topology_spacing() const;`  
+  outputs.voxel_spacing (x) when given, else max(surface spacing, largest extent / 64).
 - `class Check : public registry::PluginBase`  
   Check plugin interface.
 - `CheckReport run_checks(CheckContext& ctx);`  
@@ -33,6 +53,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Register this layer's plugins.
 - `repr::FaultRockInput fault_rock_input(const desc::Description& d, const Model& m);`  
   Fault-rock and stress inputs from a description (stage 2F, STX-TN-10), in SI units.
+- `repr::StressInput stress_input(const desc::Description& d, const Model& m);`  
+  With the description's mechanical stratigraphy (stage 4B) mapped onto the model's units.
 
 ## include/stratonix/checks/manifest.hpp
 
@@ -59,6 +81,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   One-line label used in figure footers and README files.
 - `bool crs_reprojection_available();`  
   True when the library was built with PROJ (reprojection available).
+- `struct CrsOperation { std::string name, method; double accuracy = -1; };`  
+  Stage 4C (STX-TN-16 section 2.4): a transformation between two CRS chosen by PROJ, with its name, method and stated accuracy (negative when PROJ states none). Refused without PROJ.
+- `void apply(std::vector<double>& x, std::vector<double>& y, std::vector<double>& z) const;`  
+  Transform (x, y, z) in place; x, y in the CRS's axis order as easting, northing (or longitude, latitude in degrees for a geographic CRS).
 
 ## include/stratonix/core/error.hpp
 
@@ -134,7 +160,7 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 
 - `(file)`  
   Units accepted in model descriptions and their conversion to SI.
-- `enum class Dimension { Length, Angle, Dimensionless, Ordinal, Flag, Area, InverseLength, Time, Pressure, PressureGradient, Permeability, Any };`  
+- `enum class Dimension { Length, Angle, Dimensionless, Ordinal, Flag, Area, InverseLength, Time, Pressure, PressureGradient, Permeability, Density, Acceleration, MagneticField,  ///< stage 4A: kg/m3, mGal, nT Temperature, ThermalConductivity, HeatFlow, HeatProduction, Viscosity,  ///< stage 4B: degC, W/m/K, mW/m2, uW/m3, mPa.s Velocity, VelocityGradient, TravelTime,  ///< stage 4C: m/s, 1/s, ms (seismic travel time, not geological age) Any };`  
   Physical dimension of a parameter.
 - `std::optional<UnitDef> find_unit(std::string_view name);`  
   Look up a unit by name ("m", "km", "ft", "deg", "rad", "fraction", "ratio", "percent", "ordinal", "flag"). Returns nullopt if unknown.
@@ -180,6 +206,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Vertical well.
 - `WellPath(std::string name, double x, double y, double datum_z, std::vector<WellStation> stations);`  
   Deviated well from survey stations (first station at md 0).
+- `static WellPath from_positions(std::string name, double x, double y, double datum_z, const std::vector<double>& md, const std::vector<Vec3>& north_east_tvd, std::string method);`  
+  Stage 4C: a well from positions computed by a stated survey method: measured depth and (north, east, TVD) offsets from the head, TVD positive down.
+- `Vec3 at_md(double md) const;`  
+  Point at a measured depth (interpolated along the path; vertical beyond total depth).
 - `const Polyline& points() const { return pts_; }`  
   Path points (x, y, z) from the head to total depth.
 - `Vec3 at_elevation(double z) const;`  
@@ -197,6 +227,14 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Plain-words description used in README files ("assumed by the modeller", ...).
 - `struct Param`  
   A labelled parameter: value(s), unit, evidence class and source.
+- `struct WellLogDesc { std::string file, frame, index; std::vector<std::string> curves; std::filesystem::path resolved; };`  
+  Stage 4C (STX-TN-16 section 1): log files of a well, read as delivered.
+- `struct WellAgeDesc { std::string kind, name, timescale, source; Param depth, depth_base, age, sigma; };`  
+  Stage 4C: an age datum in a well (TVD below the model datum, positive down, as the tops).
+- `std::string survey_method, azimuth_reference, survey_file;`  
+  stage 4C (rule F44): the survey's calculation method and azimuth reference; both empty for a trajectory written as in v3 (minimum curvature, grid azimuths)
+- `struct PickPerturbation { bool present = false; Param sigma, correlation_length; std::uint64_t seed = 0; } surface_perturbation;`  
+  stage 4C (STX-TN-16 section 3): one realisation of the pick uncertainty of a surface in time
 - `struct SeriesDesc`  
   Stratigraphic series (STX-TN-07 section 1): consecutive horizons, youngest first.
 - `struct GrowthDesc { std::string onset, end; bool present() const { return !onset.empty(); } };`  
@@ -221,10 +259,44 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Hybrid conditioning (stage 3A, STX-TN-11 section 4): parameters of the description fitted to data.
 - `struct GridZoneDesc { std::string unit, layering = "proportional"; Param layers, layer_thickness; };`  
   Grids and properties (stage 3B, STX-TN-12 section 10).
+- `struct Upscaled { std::string curve, method, name; Param min_valid; };`  
+  stage 4C: logs upscaled to the cells the wells pass through
+- `struct VariogramDesc`  
+  stage 4D (STX-TN-17 section 1): properties simulated by geostatistics
+- `struct RestorationUnitDesc { std::string unit; Param young, poisson; };`  
+  Restoration (stage 4B, STX-TN-15 section 4): volumetric restoration of the whole model to a horizon (decision 18) and the bed-length limit of C31.
+- `struct BackstripStepDesc { std::string horizon; Param water_depth, sea_level; };`  
+  Backstripping (STX-TN-15 section 4.4).
+- `struct ErodedSectionDesc { std::string name, well, unconformity, log; Param surface_porosity, decay, vitrinite_estimate; };`  
+  Eroded-section estimates from porosity logs (STX-TN-15 section 4.5).
+- `struct MechanicsUnitDesc { std::string unit; Param young, poisson, ucs, biot; };`  
+  Mechanical stratigraphy and tectonic strain (stage 4B, STX-TN-15 section 5.3, I-033).
+- `struct FractureUnitDesc { std::string unit; Param p32_0, a_k, a_e, p32_max; };`  
+  Fracture intensity per unit and discrete fracture networks (STX-TN-15 sections 5.1, 5.2).
+- `struct HeatUnitDesc { std::string unit; Param conductivity, heat_production; };`  
+  Heat (STX-TN-15 section 6.1).
+- `struct PressureUnitDesc { std::string unit, law; Param k0, b, phi0; };  ///< exponential: k0 exp(b (phi - phi0)); kozeny_carman: k0 (phi/phi0)^3 ((1-phi0)/(1-phi))^2 struct PressureDesc { bool present = false; Param viscosity, rho_water, rho_grain; std::vector<PressureUnitDesc> units; };`  
+  Overpressure from disequilibrium compaction (STX-TN-15 section 6.2).
+- `struct GeobodyDesc`  
+  Geobodies (stage 4B, STX-TN-15 section 3.3): channel belts and lobes placed inside a unit in geological-time coordinates, so they follow the unit's deformation.
+- `struct BodyDesc`  
+  Bodies (stage 4B, STX-TN-15 section 1): salt sheets, sills, saucer sills, dykes, injectites.
+- `struct GeophysicsUnitDesc { std::string unit; Param density, susceptibility; };`  
+  Gravity and magnetics (stage 4A, STX-TN-14 section 7).
 - `struct UncertainParamDesc { std::string path, distribution; Param mean, sd, min, max, mode, values, weights; };`  
   Uncertainty (stage 3C, STX-TN-13 section 6).
+- `struct PickUncertaintyDesc { std::string horizon; Param sigma, correlation_length; };`  
+  stage 4C (STX-TN-16 section 3): pick and velocity uncertainty carried into depth
+- `struct Sensitivity { bool present = false; std::string method; Param base_samples, bootstrap, confidence; } sensitivity;`  
+  stage 4D (STX-TN-17 section 3): total-effect sensitivity by a Saltelli design
 - `struct Description`  
   A complete, validated model description.
+- `struct VelocityPerturbation { bool present = false; Param v0_sigma, k_sigma, correlation_length; std::uint64_t seed = 0; };`  
+  stage 4C (STX-TN-16 section 2.3, decision 23): layer-cake velocity model one realisation of a layer's velocity uncertainty (STX-TN-16 section 3; written by the ensemble)
+- `struct SeismicDesc { bool present = false; std::string input, domain; int il = 0, xl = 0, x = 0, y = 0; } seismic;`  
+  stage 4C: a SEG-Y volume for sampling and display
+- `struct MapSource { std::string input, format, layer, field; };`  
+  stage 4C (section 2.5): a model from a geological map
 - `std::vector<const EventDesc*> events_for(const std::string& type, const std::string& ref) const;`  
   Events referring to a fault, primitive or body (stage 2E).
 - `int series_of(int h) const;`  
@@ -263,6 +335,32 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 - `std::vector<Issue> validate_schema(const Node& doc, const Node& schema, const RefHook& hook = {});`  
   Validate a document against a JSON Schema (the subset used by Stratonix: type, enum, const, properties, required, additionalProperties, items, minItems, minProperties, pattern, minLength, minimum, oneOf, anyOf, local $ref).
 
+## include/stratonix/engines/ages.hpp
+
+- `(file)`  
+  Stage 4C (STX-TN-16 section 1.4): age data in wells and correlation by age.
+- `double age_at_depth(const std::vector<AgeDatum>& data, double depth, AgeRule rule);`  
+  Age at a depth between the dated samples of one well (NaN outside the dated interval).
+- `double depth_of_age(const std::vector<AgeDatum>& data, double age, AgeRule rule);`  
+  Depth of an age in one well (NaN when the age lies outside the dated interval).
+
+## include/stratonix/engines/bodies.hpp
+
+- `struct SheetBody`  
+  An allochthonous salt sheet: footprint polygon (x, y), flat base, thickness tapering linearly to zero over `taper` metres inside the footprint edge.
+- `double thickness_at(double x, double y) const;`  
+  thickness at (x, y): 0 outside the footprint
+- `double sheet_volume(const SheetBody& s, double spacing);`  
+  Volume of a sheet integrated on a grid of the given spacing (m^3).
+- `struct SillBody`  
+  A circular sill with the elliptical crack profile h(r) = h0 sqrt(1 - r^2 / a^2) and the forced fold above it, w(r) = w0 (1 - r^2 / a^2)^2, with w0 set by volume and the accommodation factor.
+- `struct InjectiteSpec`  
+  Sand injectite complex sourced from a parent unit (sheets seeded and reproducible).
+- `struct BodyReport`  
+  A body placed in a model (capability "bodies" of a model with bodies).
+- `ModelPtr wrap_bodies(const desc::Description& d, ModelPtr base, BuildLog& log);`  
+  Wrap a built model with the description's bodies (STX-TN-15 section 1). Bodies take the unit query where they occupy a point (youngest first); sills lift their roof and salt sheets their overburden (the host is evaluated at the undeformed position); restoration removes the bodies. Throws Error(Build) for a body that crosses a rule (for example a younger fault crossing it).
+
 ## include/stratonix/engines/builder.hpp
 
 - `(file)`  
@@ -296,16 +394,45 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Station throws and the fitted profile of every horizon with data on both sides. s is measured along strike, direction (sin strike, cos strike), from plane.centroid.
 - `struct StickProfile`  
   Profile of dip against depth fitted to the sticks of a listric or ramp-flat fault (STX-TN-11 section 3.2): depths (m, positive down) and dips (rad), the strike of the plane fit, the shallowest point of the mean profile and the RMS distance of the stick points.
+- `struct DisplacementObservation { double s = 0, d = 0, throw_m = 0; int horizon = -1; };`  
+  Displacement field over a fault surface (stage 4A, STX-TN-14 section 3.1): T(s, d) = T_max f_s(2 (s - s0) / Ls) f_d(2 (d - d0) / Ld), fitted to the cut-off separations of every horizon. s along strike from the plane's centroid, d down dip (m) from the centroid.
+- `std::vector<DisplacementObservation> displacement_observations(const FittedPlane& plane, const std::vector<ThrowEstimate>& est, const std::vector<HorizonPoint>& pts);`  
+  Observations from the stage 3A stations of every horizon (station s, the cut-off's down-dip position from its depth and the plane's dip).
+- `struct FaultDataSet`  
+  Fault relations inferred from data and rules (STX-TN-14 section 3.2).
 - `struct FittedParameter`  
   Hybrid conditioning (STX-TN-11 section 4).
 - `std::vector<std::pair<std::size_t, double>> controlling;`  
   The data (index into ConditioningResult::residuals) with the largest sensitivity, and their share of the parameter's variance.
+- `struct ConditioningDatum`  
+  A conditioning datum: an interface point or orientation (or, from stage 4A, a gravity or magnetic station) with its stated uncertainty.
+- `class ConditioningProblem`  
+  The data, parameters and admissible ranges of d.conditioning, and the forward model: normalised residuals at a parameter vector (SI). Thread-safe: each evaluation builds its own model from its own copy of the description (stage 4A, STX-TN-14 section 4).
+- `bool residuals(const std::vector<double>& x, std::vector<double>& r, std::vector<double>* raw = nullptr) const;`  
+  Normalised residuals (value / sigma); raw values when asked. False when the model cannot be built at x.
+- `const desc::Description& base() const { return dd_; }`  
+  The description used for the builds (conditioning removed, control wells as check wells).
 - `ConditioningResult condition_to_data(const desc::Description& d, const BuildInputs& in, BuildLog& log);`  
   Fit the parameters named in d.conditioning to the data. Never throws for a failed fit: the result says why (converged = false).
 - `class ParametricModel;`  
   A parametric model built from the fitted description, with its conditioning result: capability("conditioning") -> const ConditioningResult*, "data_misfit" -> the residuals.
+- `ConditionedModel(std::shared_ptr<ParametricModel> inner, ConditioningResult r, std::shared_ptr<const PosteriorResult> posterior = nullptr);`  
+  `posterior`: the samples of conditioning.method: bayesian (capability "posterior").
 - `ModelPtr build_conditioned_model(const desc::Description& d, const BuildInputs& in, BuildLog& log);`  
-  Condition and build (the parametric builder calls this for a description with conditioning). Throws Error(Build) with the reason when the fit is refused.
+  Condition and build (the parametric builder calls this for a description with conditioning). With conditioning.method: bayesian the posterior is sampled too and the model is the least-squares fit with the posterior attached. Throws Error(Build) with the reason when the fit or the sampler is refused.
+
+## include/stratonix/engines/depositional.hpp
+
+- `std::vector<Vec3> onlap_line(const std::function<double(double, double)>& horizon, const std::function<double(double, double)>& surface, const GridSpec& g);`  
+  The termination line where horizon z = h(x, y) meets surface z = s(x, y), sampled on a grid.
+- `std::vector<Geobody> place_lobes(const LobeSpec& s, const UnitBox& u, std::uint64_t seed);`  
+  Lobes: elliptical in plan, a flat base and a lens-shaped top (thickness t (1 - r^2)), seeded.
+- `double net_to_gross(const std::vector<Geobody>& b, const UnitBox& u, double spacing);`  
+  Volume fraction of the unit inside any geobody, on a lattice of the given spacing.
+- `struct GeobodyReport`  
+  A set of geobodies in a model (capability "geobodies"): one facies unit per set.
+- `ModelPtr wrap_geobodies(const desc::Description& d, ModelPtr base, BuildLog& log);`  
+  Wrap a built model with the description's geobodies (STX-TN-15 section 3.3). A point of the host unit is mapped to its restored position and its fraction of the unit's restored thickness; the geobodies are placed in that box, so they follow the unit's deformation. Later sets take a point before earlier ones (erosional).
 
 ## include/stratonix/engines/faults.hpp
 
@@ -412,6 +539,98 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 - `void register_fault_plugins();`  
   Register built-in kinematics and hanging-wall plugins (part of register_engine_plugins()).
 
+## include/stratonix/engines/faultstyles.hpp
+
+- `std::vector<std::pair<double, double>> breached_relay_throw(const RelaySpec& s, int samples);`  
+  Summed throw along strike across a breached relay: (along-strike position, summed throw).
+- `std::vector<Vec3> trishear_curved(const std::vector<Vec3>& fault, const TrishearParams& p, const std::vector<Vec3>& points);`  
+  Points (x, z) displaced by trishear with the tip propagating along the fault polyline (x, z).
+- `std::vector<double> growth_thickness(const GrowthSpec& s);`  
+  Thickness of each growth unit across the fault (hanging wall minus footwall).
+
+## include/stratonix/engines/fields.hpp
+
+- `(file)`  
+  Stage 4A (STX-TN-14 section 1): discrete implicit field on a regular grid with free horizon values, solved by preconditioned conjugate-gradient least squares, coarse to fine.
+- `struct HorizonDatum`  
+  An interface point of horizon `horizon` (index in the series' own horizon list).
+- `struct DiscreteOptions`  
+  Options of the discrete field (`implicit.discrete`).
+- `class DiscreteField`  
+  Field s(x) = trilinear interpolation of node values on a regular grid covering `box`, fitted by least squares to interface rows s(p) - c_k = 0, orientation rows (two tangent rows and one unit-magnitude row) and second-difference regularisation. The horizon values c_k are unknowns, except the anchor's and those given in `fixed` (NaN = free).
+- `const std::vector<double>& horizon_values() const { return values_; }`  
+  Value of every horizon (fitted or fixed), by horizon index; NaN for a horizon without data.
+- `std::string summary() const;`  
+  Rows written to the log: grid, levels, iterations, residual, values.
+- `std::string horizon_order_problem(const std::vector<double>& values, const std::vector<std::string>& names);`  
+  Rule F34: horizon values must decrease from the youngest horizon (index 0) to the oldest. Returns "" when they do, else the first pair out of order, named.
+
+## include/stratonix/engines/foldframe.hpp
+
+- `(file)`  
+  Stage 4A (STX-TN-14 section 2): fold frames fitted to bedding (and axial foliation) orientations: fold axis, axial surface and the fold rotation angle as a Fourier series of the distance to the axial surface; predicted bedding normals constrain the series' field.
+- `struct OrientationDatum`  
+  An orientation measurement: position and unit normal (pointing up for bedding).
+- `double frame_coordinate(const Vec3& x) const;`  
+  Signed distance to the axial surface (the fold-frame coordinate).
+- `double rotation_angle(double c) const;`  
+  Fold rotation angle (rad) at fold-frame coordinate c.
+- `Vec3 bedding_normal(const Vec3& x) const;`  
+  Predicted unit bedding normal at x (pointing up).
+- `FoldFrame fit_fold_frame(const std::vector<OrientationDatum>& bedding, const std::vector<OrientationDatum>& foliation, const FoldFrameOptions& o);`  
+  Fit a fold frame to bedding orientations, with axial foliation when measured.
+
+## include/stratonix/engines/fractures.hpp
+
+- `double fracture_intensity(double k_max, double e_max, const FractureLaw& law);`  
+  P32 (1/m) from the maximum absolute principal curvature (1/m) and maximum strain.
+- `struct DfnResult { bool ok = false; std::string reason; std::vector<Disk> disks; };`  
+  Baecher disks in a box with expected P32; refused (empty, reason) above `limit` disks.
+- `double realised_p32(const std::vector<Disk>& d, const BBox& box);`  
+  Realised P32 of disks (area of disk parts inside the box / box volume).
+- `std::pair<double, double> horizontal_stress(double sigma_v, double pore, double alpha, double young, double poisson, double e_h, double e_H);`  
+  Horizontal stresses of a layer (Thiercelin and Plumb 1994): returns (sigma_h, sigma_H) in Pa.
+
+## include/stratonix/engines/geophysics.hpp
+
+- `(file)`  
+  Stage 4A (STX-TN-14 section 7): gravity and magnetic forward modelling of a model discretised into right rectangular prisms.
+- `double prism_gz(const Vec3& obs, double x1, double x2, double y1, double y2, double z1, double z2, double rho);`  
+  Vertical gravity anomaly (mGal, positive down) at `obs` of the prism [x1,x2]x[y1,y2]x[z1,z2] (elevations, z up) with density contrast rho (kg/m^3) (Nagy et al. 2000).
+- `double prism_dt(const Vec3& obs, double x1, double x2, double y1, double y2, double z1, double z2, const Vec3& M, const Vec3& F);`  
+  Total-field anomaly (nT) at `obs` of a uniformly magnetised prism with magnetisation M (A/m, vector, z up) for an inducing field direction F (unit vector, z up) (Bhattacharyya 1964; Blakely 1995).
+- `Vec3 field_direction(double inclination, double declination);`  
+  Unit vector of a field with inclination and declination (rad; inclination positive down, declination clockwise from north) in x east, y north, z up.
+- `std::vector<double> gravity_anomaly(const Model& m, const PotentialFieldSpec& s, const std::vector<Vec3>& stations);`  
+  Anomalies at stations (mGal / nT) of the model's units between z_top and z_base of its domain.
+- `PotentialFieldSpec potential_field_spec(const desc::Description& d, const ModelInfo& info);`  
+  The spec of a description's geophysics block for a model (densities and susceptibilities by unit name; cell default outputs.voxel_spacing x, else the largest horizontal extent / 64).
+- `struct StationMisfit`  
+  Observed against modelled at every station of the description's geophysics block.
+
+## include/stratonix/engines/geostat.hpp
+
+- `(file)`  
+  Stage 4D (STX-TN-17 section 1, decision 24): variograms, normal scores, sequential Gaussian and indicator simulation, and object-based facies, on points given in geological-time coordinates (u, v, w). Seeded and reproducible byte for byte on every platform.
+- `struct VariogramStructure`  
+  One nested structure: type "spherical", "exponential" or "gaussian" (practical ranges).
+- `double gamma(const Vec3& h) const;`  
+  gamma for a separation vector (du, dv, dw) in metres.
+- `double covariance(const Vec3& h) const;`  
+  covariance C(h) = sill - gamma(h).
+- `Variogram fit_variogram(const ExperimentalVariogram& e, const Variogram& start, bool fit_nugget, std::size_t min_pairs);`  
+  Weighted least squares (weights N(h) / gamma(h)^2, Cressie 1985) of the free parameters of `start` (contributions and ranges; the nugget when `fit_nugget`).
+- `class NormalScore`  
+  Normal-score transform of a declustered distribution with linear tails to [zmin, zmax].
+- `std::vector<double> decluster_weights(const std::vector<Vec3>& points, double cell);`  
+  Cell-declustering weights (cell size `cell`, Deutsch and Journel 1998 `declus`).
+- `std::vector<double> sgs(const std::vector<Vec3>& nodes, const std::vector<ConditioningPoint>& data, const Variogram& v, const SearchOptions& s, std::uint64_t seed, const std::vector<double>& local_mean = {});`  
+  Sequential Gaussian simulation of normal scores at `nodes` (geological-time coordinates): conditioning values (already normal scores) at their nodes, optional local means; returns one value per node.
+- `std::vector<int> sis(const std::vector<Vec3>& nodes, const std::vector<std::pair<std::size_t, int>>& data, const std::vector<double>& proportions, const std::vector<Variogram>& v, const SearchOptions& s, std::uint64_t seed);`  
+  Sequential indicator simulation of facies codes 0..K-1 with target proportions and one variogram per code; conditioning codes at their nodes.
+- `struct ObjectSpec`  
+  Object-based facies: channels (width, thickness, sinuosity, azimuth) or lobes (radius, thickness) placed by a seeded marked point process in (u, v, w) until the target proportion; wells' facies honoured by rejection and repositioning.
+
 ## include/stratonix/engines/history.hpp
 
 - `std::vector<double> event_ages(const desc::Description& d);`  
@@ -464,6 +683,52 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Erosional surfaces that no fault displaces (stage 2E): they truncate the older horizons in the present geometry, after the faulting they postdate.
 - `bool above_post_erosion(const Vec3& p) const`  
   True when p lies above an erosional surface no fault displaces: younger material that never moved (its restoration is the identity).
+
+## include/stratonix/engines/posterior.hpp
+
+- `(file)`  
+  Stage 4A (STX-TN-14 section 4): Bayesian conditioning. Priors from the description's distributions or ranges, Gaussian likelihood of the data residuals, an affine-invariant ensemble sampler (stretch move), split R-hat and effective sample size.
+- `struct PriorSpec`  
+  Prior of one parameter (SI units).
+- `using LogDensity = std::function<double(const std::vector<double>&)>;`  
+  A log-posterior over a parameter vector (SI): NaN or -inf rejects the point.
+- `PosteriorResult sample_ensemble(const LogDensity& f, const std::vector<std::vector<double>>& start, const PosteriorOptions& o);`  
+  Sample a log density with the affine-invariant ensemble sampler, walkers started from `start` (one vector per walker). Each walker moves by a differential-evolution move (probability de_fraction) or a stretch move, both built from the complementary half of the ensemble. Deterministic for a given seed whatever the number of threads.
+- `double split_rhat(const std::vector<std::vector<double>>& chains);`  
+  Split R-hat (Vehtari et al. 2021, without rank normalisation) of one parameter over chains [chain][draw].
+- `double effective_sample_size(const std::vector<std::vector<double>>& chains);`  
+  Effective sample size: draws over the integrated autocorrelation time, estimated from the walker-averaged autocorrelation function with Sokal's automatic window (Goodman and Weare 2010).
+- `PosteriorOptions posterior_options(const desc::Description& d);`  
+  Sampler options from conditioning.sampler (defaults where a key is absent).
+- `PosteriorResult sample_posterior(const desc::Description& d, const BuildInputs& in, const PosteriorOptions& o, BuildLog& log);`  
+  Bayesian conditioning of a description (conditioning.method: bayesian): priors, likelihood of the data residuals, sampler started around the least-squares fit.
+
+## include/stratonix/engines/restoration3d.hpp
+
+- `struct UnfoldResult { std::vector<Vec3> restored; double present_length = 0, restored_length = 0; };`  
+  Flexural-slip unfolding of a horizon polyline (x, z) in a section to its datum elevation, pinned at `pin_x`: bed length measured along the horizon is conserved.
+- `struct VolumetricSpec`  
+  3D volumetric restoration (decision 18): linear elasticity on a tetrahedral mesh, the horizon flattened to its datum, faults as sliding contacts.
+- `std::vector<std::pair<double, double>> unit_props;`  
+  per model unit: Young's modulus and Poisson's ratio (empty: young and poisson everywhere)
+- `struct StrainSample`  
+  Strain of one tetrahedron (Green-Lagrange, from the total deformation present -> restored).
+- `double block_porosity(double phi0, double c, double burial_depth);`  
+  Porosity of a unit in its own fault block at the block's burial depth (compaction across faults moving during burial): Athy phi = phi0 exp(-c z).
+- `double airy_tectonic_subsidence(double sediment, double rho_s, double rho_m, double rho_w, double water_depth, double sea_level_change);`  
+  Airy tectonic subsidence (Steckler and Watts 1978).
+- `double flexural_response(double k, double te, double young, double poisson, double delta_rho);`  
+  Flexural response of an elastic plate to a periodic load of wavenumber k (fraction of Airy).
+- `struct BackstripSpec`  
+  Backstripping of the burial history (STX-TN-15 section 4.4): per deposition step, the sediment above the basement horizon, its mean density from the compaction laws, and the tectonic subsidence by Airy isostasy and, with Te > 0, by an elastic plate (on a map grid).
+- `std::vector<TectonicStep> backstrip_column(const Structure& st, const BackstripSpec& s, double x, double y);`  
+  At one location: Airy only.
+- `struct BackstripMaps { std::size_t n = 0; std::vector<std::string> labels; std::vector<double> ages; std::vector<std::vector<double>> airy, flexural; };`  
+  On an n x n grid over the domain, with flexure when te > 0: per step, the Airy and flexural tectonic subsidence grids (row-major, x fastest).
+- `double backstrip_map_value(const BackstripMaps& m, const std::vector<double>& grid, const Domain& dom, double x, double y);`  
+  Bilinear value of a map at (x, y).
+- `double eroded_section(const std::vector<std::pair<double, double>>& log, double phi0, double c);`  
+  Eroded section from a porosity log (depth below the unconformity, porosity) against the normal Athy trend phi0 exp(-c z): the maximum burial minus the present depth (m).
 
 ## include/stratonix/engines/structure.hpp
 
@@ -536,6 +801,59 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 - `double compaction_round_trip(int u, double x, double y) const;`  
   Present thickness after decompaction to the surface and compaction back (C16 round trip).
 
+## include/stratonix/engines/surveys.hpp
+
+- `(file)`  
+  Stage 4C (STX-TN-16 section 1.3): deviation surveys by a stated calculation method.
+- `std::vector<SurveyPoint> survey_positions(const std::vector<SurveyStation>& stations, const SurveySpec& spec);`  
+  Positions relative to the head (north and east in the grid frame, TVD positive down). Refused (Error) when the azimuth reference is unstated.
+
+## include/stratonix/engines/thermal.hpp
+
+- `std::vector<double> steady_temperature(const std::vector<ThermalLayer>& layers, double t_surface, double q_surface);`  
+  Steady temperatures at the top of the column and at each layer base, with surface temperature and surface heat flow (W/m^2, positive upward).
+- `std::vector<double> transient_temperature(const TransientSpec& s);`  
+  Temperatures at equally spaced nodes (top first) after `time`.
+- `double gibson_overpressure_base(const GibsonSpec& s);`  
+  Overpressure (Pa) at the base of a column deposited at a constant rate (Gibson 1958).
+- `struct ColumnProps`  
+  Per model unit (index): grain conductivity, heat production, and the pressure laws; units without values take the deepest given unit's.
+- `struct ThermalHistory`  
+  Temperature and EASY%Ro of each horizon through the steps of the burial history at (x, y).
+- `struct PressureHistory`  
+  Excess pore pressure of each horizon through the steps (disequilibrium compaction, Gibson 1958; Bethke 1985), and the present profile with its hydrostatic and lithostatic bounds.
+- `double easy_ro(const std::vector<std::pair<double, double>>& path);`  
+  EASY%Ro (Sweeney and Burnham 1990) of a time-temperature path (Ma, degC), oldest first.
+
+## include/stratonix/engines/timedepth.hpp
+
+- `(file)`  
+  Stage 4C (STX-TN-16 section 2.3, decision 23): layer-cake time-to-depth conversion with an instantaneous velocity linear in depth per layer, calibrated to wells.
+- `struct LayerVelocity { double v0 = 2000, k = 0; };`  
+  v(z) = v0 + k z (z positive down from the datum, m; v in m/s; k in 1/s). k = 0: constant velocity.
+- `double layer_thickness(const LayerVelocity& v, double zt, double dt);`  
+  Thickness of a layer whose top is at depth zt, crossed in one-way time dt (s).
+- `double layer_time(const LayerVelocity& v, double zt, double zb);`  
+  One-way time to cross from zt to zb.
+- `std::function<std::vector<double>(double, double)> base_twt;`  
+  two-way times (s) of the layer bases at (x, y); size = layers
+- `std::function<std::vector<LayerVelocity>(double, double)> velocity;`  
+  velocity of each layer at (x, y) (v0 may vary laterally)
+- `std::vector<double> base_depths(const VelocityModel& m, double x, double y);`  
+  Depths of the layer bases at (x, y) (m, positive down).
+- `struct WellTie { std::string well; double x = 0, y = 0; std::vector<double> top_depth, top_twt; double weight = 1; };`  
+  A well's data for calibration: the depths of the layer bases (tops) and their two-way times.
+- `Calibration calibrate(const std::vector<WellTie>& wells, std::size_t layers, const std::vector<std::string>& exclude = {}, const std::vector<double>& fixed_k = {});`  
+  k by weighted least squares per layer (user weights only), v0 solved per well so the layer ties. `fixed_k`: per layer, a stated k (NaN or absent: fitted). Tops at NaN are not used.
+- `struct VelocityUncertainty { double v0_sigma = 0, k_sigma = 0, pick_sigma_ms = 0; };`  
+  Stage 4C (Prompt 57): depth spread of one layer base from velocity and pick uncertainty.
+- `std::vector<double> correlated_field(std::size_t nx, std::size_t ny, double dx, double dy, double sigma, double L, std::uint64_t seed);`  
+  Section 3: one realisation of a spatially correlated error on a regular lattice (nx by ny nodes at spacings dx, dy): zero mean, standard deviation `sigma`, covariance sigma^2 exp(-(r/L)^2), made as a moving average of white noise with a Gaussian kernel (Oliver 1995). L not positive: one value for the whole lattice (fully correlated); L below the spacing: independent nodes. Portable stream (SplitMix64 and Box-Muller): identical on every platform for a seed.
+- `void condition_field(std::vector<double>& f, std::size_t nx, std::size_t ny, double dx, double dy, double L, const std::vector<std::pair<double, double>>& pts);`  
+  Conditions a zero-mean field to zero at points by simple kriging of its values there with the field's covariance (conditional simulation, Journel and Huijbregts 1978): f(x) - c(x)^T C^-1 f(x_i). `pts` are lattice coordinates (i, j as real numbers).
+- `double seeded_normal(std::uint64_t seed, std::uint64_t index);`  
+  A standard normal value from a seed and an index (portable).
+
 ## include/stratonix/engines/wells.hpp
 
 - `(file)`  
@@ -578,8 +896,14 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Figure set: sections along polylines, map views per horizon, 3D views, fence diagram. Built only from the Model interface and representations. Every figure is written as PNG (300 dpi), SVG (text as text), TIFF (300 dpi, LZW, RGB, no alpha) and PPTX (one 16:9 slide with title, caption and notes), named by the figure naming rule, with a footer stating the coordinate system, vertical datum and evidence basis.
 - `struct FigureContext`  
   Information every figure needs besides the model.
+- `repr::FaultedSurfaceCache* surfaces = nullptr;`  
+  Faulted surfaces of `model` shared with the checks and exports (may be null).
 - `struct Burial`  
   Burial history at a location (stage 2D, STX-TN-08 section 4): burial depth of each horizon per step (NaN before deposition); ages in Ma when every horizon has one.
+- `std::vector<double> tectonic_airy, tectonic_flexural;`  
+  stage 4B: tectonic subsidence per step (Airy; flexural when Te > 0), empty when not computed
+- `struct Field`  
+  stage 4B: a value per step and horizon (temperature, overpressure) drawn as colour between the burial curves; NaN where it is not computed
 - `bool fault_rock = false;`  
   Fault rock and stress (stage 2F, STX-TN-10): Allan diagram and fault-surface attributes.
 - `std::string figure_basename(const FigureContext& c, const std::string& kind, const std::string& name);`  
@@ -588,6 +912,14 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Flexural-slip unfolded section (stage 2E): every bed straightened along its own length.
 - `Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b);`  
   Burial-history curves at one location (stage 2D).
+- `struct WellPanel`  
+  Stage 4C (STX-TN-16 section 1.6): a well log panel - tracks of curves by depth with tops, age data and the model's units along the well.
+- `struct CorrelationPanel`  
+  Wells side by side by TVD below the model datum with the correlation lines, each labelled with the age and rule (or the tops) it rests on.
+- `Figure seismic_section_figure(const FigureContext& c, const repr::Section& s, const std::vector<float>& amp, const std::string& how);`  
+  Stage 4C (STX-TN-16 section 2.2): seismic amplitude along a section, in depth through the stated velocity model, with the model's horizons and faults drawn over it. `amp` is s.nz x s.ns, rows from the section's top (NaN outside the volume).
+- `Figure burial_field_figure(const FigureContext& c, const FigureContext::Burial& b, const FigureContext::Burial::Field& fd);`  
+  The burial curves coloured by a field between consecutive horizons and steps (stage 4B).
 - `Figure isopach_figure(const FigureContext& c, int unit, const Grid2D& thickness, const std::vector<repr::TerminationLine>& terminations);`  
   Isopach map of a unit (stage 2C): vertical thickness per fault block, with its termination lines.
 - `struct StrikeThrowSeries`  
@@ -596,6 +928,18 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Displacement on one fault surface (lattice of fault_surface) with the cut-offs of each horizon. Stage 2F (STX-TN-10): a fault-surface attribute (SGR, CSP, thickness, seal capacity, slip or dilation tendency, reactivation pressure) seen from the hanging wall, with the cut-offs. vmin/vmax NaN: the range of the values.
 - `struct FittedRow { std::string path, unit; double start, value, sigma, min, max; };`  
   Stage 3A (STX-TN-11): fitted parameters against their admissible ranges (start, fitted value with +-2 sigma), one row per parameter.
+- `struct PosteriorSamples`  
+  Stage 4A (STX-TN-14 section 4): posterior samples for the trace and corner figures, in the parameters' units. chain[walker * steps + step][parameter], after burn-in.
+- `struct AnomalyStation { double x = 0, y = 0, observed = 0, modelled = 0, sigma = kNaN; };`  
+  Stage 4A (STX-TN-14 section 7): gravity or magnetic stations, observed against modelled.
+- `Figure anomaly_map_figure(const FigureContext& c, const std::string& kind, const std::string& unit, const std::vector<AnomalyStation>& st, double chi2_reduced);`  
+  Three maps: observed, modelled (same colour scale) and residual (modelled - observed).
+- `Figure wheeler_figure(const FigureContext& c, const WheelerDiagram& w);`  
+  Wheeler diagram (Wheeler 1958): distance along a section against geological time, coloured by unit; hiatuses blank; horizon ages as dashed lines.
+- `Figure posterior_trace_figure(const FigureContext& c, const PosteriorSamples& s);`  
+  Trace plot: every walker's path per parameter (at most 16 walkers drawn), with R-hat and ESS.
+- `Figure posterior_corner_figure(const FigureContext& c, const PosteriorSamples& s);`  
+  Corner plot: marginal histograms with the 95 % interval, and pairwise scatter of the thinned samples (at most 6 parameters).
 - `struct MisfitPoint { double x, y, misfit, normalised; };`  
   Data misfit map of one horizon: data positions coloured by normalised misfit (r / sigma, -3 to 3) where an uncertainty is stated, else by misfit in metres.
 - `Figure allan_figure(const FigureContext& c, int fault, const repr::FaultSurface& fs, const std::vector<repr::FaultRockPoint>& pts, const std::vector<std::vector<repr::CutoffLine>>& cutoffs);`  
@@ -610,12 +954,14 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Stage 3C (STX-TN-13): ensemble figures. Each states the members it rests on and the seed.
 - `struct TornadoBar { std::string parameter; double low = 0, high = 0; };`  
   Tornado chart of one key number: per parameter, its value at the parameter's P10 and P90.
-- `Figure histogram_figure(const FigureContext& c, const std::string& key, const std::vector<double>& values, double p10, double p50, double p90, const EnsembleLabel& l);`  
-  Histogram of a key number over the ok members, with P10, P50 and P90 marked.
+- `struct VariogramSeries`  
+  Histogram of a key number over the ok members, with P10, P50 and P90 marked. Stage 4D (STX-TN-17 section 1.6): experimental variograms (points sized by their pairs) with the model, per direction, and a property's histogram against the wells' upscaled values.
 - `Figure sobol_figure(const FigureContext& c, const std::string& key, const std::vector<std::pair<std::string, double>>& indices, double threshold, const EnsembleLabel& l);`  
   First-order variance-based indices of one key number, per parameter.
-- `Figure probability_map_figure(const FigureContext& c, const std::string& what, const Grid2D& p, const EnsembleLabel& l);`  
-  Probability map (fraction of the ok members) on a regular lattice.
+- `struct EffectBar { std::string parameter; double s1 = 0, s1_lo = 0, s1_hi = 0, st = 0, st_lo = 0, st_hi = 0; };`  
+  Probability map (fraction of the ok members) on a regular lattice. Stage 4D (STX-TN-17 section 3.2): first-order and total-effect indices together, with their bootstrap intervals, for one key number.
+- `Figure scalar_map_figure(const FigureContext& c, const std::string& title, const std::string& subtitle, const std::string& bar_label, const Grid2D& g, double vmin, double vmax);`  
+  Stage 4B: a scalar map over the domain (grey where undefined), with a colour bar from vmin to vmax.
 - `Figure grid_view3d_figure(const FigureContext& c, const repr::CornerPointGrid& g, double azimuth_deg, double elevation_deg);`  
   3D view of the grid's outer faces coloured by zone.
 - `WrittenFigure write_figure(const Figure& f, const std::filesystem::path& folder, const std::string& basename, const std::string& title, const std::string& caption, const std::string& notes);`  
@@ -651,6 +997,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Grid keywords SPECGRID, COORD, ZCORN, ACTNUM (depth positive down), the integer properties ZONE, BLOCK and FACIES, real properties, MULTX / MULTY and FAULTS; every keyword has a comment header with provenance, unit and evidence class.
 - `constexpr double kGrdeclMissing = -999.25;`  
   Missing values of real properties in GRDECL (stated in the file's header).
+- `void write_grdecl(std::ostream& os, const repr::CornerPointGrid& g, const repr::PropertySet* props, const repr::TransmissibilityResult* trans, const GrdeclInfo& info, int dec = 3);`  
+  The same file written to a stream as it is made (stage 4D: never held whole in memory).
 - `struct VtuData`  
   VTK XML unstructured grid (ASCII) of triangles or polylines with optional point and cell arrays.
 - `VtuData grid_vtu(const repr::CornerPointGrid& g, const repr::PropertySet* props);`  
@@ -673,6 +1021,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Stage 3B (STX-TN-12): the grid of the description's grid block and what goes with it.
 - `std::vector<std::string> comments() const;`  
   Lines written at the top of every file that takes comments (model, CRS, z convention).
+- `void share_surfaces(repr::FaultedSurfaceCache* c) { shared_ = c; }`  
+  Share the faulted surfaces already made by the checks of the same model (stage 4B, I-020).
 - `Grid2D block_surface(int h, BlockCode b, int dilate = 2);`  
   Per-block surface of horizon h for block b, kept on the block's footprint on that horizon dilated by `dilate` nodes (so it reaches across the fault gap); NaN elsewhere.
 - `std::vector<BlockCode> blocks_on(int h);`  
@@ -691,6 +1041,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Write the listed exporters into folder (must be new or empty) plus README.txt describing every file, the coordinate system, units, z convention and the Petrel import option.
 - `std::string export_readme(const ExportContext& c, const std::vector<ExportedFile>& files, const std::string& evidence_note);`  
   README text for an export folder.
+- `std::vector<std::string> optional_components();`  
+  Stage 4C (STX-TN-16 section 4): the optional readers and exporters this build includes, one line each ("RESQML 2.0.1 export (FESAPI): included" ...), for `stratonix version` and packages.
 
 ## include/stratonix/io/io.hpp
 
@@ -700,6 +1052,12 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Data read by an importer. Coordinates are as in the file (z as written; see z_is).
 - `class Importer : public registry::PluginBase`  
   Importer plugin interface.
+- `ImportedData read_input(const std::string& format, const std::filesystem::path& file);`  
+  Stage 4D (STX-TN-17 section 4.1): read an input through its importer, from a process-wide cache when one is switched on (key: format, path, size and modification time; the cached data are the importer's own result, so cached and uncached builds read the same values).
+- `bool set_input_cache(bool on);`  
+  Switch the input cache on or off (off clears it). Returns the previous state.
+- `std::size_t input_cache_hits();`  
+  Reads served from the cache since it was switched on.
 - `std::string write_irap_ascii(const Grid2D& g, int decimals = 4);`  
   IRAP classic ASCII grid. Header: -996 nrow xinc yinc / xmin xmax ymin ymax / ncol rot xrot yrot / 0 0 0 0 0 0 0; values x fastest from (xmin, ymin), 6 per line, undefined = 9999900.0.
 - `std::string write_zmap(const Grid2D& g, const std::string& name, const std::vector<std::string>& comments, int decimals = 4);`  
@@ -710,6 +1068,54 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Read the input grids a description refers to (surfaces and isochores) with the registered importers.
 - `void register_io_plugins();`  
   Register this layer's plugins.
+
+## include/stratonix/io/maps.hpp
+
+- `(file)`  
+  Stage 4C (STX-TN-16 section 2.5): geological maps (shapefile, GeoPackage), outcrop measurements and elevation models as model inputs.
+- `MapLayer read_geojson(const std::filesystem::path& file);`  
+  GeoJSON (RFC 7946) feature collections; the 2008 `crs` member, when present, is kept in crs_name.
+- `void write_shapefile(const std::filesystem::path& shp, const MapLayer& layer);`  
+  Write a shapefile (with .shx and .dbf) - used by the tests and the exports.
+- `ModelData geological_map_data(const desc::Description& d);`  
+  Stage 4C: the description's geological_map read, placed in the model's CRS (PROJ when the files state another), contacts labelled with the base horizon of the younger unit.
+- `ModelData map_to_model_data(const MapLayer& units, const std::string& unit_field, const std::vector<std::string>& unit_order, const MapLayer* faults, const std::vector<Measurement>& measurements, const Grid2D& dem);`  
+  Contacts between map units (youngest first in `unit_order`) draped on the elevation model become points on the horizon at the base of the younger unit; faults become traces.
+
+## include/stratonix/io/seismic.hpp
+
+- `(file)`  
+  Stage 4C (STX-TN-16 section 2): SEG-Y volumes read for sampling and display, horizon picks and fault sticks from common interpretation exports, each in its stated domain.
+- `struct SegyLayout { int inline_byte = 0, crossline_byte = 0, x_byte = 0, y_byte = 0; };`  
+  Trace-header byte positions (1-based, as in the standard); 0 = from the file's revision.
+- `double sample(double x, double y, double t) const;`  
+  Amplitude at a point by bilinear interpolation between traces and linear in time; NaN outside.
+- `struct Pick { int il = 0, xl = 0; Vec3 p; };  ///< p.z holds the time or depth value as read struct PickSet { std::string name, source, domain, unit; std::vector<Pick> picks; };`  
+  Picks and sticks; `domain` is "time" (two-way, ms unless the unit says otherwise) or "depth".
+- `std::vector<PickSet> read_picks(const std::filesystem::path& file, const std::string& format, const std::string& domain, const std::string& unit);`  
+  Formats: "charisma", "iesx", "petrel_ascii", "csv". Refused when `domain` is empty.
+
+## include/stratonix/io/velocity.hpp
+
+- `(file)`  
+  Stage 4C (STX-TN-16 section 2.3, decision 23): the description's velocity model - time surfaces of the layer bases, wells' tops and times, calibration, and the depth-converted surfaces.
+- `VelocityBuild velocity_build(const desc::Description& d);`  
+  Loads the time surfaces, calibrates to the wells and converts the surfaces to depth.
+- `double depth_to_time_safe(const VelocityModel& m, double x, double y, double z);`  
+  Two-way time at a depth; NaN where the velocity model is undefined (outside the time surfaces).
+
+## include/stratonix/io/welldata.hpp
+
+- `(file)`  
+  Stage 4C (STX-TN-16 section 1): well logs read from LAS 2.0, LAS 3.0 and DLIS (RP66 V1) files as delivered. Units and null values come from the file; every read reports them.
+- `struct LasParameter { std::string unit, value, description; };`  
+  One LAS 3.0 section group or the parameters of a LAS 2.0 file: mnemonic -> (unit, value, description).
+- `std::vector<LogCurve> tops, inclinometry;`  
+  LAS 3.0 tops and inclinometry sections when present (curves of their data sections)
+- `WellLogSet read_las(const std::filesystem::path& file);`  
+  LAS 2.0 (wrapped or not) and LAS 3.0 (log, tops and inclinometry groups).
+- `std::vector<WellLogSet> read_dlis(const std::filesystem::path& file);`  
+  DLIS (RP66 V1, decision 21): one set per logical file and frame.
 
 ## include/stratonix/model/model.hpp
 
@@ -805,12 +1211,27 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 - `std::string evidence_in_plain_words(desc::Evidence e);`  
   Plain-words explanation of an evidence class.
 
+## include/stratonix/package/geostat_props.hpp
+
+- `(file)`  
+  Stage 4D (STX-TN-17 section 1): the description's geostatistical properties on the corner-point grid - cells mapped to geological-time coordinates, conditioned to upscaled logs, simulated by SGS, SIS or objects; variograms, histograms, conditioning and statistics reported.
+- `GeostatBuild geostat_properties(const desc::Description& d, const Model& m, const repr::CornerPointGrid& g, const repr::PropertySet& existing);`  
+  Simulate every grid.geostatistics entry on the grid; `existing` holds the properties already on the grid (upscaled logs for conditioning, transforms for trends).
+
 ## include/stratonix/package/pipeline.hpp
 
 - `(file)`  
   High-level operations shared by the command line and the C API.
 - `void register_all_plugins();`  
   Register every built-in plugin of every layer (idempotent). Call once at start-up.
+- `struct BuildCache;`  
+  Cache shared by builds of descriptions that differ only in some parameters (ensemble members): per-fault surfaces, the checks' lattices and imported or converted inputs, each keyed by the hash of what it reads. Cached and uncached builds give the same bytes.
+- `BuildOutcome run_build_cached(const std::filesystem::path& description, const std::filesystem::path& out_dir, const BuildOptions& opt, BuildCache& cache);`  
+  Build a description into out_dir through a cache (run_build otherwise unchanged).
+- `struct GridStreamOptions { std::size_t memory_limit = 0; std::size_t slab_layers = 0; std::vector<std::string> formats; };`  
+  Corner-point grid written by layers (k slabs) within a memory limit; returns the peak resident memory in bytes. The written files equal those of the grid built in memory.
+- `std::vector<std::pair<std::string, std::string>> parallel_build_digest(const std::filesystem::path& description, unsigned threads);`  
+  Parallel interpolation, grid corners and evaluation over fixed partitions written in order: the bytes of every output file of a build at `threads` threads, by relative path.
 - `BuildOutcome run_build(const std::filesystem::path& description, const std::filesystem::path& out_dir, const BuildOptions& opt, const std::string& command = "build");`  
   Validate, build and check a model, write summary, check report, exports and figures into `out_dir`, and finish with manifest.json. An existing non-empty output folder is refused, so an issued output is never overwritten.
 - `BuildOutcome build_only(const desc::Description& d, const BuildOptions& opt);`  
@@ -819,14 +1240,16 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Key numbers of a built model (summary table; also read by the figures).
 - `std::string data_misfit_csv(const Model& m);`  
   Misfit at every data point of a data-conditioned model (empty if the model has no data).
-- `void write_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys, const std::filesystem::path& folder);`  
-  Write the figure set (sections from the description, maps, 3D views, fence) into a folder.
+- `using BurialFields = std::map<std::string, std::vector<std::pair<std::vector<std::string>, fig::FigureContext::Burial::Field>>>;`  
+  Write the figure set (sections from the description, maps, 3D views, fence) into a folder. Per location: (step labels, field) pairs drawn over the burial curves (stage 4B).
 - `BuildOutcome run_section(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::string& name, const Polyline& line, const BuildOptions& opt);`  
   Draw one section (named in the description, or along `line` when it is not empty) in the four figure formats; the model is built and checked first and nothing is drawn if a check fails.
 - `BuildOutcome run_state(const std::filesystem::path& description, const std::filesystem::path& out_dir, double age, const BuildOptions& opt);`  
   Build the model at time `age` (Ma) of a description with events, and write its package (stage 2E, STX-TN-09 section 2).
 - `void write_restoration(const desc::Description& d, const Model& m, const std::filesystem::path& folder);`  
   Restoration report of a timeline model into `folder`: a section and a map at every event, the sequence as one deck, the flexural-slip unfolded section, balance.csv and the checks of every state (STX-TN-09 sections 2 and 3). Nothing is written for a model without events.
+- `void write_posterior_tables(const desc::Description& d, const PosteriorResult& pr, const std::filesystem::path& dir);`  
+  Stage 4A: posterior_samples.csv and posterior_summary.csv of conditioning.method: bayesian.
 - `std::vector<std::string> resolve_export_ids(const desc::Description& d, const std::vector<std::string>& requested);`  
   Export ids from a request ("petrel" expands to the Petrel set; unknown ids are skipped with a warning); an empty request takes the description's outputs.exports.
 - `BuildOutcome run_export(const std::filesystem::path& description, const std::filesystem::path& out_dir, const std::vector<std::string>& formats, double grid_spacing, const BuildOptions& opt);`  
@@ -844,6 +1267,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Uniform in the open interval (0, 1), from the top 53 bits.
 - `double normal_cdf(double x);`  
   Standard normal CDF and its inverse (Acklam 2003, one Halley step).
+- `bool saltelli = false;`  
+  stage 4D (STX-TN-17 section 3): a Saltelli design instead of random members
+- `struct InterpretationSource { std::string kind, target; std::size_t index = 0; };  ///< kind "picks" or "velocity" std::vector<InterpretationSource> interpretation;`  
+  stage 4C (STX-TN-16 section 3): pick and velocity uncertainty; each member gets its own realisation (a seeded correlated field) of every source
 - `EnsembleSpec ensemble_spec(const desc::Description& d);`  
   The ensemble specification of a description's uncertainty block (rule F33 already applied).
 - `std::vector<MemberSample> sample_members(const EnsembleSpec& s);`  
@@ -860,10 +1287,25 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Percentiles by linear interpolation (Hyndman and Fan 1996, type 7).
 - `double first_order_index(const std::vector<double>& x, const std::vector<double>& y);`  
   First-order index of y on x by equal-count binning (sqrt(N) bins).
+- `struct SensitivityDesign`  
+  Saltelli (2010) design on k parameters: N base rows of matrices A and B (uniforms in (0, 1)), run order A, B, then A_B^(i) for i = 1..k: N (k + 2) rows of k uniforms.
+- `struct TotalEffectRow`  
+  First-order (Saltelli 2010) and total-effect (Jansen 1999) indices with bootstrap percentile intervals at `level`; y holds one value per design row.
+- `struct VarianceSplit { std::string horizon; std::size_t nodes = 0, members = 0; double conversion = 0, structural = 0, covariance = 0, total = 0; };`  
+  stage 4C: per velocity-model horizon, the depth variance from the depth conversion (picks and velocity) and from the structural parameters, averaged over a lattice of the base surface
+- `std::vector<TotalEffectRow> total_effects;`  
+  stage 4D: first-order and total-effect indices of a Saltelli design (uncertainty.sensitivity)
 - `EnsembleResult run_ensemble(const std::filesystem::path& description, const std::filesystem::path& out_dir, const EnsembleOptions& o);`  
   Run the ensemble of a description; writes into out_dir when it is not empty.
 - `bool parse_key_value(const std::string& text, double* value, std::string* unit);`  
   Numeric value of a summary key number's text ("167.4 m at H4" -> 167.4), and its unit.
+
+## include/stratonix/package/welldata.hpp
+
+- `(file)`  
+  Stage 4C (STX-TN-16 section 1): the well data of a build - logs on the well paths, correlation by age, logs upscaled to grid cells, the C35/C38 results and the panels.
+- `WellDataBuild well_data(const desc::Description& d, const Model& m, const repr::CornerPointGrid* grid);`  
+  Reads the well files of the description (as delivered) and assembles the well data; `grid` may be null (no upscaling). Throws on a file that cannot be read or a curve that is not there.
 
 ## include/stratonix/registry/registry.hpp
 
@@ -892,6 +1334,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 
 ## include/stratonix/repr/faultrock.hpp
 
+- `bool lateral = false;`  
+  stage 4B (STX-TN-15 section 5.3, I-033): mechanical stratigraphy. Per model unit (E Pa, nu, Biot alpha; NaN = the regime ratios), the horizontal stresses follow the uniaxial-strain relation plus the tectonic strains e_h, e_H (e_H along `azimuth`, rad) (Thiercelin and Plumb 1994).
+- `void stress_at(const StressInput& s, int unit, double z, double S6[6], double& pp);`  
+  Stress tensor (Pa; xx, yy, zz, xy, xz, yz) and pore pressure at depth z (m) in a model unit.
 - `struct FaultRockPoint`  
   Attributes at one point of a fault surface. Missing values are NaN, with the reasons in `missing`.
 - `std::vector<FaultRockPoint> fault_rock_surface(const Model& m, const FaultSurface& fs, const FaultRockInput& in, const StressInput& s, double max_extent = 1.0);`  
@@ -899,10 +1345,25 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 - `struct CurvatureGrids`  
   Curvature attributes of a horizon (Roberts 2001), 1/m, and the fracture-trend azimuth (deg; NaN where the curvature is below `fracture_threshold`).
 
+## include/stratonix/repr/geotime.hpp
+
+- `(file)`  
+  Stage 4A (STX-TN-14 section 5): geological-time coordinates. (u, v) from the model's restoration, t from the restored-frame stratigraphic column and horizon ages; inverse by fixed-point iteration on the restoration; hiatuses where horizons are absent.
+- `struct Hiatus { double t_young = kNaN, t_old = kNaN; int horizon_missing = -1; };`  
+  A gap in the record at a column: between the ages of two horizons the column lacks.
+- `GeologicalTime(const Model& m, std::vector<double> ages);`  
+  ages: one per horizon (Ma, young to old); empty = ordinals (the horizon index).
+- `std::optional<Vec3> inverse(double u, double v, double t, double tolerance = 0.01) const;`  
+  Present-day point of (u, v, t); nullopt where the iteration does not converge.
+- `constexpr int kWheelerFault = -2;`  
+  A Wheeler diagram along a line (Wheeler 1958): per column, the time intervals each unit records; a time no unit records is a hiatus (blank in the figure). unit kWheelerFault (-2): times a vertical column misses where it crosses a fault (a fault cut-out, not a hiatus).
+
 ## include/stratonix/repr/grid.hpp
 
 - `struct ZoneSpec`  
   One zone of the grid: a model unit and its layering.
+- `bool follow_fault_traces = false;`  
+  stage 4D (STX-TN-17 section 2, I-035): lattice nodes moved onto the fault traces, pillars along the faults; stair steps only where reported
 - `struct CornerPointGrid`  
   Corner-point grid in the Eclipse convention: i fastest, then j, then k (k = 0 at the top). Coordinates are model coordinates with z up (elevation); exporters convert to depth.
 - `std::vector<double> coord;`  
@@ -952,12 +1413,18 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
 
 - `(file)`  
   Representations derived from any Model by evaluation only: horizon grids (per block and faulted with gaps), fault meshes, cut-off lines, throw tables, well intersections, sections, voxel grids and closure analysis. Each kernel has a reference implementation (plain, robust, slow). Where an optimised version exists it is selected by optimised_kernels() and must match the reference in parity tests.
+- `std::vector<std::array<double, 4>> extent;`  
+  per code: the map extent of its samples, x0, y0, x1, y1 (m), widened by one lattice cell
 - `BlockList list_blocks(const Model& m, std::size_t n = 48, std::size_t nz = 48);`  
   Sample the domain on an n x n x nz lattice and list the block codes present.
 - `Grid2D horizon_grid_block(const Model& m, int horizon, BlockCode block, const GridSpec& g, double margin = 2000);`  
   Root of a horizon's scalar along verticals, as seen from one block (extended beyond it). Reference: bisection. Optimised: bracketed secant (Illinois). NaN if no root within the domain's elevation range extended by `margin`.
 - `FaultedSurface horizon_grid_faulted(const Model& m, int horizon, const GridSpec& g);`  
   Faulted horizon surface with fault gaps. Reference: candidate blocks from dense sampling of each column. Optimised: block iteration from the per-block root. Parity tested.
+- `class FaultedSurfaceCache`  
+  Faulted horizon surfaces of one model, each computed once per horizon and lattice and shared by the checks, figures and exports of a build (stage 4B, I-020). Entries never move once made.
+- `const FaultedSurface& faulted_surface(const Model& m, int horizon, const GridSpec& g, FaultedSurfaceCache* cache, FaultedSurface& scratch);`  
+  The cached surface when `cache` is of `m`; otherwise computed into `scratch`, which is returned.
 - `Grid2D unit_thickness_grid(const Model& m, int unit, const GridSpec& g);`  
   Vertical thickness of model unit `unit` (between horizons unit-1 and unit) in the present geometry, per node where both horizons are in one fault block; NaN in fault gaps.
 - `struct TerminationLine`  
@@ -984,6 +1451,32 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Triangulated surface from a grid: two triangles per fully defined cell, one where exactly three corners are defined; nothing across gaps. Vertices only at defined nodes.
 - `std::vector<Polyline> contour_lines(const Grid2D& g, double level);`  
   Contour lines of a grid at a level (marching squares; NaN cells skipped).
+
+## include/stratonix/repr/topology.hpp
+
+- `(file)`  
+  Stage 4A (STX-TN-14 section 6): the block-and-contact graph of a model and the watertightness of its surfaces.
+- `struct ContactNode { int unit = -1; int block = -1; std::size_t cells = 0; };`  
+  Node: a unit in a fault block.
+- `struct ContactEdge`  
+  Edge: two nodes in contact, the surface between them and its sampled area (m^2).
+- `double area = 0;`  
+  block are "unconformity" when the series change or a unit between them terminates
+- `ContactGraph contact_graph(const Model& m, double spacing);`  
+  Sample the model on a lattice of the given spacing and record face-neighbour contacts.
+- `bool same_topology(const ContactGraph& a, const ContactGraph& b, std::vector<std::string>* diff = nullptr);`  
+  Same nodes and edges (areas ignored); `diff` lists edges present in only one graph.
+- `WatertightReport watertightness(const Model& m, double spacing, double tolerance);`  
+  Horizon edges: on a surface grid of the given spacing, every horizon node next to a gap or another block is followed along the horizon (bisection) to where it leaves its block; the gap is the distance from there to the nearest fault surface, other horizon or domain boundary.
+- `WatertightReport watertightness(const Model& m, const GridSpec& g, const std::function<const repr::FaultedSurface&(int)>& surface, double tolerance);`  
+  The same on a given surface grid, with the faulted horizon surfaces supplied (checks reuse theirs).
+
+## include/stratonix/repr/upscale.hpp
+
+- `(file)`  
+  Stage 4C (STX-TN-16 section 1.5): logs upscaled to the cells a well passes through.
+- `struct PathLog { std::string well, curve; std::vector<Vec3> p; std::vector<double> md, v; };`  
+  A log sampled along a path: positions (x, y, z), measured depths and values (NaN at nulls).
 
 ## capi/include/stratonix_c.h
 

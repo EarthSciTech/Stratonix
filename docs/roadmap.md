@@ -76,6 +76,20 @@ stage starts with its own specification and its tests, written before the code.
 
 Prompt R then releases v4.
 
+**What v4 taught (2026.4).**
+- Reading real files means reading what is there: the LAS reader met UTF-16 files, curves without
+  mnemonics, extra data columns and decimal commas in lasio's test files on its first run in CI.
+  Every reader now reports what it met, and each format is cross-checked against an independent
+  reader.
+- Map data alone constrain the ground, not the geometry at depth: the public-map model fails its
+  checks below the outcrop (I-048). Fold frames or thickness constraints from the map come next.
+- New checks cost time: C26 and C27 make an ensemble member slower than in v3, and caching cannot
+  help an ensemble in which every member changes every fault (I-049). Faster fault restoration and
+  checks on shared lattices are the next steps; a grid of 50 million cells needs slab-wise
+  construction (I-050).
+- Reproducibility across platforms needs control of the elementary functions, not only of the
+  random stream: the geostatistics evaluates exp and log itself.
+
 # 6. v5: applications (stage 5A, Prompts 62 to 68)
 
 Shared tools (conditions at depth from the 4B histories, traps, migration, volumes), then one application

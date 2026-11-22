@@ -210,6 +210,34 @@ touched by ensembles:
 - outputs written in member order, numbers through `fmt_fixed`/`fmt_shortest`;
 - `test_v3_uncertainty` U9 compares files from 1 and 4 threads.
 
+### Real data (2026.4)
+
+Readers live in the io layer and read files as delivered: `io/welldata.hpp` (LAS 2.0/3.0, DLIS),
+`io/seismic.hpp` (SEG-Y, picks, sticks), `io/maps.hpp` (shapefile, GeoJSON, GeoPackage, GeoTIFF,
+ESRI ASCII), `io/velocity.hpp` (the description's velocity model). Every reader returns its
+values with a `report` of what it met (nulls, units, encodings, lines not read); a reader never
+assumes a value the file does not state. Inputs go through `io::read_input`, which an ensemble
+caches (key: format, path, size, modification time). The engines (`engines/surveys.hpp`,
+`engines/ages.hpp`, `engines/timedepth.hpp`) take plain values. New readers are cross-checked in
+CI against an independent reader used as a test tool only (lasio, dlisio, segyio, GeostatsPy).
+
+### Geostatistics (2026.4)
+
+`engines/geostat.hpp` works on points in geological-time coordinates; `package/geostat_props.cpp`
+maps a unit's cells to (u, v, w) and back. Rules for code that produces simulated values:
+
+- the stream is SplitMix64 with Marsaglia's polar method; `exp` and `log` that enter simulated
+  values are the deterministic versions in `geostat.cpp` (IEEE + - * / and sqrt only);
+- neighbours are sorted by (scaled distance, node index); no unordered container is iterated;
+- `test_v4_scale` S7 compares a realisation's checksum with the value from the Linux build, so CI
+  on Windows is the cross-platform test.
+
+### Python (2026.4)
+
+`python/stratonix/__init__.py` binds the C API with `ctypes`; a function added to the C API gets
+its `argtypes`/`restype` there and a test in `python/tests`. The bindings never call the C++
+library directly, so the C API's stability is theirs.
+
 ## 4.3 An importer
 
 Derive from `io::Importer`: `data_kind()` ("grid", "points", "lines", "meshes", "tops") and
