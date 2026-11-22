@@ -1,6 +1,7 @@
 // Checks that fail a build. Each check states its tolerance and where the tolerance came from.
 #include "stratonix/checks/checks.hpp"
 
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -83,7 +84,7 @@ std::string CheckReport::csv() const {
 
 // ---- context -------------------------------------------------------------------------------
 CheckContext::CheckContext(const Model& m, const desc::Description& d, std::vector<WellPath> wells, double spacing)
-    : m_(m), d_(d), wells_(std::move(wells)) {
+    : m_(m), d_(d), wells_(std::move(wells)), surfaces_(std::make_shared<repr::FaultedSurfaceCache>(m)) {
   const Domain& dom = m.info().domain;
   // Limit check grids to ~160k nodes; the full-resolution grids are used for exports.
   double sp = spacing;
@@ -104,9 +105,7 @@ const Grid2D& CheckContext::block_surface(int h, BlockCode b) {
   return it->second;
 }
 const repr::FaultedSurface& CheckContext::faulted_surface(int h) {
-  auto it = faulted_.find(h);
-  if (it == faulted_.end()) it = faulted_.emplace(h, repr::horizon_grid_faulted(m_, h, grid_)).first;
-  return it->second;
+  return surfaces_->get(h, grid_);
 }
 const repr::FaultSurface& CheckContext::fault_lattice(int f) {
   auto it = lattice_.find(f);
@@ -129,6 +128,9 @@ const GridProducts* CheckContext::grid_products() {
   if (!d_.grid.present || !timeline_checks) return nullptr;  // grids are of the present-day model, not of restored states
   if (!grid_products_) grid_products_ = std::make_unique<GridProducts>(make_grid_products(d_, m_));
   return grid_products_.get();
+}
+void CheckContext::add_grid_property(repr::CellProperty p) {
+  if (grid_products() && grid_products_) grid_products_->props.props.push_back(std::move(p));
 }
 const ContactGraph& CheckContext::contact_graph() {
   if (!graph_) graph_ = std::make_unique<ContactGraph>(stratonix::contact_graph(m_, topology_spacing()));
@@ -1280,6 +1282,8 @@ class C26 final : public Check {
 /// on a fault, another horizon (unconformity, pinch-out) or the domain boundary within tolerance.
 class C27 final : public Check {
   std::vector<CheckResult> run(CheckContext& c) const override {
+    // the exported surfaces are those of the present-day model; restored states are checked by C17 and C26
+    if (!c.timeline_checks) return {};
     std::string src;
     double tol = 0.5 * c.grid().dx;
     if (c.description().tol_watertight.present) {
@@ -1791,9 +1795,13 @@ repr::StressInput stress_input(const desc::Description& d) {
 
 CheckReport run_checks(CheckContext& ctx) {
   CheckReport rep;
+  static const bool timing = std::getenv("STRATONIX_TIMING") != nullptr;  // diagnostic: seconds per check on stderr
   for (auto* e : registry::Registry::global().list(registry::Kind::Check)) {
     auto chk = registry::Registry::global().create<Check>(registry::Kind::Check, e->name);
+    const auto t0 = std::chrono::steady_clock::now();
     auto rs = chk->run(ctx);
+    if (timing)
+      std::fprintf(stderr, "[stratonix timing] %s %.3f s\n", e->name.c_str(), std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     rep.results.insert(rep.results.end(), rs.begin(), rs.end());
   }
   // Report in numeric order of the check ids (C1, C2, ..., C10, C11), stable within a check.

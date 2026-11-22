@@ -151,6 +151,7 @@ struct Fault {
   /// at(), tips(), ab() and profile_coords() is the horizontal distance u along the dip direction.
   std::shared_ptr<const CurvedFault> curved;
   std::string hw_name;          ///< hanging-wall plugin name
+  bool hw_scaled = false;       ///< the hanging wall scales the layer throw by distance (not rigid or layer_rigid)
   // Interaction (STX-TN-05 sections 3 and 4).
   int drag = 0;                 ///< 0 none, +1 normal drag, -1 reverse drag
   double drag_fraction = 0, drag_width = 0;

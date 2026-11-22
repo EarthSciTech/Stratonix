@@ -382,8 +382,23 @@ std::vector<double> horizon_ages(const desc::Description& d, const Model& m) {
 }
 
 void write_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
-                   const std::filesystem::path& folder) {
+                   const std::filesystem::path& folder, repr::FaultedSurfaceCache* surfaces, const BurialFields* fields) {
   auto c = figure_context(d, m, keys);
+  c.surfaces = surfaces;
+  if (fields)
+    for (auto& b : c.burial) {
+      auto it = fields->find(b.location);
+      if (it == fields->end()) continue;
+      // the field's steps are matched to the burial steps by label
+      for (auto& [labels, fd] : it->second) {
+        fig::FigureContext::Burial::Field g{fd.kind, fd.label, fd.unit, {}};
+        for (auto& lb : b.step_labels) {
+          auto p = std::find(labels.begin(), labels.end(), lb);
+          g.v.push_back(p == labels.end() ? std::vector<double>(b.depth.front().size(), kNaN) : fd.v[static_cast<std::size_t>(p - labels.begin())]);
+        }
+        b.fields.push_back(std::move(g));
+      }
+    }
   std::vector<std::pair<std::string, Polyline>> secs;
   std::vector<std::vector<double>> det;
   for (auto& s : d.sections) {
@@ -431,10 +446,12 @@ std::vector<std::string> resolve_export_ids(const desc::Description& d, const st
 }
 
 std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Model& m, const std::vector<std::string>& ids,
-                                            const std::filesystem::path& folder, double grid_spacing, const GridProducts* gp = nullptr) {
+                                            const std::filesystem::path& folder, double grid_spacing, const GridProducts* gp = nullptr,
+                                            repr::FaultedSurfaceCache* surfaces = nullptr) {
   double sp = grid_spacing > 0 ? grid_spacing : d.grid_spacing.si();
   double sticks = d.fault_stick_spacing.present ? d.fault_stick_spacing.si() : 250.0;  // Stratonix default when not given
   io::ExportContext c(m, make_well_paths(d), GridSpec::covering(m.info().domain, sp), std::max(10.0, sp / 2), sticks);
+  c.share_surfaces(surfaces);
   c.vertical_exaggeration = d.vertical_exaggeration.present ? d.vertical_exaggeration.si() : 1.0;
   c.fault_rock = d.fault_rock.present;
   if (d.fault_rock.present || d.stress.present) {
@@ -1033,6 +1050,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
   // stage 4B (sections 5 and 6): mechanics, fractures, heat and pressure
   CheckContext::BasinResults basin;
   std::vector<std::pair<std::string, Grid2D>> basin_maps;  // figures written after the checks
+  BurialFields burial_fields;  // stage 4B: temperature and overpressure per well and step, drawn over the burial curves
   {
     const Model& m = *o.model;
     const auto& inf = m.info();
@@ -1077,6 +1095,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
       for (auto& w : wells) {
         auto th = thermal_history(*st, ts, w.x(), w.y());
         basin.heat_balance.push_back({w.name(), th.balance_error});
+        burial_fields[w.name()].push_back({th.labels, {"temperature", "temperature", "degC", th.temperature}});
         for (std::size_t k = 0; k < th.labels.size(); ++k)
           for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
             if (!std::isfinite(th.temperature[k][h])) continue;
@@ -1114,6 +1133,12 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
       std::string t = "location,step,age_Ma,horizon,overpressure_MPa\n", prof = "location,depth_m,pore_MPa,hydrostatic_MPa,lithostatic_MPa\n";
       for (auto& w : wells) {
         auto ph = pressure_history(*st, ps, w.x(), w.y());
+        {
+          auto mpa = ph.overpressure;
+          for (auto& row : mpa)
+            for (double& v : row) v /= 1e6;
+          burial_fields[w.name()].push_back({ph.labels, {"overpressure", "overpressure", "MPa", mpa}});
+        }
         for (std::size_t k = 0; k < ph.labels.size(); ++k)
           for (std::size_t h = 0; h < inf.horizons.size(); ++h)
             if (std::isfinite(ph.overpressure[k][h]))
@@ -1158,6 +1183,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     }
     // fracture intensity per unit from the curvature of its top horizon, and the network
     if (d.fractures.present) {
+      std::vector<Disk> dfn_disks;
       const std::size_t nf = 60;
       GridSpec gs{dom.x0 + dom.sx / nf / 2, dom.y0 + dom.sy / nf / 2, dom.sx / nf, dom.sy / nf, nf, nf};
       std::string t = "unit,x,y,kmax_abs_1_per_m,p32_1_per_m\n";
@@ -1216,6 +1242,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
             if (r.ok) {
               basin.dfn_count = r.disks.size();
               basin.dfn_realised = realised_p32(r.disks, box);
+              dfn_disks = r.disks;
               std::string dt = "x,y,z,normal_x,normal_y,normal_z,radius_m,set\n";
               for (auto& dk : r.disks)
                 dt += fmt_fixed(dk.c.x, 2) + "," + fmt_fixed(dk.c.y, 2) + "," + fmt_fixed(dk.c.z, 2) + "," + fmt_fixed(dk.n.x, 5) + "," + fmt_fixed(dk.n.y, 5) + "," +
@@ -1226,6 +1253,67 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
         }
       }
       write_file(out_dir / "fracture_intensity.csv", t);
+      // as grid properties when the description has a grid (stage 4B definition of done)
+      if (const GridProducts* gp = ctx.grid_products()) {
+        const auto& G = gp->grid;
+        const GridSpec cs{G.x0 + 0.5 * G.dx, G.y0 + 0.5 * G.dy, G.dx, G.dy, static_cast<std::size_t>(G.nx), static_cast<std::size_t>(G.ny)};
+        repr::CellProperty P{"P32", "1/m", "derived",
+                             "fracture intensity law of the unit (fractures block) at the maximum absolute principal curvature of the unit's top horizon at the column centre"};
+        P.v.assign(G.ncell(), kNaN);
+        for (auto& fu : d.fractures.units) {
+          const int ui = d.unit_index(fu.unit);
+          if (ui < 0) continue;
+          const int h = d.horizon_index(d.units[static_cast<std::size_t>(ui)].top);
+          const int mu = model_unit_of(d, m, fu.unit);
+          if (h < 0 || mu < 0) continue;
+          const auto cg = repr::curvature(m, h, cs, 0.0);
+          FractureLaw law{fu.p32_0.si(), fu.a_k.si(), fu.a_e.present ? fu.a_e.si() : 0.0, fu.p32_max.si()};
+          for (int k = 0; k < G.nz; ++k)
+            for (int j = 0; j < G.ny; ++j)
+              for (int i = 0; i < G.nx; ++i) {
+                const auto c = G.cell(i, j, k);
+                if (!G.actnum[c] || G.zone[c] != mu) continue;
+                const auto q = cs.index(static_cast<std::size_t>(i), static_cast<std::size_t>(j));
+                const double k1 = cg.kmax.v[q], k2 = cg.kmin.v[q];
+                if (std::isfinite(k1) && std::isfinite(k2)) P.v[c] = fracture_intensity(std::max(std::fabs(k1), std::fabs(k2)), 0.0, law);
+              }
+        }
+        for (double v : P.v) P.missing += std::isfinite(v) ? 0 : 1;
+        if (P.missing) P.missing_reason = "inactive, outside the units with a fracture law, or no curvature at the column";
+        ctx.add_grid_property(std::move(P));
+        if (!dfn_disks.empty()) {
+          repr::CellProperty R{"P32_DFN", "1/m", "derived", "realised P32 of the sampled network: disk area inside the cell's bounding box over its volume"};
+          R.v.assign(G.ncell(), kNaN);
+          const int mu = model_unit_of(d, m, basin.dfn_unit);
+          const auto& A = d.fractures.dfn.area;
+          // disks binned by column so each cell visits only the disks that can reach it
+          std::vector<std::vector<std::size_t>> bins(G.ncell() / std::max(1, G.nz));
+          for (std::size_t n = 0; n < dfn_disks.size(); ++n) {
+            const auto& dk = dfn_disks[n];
+            const int i0 = std::max(0, static_cast<int>(std::floor((dk.c.x - dk.r - G.x0) / G.dx))), i1 = std::min(G.nx - 1, static_cast<int>(std::floor((dk.c.x + dk.r - G.x0) / G.dx)));
+            const int j0 = std::max(0, static_cast<int>(std::floor((dk.c.y - dk.r - G.y0) / G.dy))), j1 = std::min(G.ny - 1, static_cast<int>(std::floor((dk.c.y + dk.r - G.y0) / G.dy)));
+            for (int j = j0; j <= j1; ++j)
+              for (int i = i0; i <= i1; ++i) bins[static_cast<std::size_t>(i) + static_cast<std::size_t>(G.nx) * static_cast<std::size_t>(j)].push_back(n);
+          }
+          std::vector<Disk> local;
+          for (int k = 0; k < G.nz; ++k)
+            for (int j = 0; j < G.ny; ++j)
+              for (int i = 0; i < G.nx; ++i) {
+                const auto c = G.cell(i, j, k);
+                if (!G.actnum[c] || G.zone[c] != mu) continue;
+                BBox b;
+                for (auto& v : G.corners(i, j, k)) b.add(v);
+                const double xc = 0.5 * (b.lo.x + b.hi.x), yc = 0.5 * (b.lo.y + b.hi.y);
+                if (xc < A.si(0) || xc > A.si(2) || yc < A.si(1) || yc > A.si(3)) continue;
+                local.clear();
+                for (auto n : bins[static_cast<std::size_t>(i) + static_cast<std::size_t>(G.nx) * static_cast<std::size_t>(j)]) local.push_back(dfn_disks[n]);
+                R.v[c] = realised_p32(local, b);
+              }
+          for (double v : R.v) R.missing += std::isfinite(v) ? 0 : 1;
+          if (R.missing) R.missing_reason = "inactive, outside the network's unit, or outside its area";
+          ctx.add_grid_property(std::move(R));
+        }
+      }
     }
     if (!basin.heat_balance.empty() || !basin.pressure.empty() || basin.dfn) ctx.basin = &basin;
   }
@@ -1260,7 +1348,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
   if (!o.checks_passed) {
     log(LogLevel::Error, "checks failed: exports and figures are not written (see checks_report.txt)");
   } else {
-    if (opt.figures) write_figures(d, *o.model, keys, out_dir / "figures");
+    if (opt.figures) write_figures(d, *o.model, keys, out_dir / "figures", ctx.surfaces(), &burial_fields);
     if (opt.figures && !d.events.empty()) write_restoration(d, *o.model, out_dir / "restoration");
     if (opt.figures) write_data_figures(d, *o.model, keys, out_dir / "figures");
     if (opt.figures && !pf.stations.empty()) write_geophysics_figures(d, *o.model, keys, pf, out_dir / "figures");
@@ -1317,7 +1405,7 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     }
     if (gp) write_grid_outputs(d, *o.model, *gp, keys, out_dir, opt.figures);
     auto ids = resolve_export_ids(d, opt.exports);
-    if (!ids.empty()) write_exports(d, *o.model, ids, out_dir / "exports", 0, gp);
+    if (!ids.empty()) write_exports(d, *o.model, ids, out_dir / "exports", 0, gp, ctx.surfaces());
   }
   Manifest man = Manifest::from_description(d, command);
   for (auto& [k, v] : o.log.values) man.extra.emplace_back(k, v);
@@ -1380,7 +1468,7 @@ BuildOutcome run_export(const std::filesystem::path& description, const std::fil
   } else {
     auto ids = resolve_export_ids(d, formats);
     if (ids.empty()) throw Error(ErrorCode::InvalidArgument, "no available export format requested");
-    write_exports(d, *o.model, ids, out_dir / "exports", grid_spacing, ctx.grid_products());
+    write_exports(d, *o.model, ids, out_dir / "exports", grid_spacing, ctx.grid_products(), ctx.surfaces());
   }
   Manifest man = Manifest::from_description(d, "export");
   man.add_outputs(out_dir);

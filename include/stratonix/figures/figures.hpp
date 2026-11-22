@@ -33,6 +33,8 @@ struct FigureContext {
   std::vector<std::string> unit_colors;  ///< per model unit "#rrggbb" or empty
   std::vector<std::string> unit_labels;  ///< per model unit display name (UTF-8) or empty
   double vertical_exaggeration = 1;
+  /// Faulted surfaces of `model` shared with the checks and exports (may be null).
+  repr::FaultedSurfaceCache* surfaces = nullptr;
   double grid_spacing = 50;
   int closure_horizon = -1;
   bool faults_seal = false;
@@ -47,6 +49,13 @@ struct FigureContext {
     std::vector<std::vector<double>> depth;  ///< [step][horizon]
     /// stage 4B: tectonic subsidence per step (Airy; flexural when Te > 0), empty when not computed
     std::vector<double> tectonic_airy, tectonic_flexural;
+    /// stage 4B: a value per step and horizon (temperature, overpressure) drawn as colour between
+    /// the burial curves; NaN where it is not computed
+    struct Field {
+      std::string kind, label, unit;           ///< kind names the figure (temperature, overpressure)
+      std::vector<std::vector<double>> v;      ///< [step][horizon], the steps of `depth`
+    };
+    std::vector<Field> fields;
   };
   std::vector<Burial> burial;
   /// Fault rock and stress (stage 2F, STX-TN-10): Allan diagram and fault-surface attributes.
@@ -70,6 +79,8 @@ Figure map_figure(const FigureContext& c, int horizon, const repr::FaultedSurfac
 Figure unfolded_figure(const FigureContext& c, const std::string& section, const std::vector<repr::UnfoldedHorizon>& beds);
 /// Burial-history curves at one location (stage 2D).
 Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b);
+/// The burial curves coloured by a field between consecutive horizons and steps (stage 4B).
+Figure burial_field_figure(const FigureContext& c, const FigureContext::Burial& b, const FigureContext::Burial::Field& fd);
 /// Isopach map of a unit (stage 2C): vertical thickness per fault block, with its termination lines.
 Figure isopach_figure(const FigureContext& c, int unit, const Grid2D& thickness, const std::vector<repr::TerminationLine>& terminations);
 Figure view3d_figure(const FigureContext& c, double azimuth_deg, double elevation_deg, const std::string& preset_name);

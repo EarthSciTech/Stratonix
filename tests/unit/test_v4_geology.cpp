@@ -314,6 +314,21 @@ TEST_CASE("G14 a fold restores flat within the labelled strain limit (hybrid sou
   CHECK(r.flatness_rms < 1.0);
 }
 
+TEST_CASE("G14b the stage 2E example restores in 3D within the strain limit") {
+  register_all_plugins();
+  auto d = desc::load_description(fs::path(STX_SOURCE_DIR) / "examples" / "rift_inversion_history.yaml");
+  auto m = build_only(d, BuildOptions{}).model;
+  VolumetricSpec s;
+  s.horizon = "H2";  // the post-rift top, folded by the inversion and offset by F1
+  s.datum_z = -1000;
+  auto r = volumetric_restore(*m, s);
+  REQUIRE(r.ok);
+  std::printf("  max strain %.4f, flatness %.3f m, bed stretch %.4f, %zu tetrahedra, %zu fault contacts\n", r.max_strain, r.flatness_rms,
+              r.horizon_stretch_max, r.tetrahedra, r.fault_contacts);
+  CHECK(r.max_strain < s.max_strain);
+  CHECK(r.flatness_rms < 1.0);
+}
+
 TEST_CASE("G15 compaction across a fault active during burial: each block on its own Athy curve") {
   const double phi0 = 0.6, c = 5e-4;
   CHECK(rel(block_porosity(phi0, c, 2000), phi0 * std::exp(-c * 2000)) < 0.005);

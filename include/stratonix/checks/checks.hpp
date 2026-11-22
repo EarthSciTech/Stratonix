@@ -84,6 +84,10 @@ class CheckContext {
   double fault_spacing() const { return fault_spacing_; }
   /// Grid products of the description's grid block (nullptr without one); computed once.
   const GridProducts* grid_products();
+  /// The faulted surfaces of this model, shared with the figures and exports of the build.
+  repr::FaultedSurfaceCache* surfaces() { return surfaces_.get(); }
+  /// Stage 4B: add a cell property computed by the pipeline (P32, P32_DFN) before the checks run.
+  void add_grid_property(repr::CellProperty p);
   /// Stage 4A: station misfits of the geophysics block (C29), set by the pipeline; nullptr = none.
   const PotentialFieldResult* potential_fields = nullptr;
   /// Stage 4B: the volumetric restoration of the restoration block (C31), set by the pipeline.
@@ -112,7 +116,7 @@ class CheckContext {
   double fault_spacing_;
   std::unique_ptr<repr::BlockList> blocks_;
   std::map<std::pair<int, BlockCode>, Grid2D> block_surf_;
-  std::map<int, repr::FaultedSurface> faulted_;
+  std::shared_ptr<repr::FaultedSurfaceCache> surfaces_;
   std::map<int, repr::FaultSurface> lattice_;
   std::map<std::pair<int, int>, std::vector<repr::CutoffLine>> cutoffs_;
   std::map<std::pair<int, int>, repr::ThrowRow> throws_;

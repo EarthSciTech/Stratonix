@@ -2,14 +2,17 @@
 /// @brief High-level operations shared by the command line and the C API.
 #pragma once
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
 #include "stratonix/desc/description.hpp"
 #include "stratonix/engines/builder.hpp"
+#include "stratonix/figures/figures.hpp"
 #include "stratonix/repr/faultrock.hpp"
 
 namespace stratonix {
+namespace repr { class FaultedSurfaceCache; }
 
 /// Register every built-in plugin of every layer (idempotent). Call once at start-up.
 void register_all_plugins();
@@ -45,8 +48,11 @@ std::string summary_csv(const std::vector<std::pair<std::string, std::string>>& 
 /// Misfit at every data point of a data-conditioned model (empty if the model has no data).
 std::string data_misfit_csv(const Model& m);
 /// Write the figure set (sections from the description, maps, 3D views, fence) into a folder.
+/// Per location: (step labels, field) pairs drawn over the burial curves (stage 4B).
+using BurialFields = std::map<std::string, std::vector<std::pair<std::vector<std::string>, fig::FigureContext::Burial::Field>>>;
 void write_figures(const desc::Description& d, const Model& m, const std::vector<std::pair<std::string, std::string>>& keys,
-                   const std::filesystem::path& folder);
+                   const std::filesystem::path& folder, repr::FaultedSurfaceCache* surfaces = nullptr,
+                   const BurialFields* fields = nullptr);
 
 /// Draw one section (named in the description, or along `line` when it is not empty) in the
 /// four figure formats; the model is built and checked first and nothing is drawn if a check fails.

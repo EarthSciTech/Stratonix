@@ -643,13 +643,20 @@ Figure unfolded_figure(const FigureContext& c, const std::string& section, const
   return f;
 }
 
-Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b) {
+namespace {
+Color viridis_like(double t);  // defined with the map figures below
+Figure burial_plot(const FigureContext& c, const FigureContext::Burial& b, const FigureContext::Burial::Field* fd) {
   Figure f(842, 595);
   const auto& inf = c.model->info();
   const bool ages = !b.ages.empty();
-  title(f, (c.title.empty() ? c.model_name : c.title) + " - burial history at " + b.location,
-        std::string("Burial depth of each horizon below the depositional surface, from compaction of every unit by its law; ") +
-            (ages ? "time in Ma" : "deposition steps (no horizon ages given)"));
+  if (fd)
+    title(f, (c.title.empty() ? c.model_name : c.title) + " - " + fd->label + " through burial at " + b.location,
+          std::string("Burial curves of the horizons coloured by ") + fd->label + " (" + fd->unit + "), linear between horizons and steps; " +
+              (ages ? "time in Ma" : "deposition steps (no horizon ages given)") + "; blank where it is not computed");
+  else
+    title(f, (c.title.empty() ? c.model_name : c.title) + " - burial history at " + b.location,
+          std::string("Burial depth of each horizon below the depositional surface, from compaction of every unit by its law; ") +
+              (ages ? "time in Ma" : "deposition steps (no horizon ages given)"));
   const double px = 70, py = 70, pw = 842 - 300, ph = 595 - 140;
   double tmin = 0, tmax = static_cast<double>(b.depth.size() - 1), dmax = 1;
   if (ages) { tmin = 1e300; tmax = -1e300; for (double a : b.ages) { tmin = std::min(tmin, a); tmax = std::max(tmax, a); } }
@@ -675,6 +682,39 @@ Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b) {
   }
   f.text({px + pw / 2, py + ph + 28}, ages ? "Age (Ma)" : "Horizon at the surface (deposition step)", 7.5, Anchor::Middle, false, kInk);
   f.text({px - 45, py + ph / 2}, "Burial depth (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  double fmin = 1e300, fmax = -1e300;
+  if (fd) {
+    for (auto& row : fd->v)
+      for (double v : row)
+        if (std::isfinite(v)) { fmin = std::min(fmin, v); fmax = std::max(fmax, v); }
+    if (!(fmax > fmin)) fmax = fmin + 1;
+    // cells between consecutive horizons (in depth order at the step) and consecutive steps, split
+    // into strips coloured by the value interpolated along the cell
+    std::vector<int> hs = b.horizons;
+    for (std::size_t k = 0; k + 1 < b.depth.size() && k + 1 < fd->v.size(); ++k)
+      for (std::size_t i = 0; i + 1 < hs.size(); ++i) {
+        const auto h0 = static_cast<std::size_t>(hs[i]), h1 = static_cast<std::size_t>(hs[i + 1]);
+        const double d00 = b.depth[k][h0], d01 = b.depth[k][h1], d10 = b.depth[k + 1][h0], d11 = b.depth[k + 1][h1];
+        const double v00 = fd->v[k][h0], v01 = fd->v[k][h1], v10 = fd->v[k + 1][h0], v11 = fd->v[k + 1][h1];
+        if (!std::isfinite(d10) || !std::isfinite(d11) || !std::isfinite(v10) || !std::isfinite(v11)) continue;
+        // a horizon not yet deposited at step k starts at the surface with the younger one's value
+        const double a00 = std::isfinite(d00) ? d00 : 0.0, a01 = std::isfinite(d01) ? d01 : 0.0;
+        const double w00 = std::isfinite(v00) && std::isfinite(d00) ? v00 : v10, w01 = std::isfinite(v01) && std::isfinite(d01) ? v01 : v11;
+        const int ns = 6;
+        for (int sI = 0; sI < ns; ++sI) {
+          const double t0 = static_cast<double>(sI) / ns, t1 = static_cast<double>(sI + 1) / ns;
+          auto D = [&](double tt, double u) { return (1 - tt) * ((1 - u) * a00 + u * a01) + tt * ((1 - u) * d10 + u * d11); };
+          auto V = [&](double tt, double u) { return (1 - tt) * ((1 - u) * w00 + u * w01) + tt * ((1 - u) * v10 + u * v11); };
+          auto XT = [&](double tt) { return X(k) + tt * (X(k + 1) - X(k)); };
+          for (int uI = 0; uI < ns; ++uI) {
+            const double u0 = static_cast<double>(uI) / ns, u1 = static_cast<double>(uI + 1) / ns;
+            const double vm = V(0.5 * (t0 + t1), 0.5 * (u0 + u1));
+            const Color col = viridis_like(std::clamp((vm - fmin) / (fmax - fmin), 0.0, 1.0));
+            f.path({{XT(t0), Y(D(t0, u0))}, {XT(t1), Y(D(t1, u0))}, {XT(t1), Y(D(t1, u1))}, {XT(t0), Y(D(t0, u1))}}, true, col, col, 0.2);
+          }
+        }
+      }
+  }
   std::vector<LegendEntry> es;
   for (int h : b.horizons) {
     std::vector<Pt> pl;
@@ -699,11 +739,27 @@ Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b) {
     f.path(pl, false, none(), kInk, 1.6, kind == 0 ? std::vector<double>{5, 2} : std::vector<double>{1.5, 1.5});
     es.push_back({"Backstripping", kind == 0 ? "Tectonic subsidence, Airy (dashed)" : "Tectonic subsidence, flexural (dotted)", none(), true, kInk, 1.6});
   }
-  double ly = legend(f, 842 - 200, py, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
+  double ly = py;
+  if (fd) {
+    const double rx = 842 - 200;
+    f.text({rx, ly}, fd->label + " (" + fd->unit + ")", 7.5, Anchor::Start, true, kInk);
+    for (int k = 0; k < 100; ++k) f.rect(rx, ly + 6 + k * 1.2, 14, 1.3, viridis_like(1 - k / 99.0), none());
+    f.rect(rx, ly + 6, 14, 120, none(), kInk, 0.4);
+    const int dec = std::clamp(2 - static_cast<int>(std::floor(std::log10(std::max(1e-12, std::fabs(fmax - fmin))))), 0, 6);
+    f.text({rx + 18, ly + 12}, fmt_fixed(fmax, dec), 6.5, Anchor::Start, false, kInk);
+    f.text({rx + 18, ly + 68}, fmt_fixed(0.5 * (fmin + fmax), dec), 6.5, Anchor::Start, false, kInk);
+    f.text({rx + 18, ly + 126}, fmt_fixed(fmin, dec), 6.5, Anchor::Start, false, kInk);
+    ly += 140;
+  }
+  ly = legend(f, 842 - 200, ly, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
   key_box(f, c, 842 - 200, ly, 190);
   footer(f, c);
   return f;
 }
+}  // namespace
+
+Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b) { return burial_plot(c, b, nullptr); }
+Figure burial_field_figure(const FigureContext& c, const FigureContext::Burial& b, const FigureContext::Burial::Field& fd) { return burial_plot(c, b, &fd); }
 
 Figure isopach_figure(const FigureContext& c, int unit, const Grid2D& g, const std::vector<repr::TerminationLine>& terms) {
   Figure f(842, 595);
@@ -818,7 +874,8 @@ Figure view3d_figure(const FigureContext& c, double az, double el, const std::st
   const double n_see = std::max<double>(1.0, static_cast<double>(inf.horizons.size()) - 1.0);
   const double alpha = std::min(0.4, 1.0 - std::pow(0.2, 1.0 / n_see));
   for (std::size_t k = inf.horizons.size(); k-- > 0;) {
-    auto fs = repr::horizon_grid_faulted(*c.model, static_cast<int>(k), g);
+    repr::FaultedSurface scratch;
+    const auto& fs = repr::faulted_surface(*c.model, static_cast<int>(k), g, c.surfaces, scratch);
     meshes.push_back({repr::grid_to_mesh(fs.z), unit_color(c, k + 1), k + 1 == inf.horizons.size() ? 1.0 : alpha});
   }
   BBox box = d.box();
@@ -1677,7 +1734,8 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
   for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
     std::vector<repr::TerminationLine> adj = terms[h];
     adj.insert(adj.end(), terms[h + 1].begin(), terms[h + 1].end());
-    auto fs = repr::horizon_grid_faulted(*c.model, static_cast<int>(h), g);
+    repr::FaultedSurface scratch;
+    const auto& fs = repr::faulted_surface(*c.model, static_cast<int>(h), g, c.surfaces, scratch);
     std::vector<std::vector<repr::CutoffLine>> cut;
     for (std::size_t ff = 0; ff < inf.faults.size(); ++ff) {
       auto fsurf = repr::fault_surface(*c.model, static_cast<int>(ff), std::max(10.0, g.dx / 2));
@@ -1708,6 +1766,10 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
     out.push_back(write_figure(fgr, folder, figure_basename(c, "burial", b.location), c.model_name + " - burial history at " + b.location,
                                "Burial-history curves at " + b.location + ": burial depth of each horizon through the deposition steps.",
                                notes_common));
+    for (auto& fd : b.fields)
+      out.push_back(write_figure(burial_field_figure(c, b, fd), folder, figure_basename(c, "burial_" + fd.kind, b.location),
+                                 c.model_name + " - " + fd.label + " through burial at " + b.location,
+                                 "Burial-history curves at " + b.location + " coloured by " + fd.label + " (" + fd.unit + ").", notes_common));
   }
   // Curvature maps (stage 2F)
   for (int h : c.curvature_horizons) {

@@ -7,7 +7,10 @@
 /// exists it is selected by optimised_kernels() and must match the reference in parity tests.
 #pragma once
 #include <cstdint>
+#include <map>
+#include <mutex>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "stratonix/core/grid.hpp"
@@ -41,6 +44,22 @@ struct FaultedSurface {
 /// Reference: candidate blocks from dense sampling of each column. Optimised: block iteration
 /// from the per-block root. Parity tested.
 FaultedSurface horizon_grid_faulted(const Model& m, int horizon, const GridSpec& g);
+
+/// Faulted horizon surfaces of one model, each computed once per horizon and lattice and shared by
+/// the checks, figures and exports of a build (stage 4B, I-020). Entries never move once made.
+class FaultedSurfaceCache {
+ public:
+  explicit FaultedSurfaceCache(const Model& m) : m_(&m) {}
+  const Model& model() const { return *m_; }
+  const FaultedSurface& get(int horizon, const GridSpec& g);
+
+ private:
+  const Model* m_;
+  std::mutex mu_;
+  std::map<std::tuple<int, long long, long long, long long, long long, std::size_t, std::size_t>, FaultedSurface> map_;
+};
+/// The cached surface when `cache` is of `m`; otherwise computed into `scratch`, which is returned.
+const FaultedSurface& faulted_surface(const Model& m, int horizon, const GridSpec& g, FaultedSurfaceCache* cache, FaultedSurface& scratch);
 
 // ---- stratigraphic terminations (stage 2C, STX-TN-07 section 2) ----------------------------
 /// Vertical thickness of model unit `unit` (between horizons unit-1 and unit) in the present

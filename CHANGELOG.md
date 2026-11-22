@@ -39,9 +39,14 @@ has its own version (`stratonix_schema`).
   - mechanical stratigraphy with tectonic strain (`mechanics`, I-033), fracture intensity from
     curvature and Baecher networks (`fractures`, C34), temperature and EASY%Ro through the burial
     history (`heat`, C32), overpressure from disequilibrium compaction (`pressure`, C33); rules
-    F41, F42; example `basin_heat_pressure_fractures`.
+    F41, F42; example `basin_heat_pressure_fractures`. Fracture intensity is also written as grid
+    properties `P32` and `P32_DFN` (realised network intensity per cell), and temperature and
+    overpressure are drawn over the burial curves at each well.
 
 ### Changed
+- C27 (watertight surfaces) checks the present-day model only; restored states are covered by
+  C17 and C26. The checks, figures and exports of a build share the faulted horizon surfaces, so
+  the stage 2E example builds faster than with 2026.3.
 - Compaction porosity is taken at each block's maximum burial (`burial: block`, the default);
   `burial: restored` keeps the 2026.3 behaviour.
 - C26: contacts between non-adjacent units inside a block are resolved against the restored

@@ -149,6 +149,8 @@ class ExportContext {
   std::vector<std::string> comments() const;
 
   const repr::FaultedSurface& faulted(int h);
+  /// Share the faulted surfaces already made by the checks of the same model (stage 4B, I-020).
+  void share_surfaces(repr::FaultedSurfaceCache* c) { shared_ = c; }
   const repr::FaultSurface& fault_surface(int f);
   const std::vector<repr::CutoffLine>& cutoffs(int f, int h);
   const std::vector<repr::WellTop>& tops(std::size_t well);
@@ -168,6 +170,7 @@ class ExportContext {
   GridSpec grid_;
   double fault_spacing_, stick_spacing_;
   std::map<int, repr::FaultedSurface> faulted_;
+  repr::FaultedSurfaceCache* shared_ = nullptr;
   std::map<int, repr::FaultSurface> fsurf_;
   std::map<std::pair<int, int>, std::vector<repr::CutoffLine>> cut_;
   std::map<std::size_t, std::vector<repr::WellTop>> tops_;

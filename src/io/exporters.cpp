@@ -36,6 +36,7 @@ std::vector<std::string> ExportContext::comments() const {
 }
 
 const repr::FaultedSurface& ExportContext::faulted(int h) {
+  if (shared_ && &shared_->model() == &m_) return shared_->get(h, grid_);
   auto it = faulted_.find(h);
   if (it == faulted_.end()) it = faulted_.emplace(h, repr::horizon_grid_faulted(m_, h, grid_)).first;
   return it->second;

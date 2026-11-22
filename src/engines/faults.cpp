@@ -505,6 +505,7 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
     f.slip = f.kin->slip_vector(f.s, f.dd, f.dip, f.rake);
     f.hw = reg.create<HangingWallField>(registry::Kind::HangingWall, fd.hw_type);
     f.hw_name = f.hw->name();
+    f.hw_scaled = f.hw_name != "layer_rigid" && f.hw_name != "rigid";
     f.layered = f.hw->name() == "layer_rigid";
     f.influence = fd.influence_distance.present ? fd.influence_distance.si() : 0.0;
     if (!fd.abuts_fault.empty()) {
@@ -1400,7 +1401,7 @@ double FaultNetwork::layer_throw(int fi, double s, const Vec3& q) const {
   double a = dot(q - f.p0, f.s);
   if (std::fabs(a) >= 0.5 * f.length) return 0.0;
   double t = f.throw_at(a, f.layer_b(s, a)) * f.growth_at(s);
-  if (f.hw_name != "layer_rigid" && f.hw_name != "rigid" && t != 0.0) {
+  if (f.hw_scaled && t != 0.0) {
     // stage 4B: the hanging wall's distance factor (slip lies in the plane, so sigma is invariant)
     const double sig = f.sigma(q);
     const double next = f.hw->needs_next_fault() ? next_fault_distance(fi, q, sig) : kInf;

@@ -26,7 +26,7 @@ namespace fs = std::filesystem;
 void ensure_new_output_dir(const fs::path& out_dir);
 BuildOutcome build_only(const desc::Description& d, const BuildOptions& opt);
 std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Model& m, const std::vector<std::string>& ids, const fs::path& folder,
-                                            double grid_spacing, const GridProducts* gp = nullptr);
+                                            double grid_spacing, const GridProducts* gp = nullptr, repr::FaultedSurfaceCache* surfaces = nullptr);
 std::vector<std::pair<std::string, std::string>> grid_rows(const GridProducts& gp);
 void write_grid_outputs(const desc::Description& d, const Model& m, const GridProducts& gp, const std::vector<std::pair<std::string, std::string>>& keys,
                         const fs::path& out_dir, bool figures);
@@ -298,8 +298,8 @@ PackageOutcome run_package(const fs::path& description, const fs::path& out_dir,
   write_file(out_dir / "parameters.csv", parameters_csv(d));
   write_file(out_dir / "model_description.yaml", read_file(description));
   auto ids = resolve_export_ids(d, cfg.formats);
-  auto files = write_exports(d, *o.model, ids, out_dir / "exports", 0, gp);
-  if (cfg.figures) write_figures(d, *o.model, keys, out_dir / "figures");
+  auto files = write_exports(d, *o.model, ids, out_dir / "exports", 0, gp, ctx.surfaces());
+  if (cfg.figures) write_figures(d, *o.model, keys, out_dir / "figures", ctx.surfaces());
   if (gp) write_grid_outputs(d, *o.model, *gp, keys, out_dir, cfg.figures);
   write_file(out_dir / "README.txt", readme(d, *o.model, cfg, rep, files, cfg.figures));
   // 3. Translate internal labels at the boundary, in every text file.

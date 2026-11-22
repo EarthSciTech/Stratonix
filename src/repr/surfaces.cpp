@@ -323,6 +323,21 @@ static void faulted_roots_chunk(const Model& m, int h, const std::vector<double>
   if (overlaps) *overlaps = nover;
 }
 
+const FaultedSurface& FaultedSurfaceCache::get(int h, const GridSpec& g) {
+  auto q = [](double v) { return std::llround(v * 1e6); };  // lattices equal to the micrometre are the same
+  const auto key = std::make_tuple(h, q(g.x0), q(g.y0), q(g.dx), q(g.dy), g.nx, g.ny);
+  std::lock_guard<std::mutex> lk(mu_);
+  auto it = map_.find(key);
+  if (it == map_.end()) it = map_.emplace(key, horizon_grid_faulted(*m_, h, g)).first;
+  return it->second;
+}
+
+const FaultedSurface& faulted_surface(const Model& m, int h, const GridSpec& g, FaultedSurfaceCache* cache, FaultedSurface& scratch) {
+  if (cache && &cache->model() == &m) return cache->get(h, g);
+  scratch = horizon_grid_faulted(m, h, g);
+  return scratch;
+}
+
 FaultedSurface horizon_grid_faulted(const Model& m, int h, const GridSpec& g) {
   std::vector<double> xs(g.size()), ys(g.size());
   for (std::size_t j = 0; j < g.ny; ++j)

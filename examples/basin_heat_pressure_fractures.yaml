@@ -128,6 +128,14 @@ pressure:
     - {unit: Shale_upper, law: exponential, k0: "0.001 mD | assumed | worked example: shale at its reference porosity", b: "15 ratio | assumed | worked example", phi0: "0.3 fraction | assumed | worked example"}
     - {unit: Sand, law: kozeny_carman, k0: "100 mD | assumed | worked example: sandstone at its reference porosity", phi0: "0.25 fraction | assumed | worked example"}
     - {unit: Shale_lower, law: exponential, k0: "0.0001 mD | assumed | worked example", b: "15 ratio | assumed | worked example", phi0: "0.3 fraction | assumed | worked example"}
+grid:
+  spacing: "[125, 125] m | user_instruction | worked example: areal cell size; the network box spans 2 x 2 columns"
+  margin: "50 m | user_instruction | worked example"
+  zones:
+    - {unit: Shale_upper, layers: "3 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Sand, layers: "4 ordinal | user_instruction | worked example: P32 and P32_DFN as cell properties", layering: proportional}
+    - {unit: Shale_lower, layers: "3 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Basement, layers: "2 ordinal | user_instruction | worked example", layering: proportional}
 outputs:
   sections:
     - name: XS_EW
