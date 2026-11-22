@@ -89,7 +89,7 @@ double PriorSpec::log_density(double x) const {
   if (distribution == "normal") {
     if (!(b > 0)) return kNegInf;
     double z = (x - a) / b;
-    return -0.5 * z * z - std::log(b * std::sqrt(2 * M_PI));
+    return -0.5 * z * z - std::log(b * std::sqrt(2 * kPi));
   }
   if (distribution == "triangular") {
     if (x < a || x > c || !(c > a)) return kNegInf;
@@ -361,7 +361,7 @@ PosteriorResult sample_posterior(const desc::Description& d, const BuildInputs& 
     for (std::size_t k = 0; k < np; ++k) {
       // Box-Muller normal, clamped inside the admissible range
       double u1 = std::max(g.uniform(), 1e-300), u2 = g.uniform();
-      double z = std::sqrt(-2 * std::log(u1)) * std::cos(2 * M_PI * u2);
+      double z = std::sqrt(-2 * std::log(u1)) * std::cos(2 * kPi * u2);
       double lo = pb.lower()[k], hi = pb.upper()[k], m = 1e-6 * (hi - lo);
       x[k] = std::clamp(centre[k] + z * scale[k], lo + m, hi - m);
     }
