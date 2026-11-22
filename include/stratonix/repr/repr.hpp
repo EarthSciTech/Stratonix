@@ -6,6 +6,7 @@
 /// Each kernel has a reference implementation (plain, robust, slow). Where an optimised version
 /// exists it is selected by optimised_kernels() and must match the reference in parity tests.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <map>
 #include <mutex>
@@ -24,6 +25,9 @@ namespace stratonix::repr {
 struct BlockList {
   std::vector<BlockCode> codes;    ///< distinct block codes found in the domain, ascending
   std::vector<std::size_t> counts; ///< samples per code
+  /// per code: the map extent of its samples, x0, y0, x1, y1 (m), widened by one lattice cell
+  std::vector<std::array<double, 4>> extent;
+  double cell = 0;                 ///< lattice cell size (m), the larger of the two directions
 };
 /// Sample the domain on an n x n x nz lattice and list the block codes present.
 BlockList list_blocks(const Model& m, std::size_t n = 48, std::size_t nz = 48);

@@ -101,8 +101,29 @@ const repr::BlockList& CheckContext::blocks() {
 const Grid2D& CheckContext::block_surface(int h, BlockCode b) {
   auto k = std::make_pair(h, b);
   auto it = block_surf_.find(k);
-  if (it == block_surf_.end()) it = block_surf_.emplace(k, repr::horizon_grid_block(m_, h, b, grid_)).first;
-  return it->second;
+  if (it != block_surf_.end()) return it->second;
+  // The block's surface over its sampled map extent widened by a further lattice cell (two in
+  // all); NaN beyond, where the block is not present. A network of many faults has many small
+  // blocks, so a full grid per block was most of the cost of C1 and C2 (stage 4B).
+  const auto& bl = blocks();
+  const auto pos = static_cast<std::size_t>(std::lower_bound(bl.codes.begin(), bl.codes.end(), b) - bl.codes.begin());
+  Grid2D out(grid_);
+  if (pos < bl.codes.size() && bl.codes[pos] == b && !bl.extent.empty()) {
+    auto a = bl.extent[pos];
+    a[0] -= bl.cell; a[1] -= bl.cell; a[2] += bl.cell; a[3] += bl.cell;
+    auto idx = [](double v, double v0, double dv, std::size_t n) {
+      return static_cast<std::size_t>(std::clamp(std::floor((v - v0) / dv), 0.0, static_cast<double>(n - 1)));
+    };
+    const std::size_t i0 = idx(a[0], grid_.x0, grid_.dx, grid_.nx), j0 = idx(a[1], grid_.y0, grid_.dy, grid_.ny);
+    const std::size_t i1 = std::min(grid_.nx - 1, idx(a[2], grid_.x0, grid_.dx, grid_.nx) + 1), j1 = std::min(grid_.ny - 1, idx(a[3], grid_.y0, grid_.dy, grid_.ny) + 1);
+    GridSpec w{grid_.x(i0), grid_.y(j0), grid_.dx, grid_.dy, i1 - i0 + 1, j1 - j0 + 1};
+    const Grid2D s = repr::horizon_grid_block(m_, h, b, w);
+    for (std::size_t j = 0; j < w.ny; ++j)
+      for (std::size_t i = 0; i < w.nx; ++i) out.at(i0 + i, j0 + j) = s.at(i, j);
+  } else {
+    out = repr::horizon_grid_block(m_, h, b, grid_);
+  }
+  return block_surf_.emplace(k, std::move(out)).first->second;
 }
 const repr::FaultedSurface& CheckContext::faulted_surface(int h) {
   return surfaces_->get(h, grid_);

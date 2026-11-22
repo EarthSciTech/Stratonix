@@ -22,9 +22,26 @@ BlockList list_blocks(const Model& m, std::size_t n, std::size_t nz) {
   EvalResult r;
   m.evaluate(pts, kEvalBlock, r);
   std::map<BlockCode, std::size_t> c;
-  for (auto b : r.block) c[b]++;
+  std::map<BlockCode, std::array<double, 4>> e;
+  for (std::size_t q = 0; q < r.block.size(); ++q) {
+    const BlockCode b = r.block[q];
+    c[b]++;
+    auto [it, fresh] = e.try_emplace(b, std::array<double, 4>{pts[q].x, pts[q].y, pts[q].x, pts[q].y});
+    if (!fresh) {
+      auto& a = it->second;
+      a[0] = std::min(a[0], pts[q].x); a[1] = std::min(a[1], pts[q].y);
+      a[2] = std::max(a[2], pts[q].x); a[3] = std::max(a[3], pts[q].y);
+    }
+  }
   BlockList bl;
-  for (auto& [k, v] : c) { bl.codes.push_back(k); bl.counts.push_back(v); }
+  bl.cell = std::max(d.sx, d.sy) / static_cast<double>(n);
+  for (auto& [k, v] : c) {
+    bl.codes.push_back(k);
+    bl.counts.push_back(v);
+    auto a = e[k];
+    a[0] -= bl.cell; a[1] -= bl.cell; a[2] += bl.cell; a[3] += bl.cell;
+    bl.extent.push_back(a);
+  }
   return bl;
 }
 
