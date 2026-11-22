@@ -128,6 +128,15 @@ class CheckContext {
     std::string tolerance_source;
   };
   const TimeDepthResults* time_depth = nullptr;
+  /// Stage 4D: geostatistical properties (C39 conditioning, C40 statistics), set by the pipeline.
+  struct GeostatResults {
+    struct Conditioning { std::string property; std::size_t cells = 0, mismatched = 0; double largest = 0; bool exact = true; };
+    std::vector<Conditioning> conditioning;
+    struct Statistic { std::string property, what; double target = 0, got = 0, tolerance = 0; };
+    std::vector<Statistic> statistics;
+    std::size_t cells = 0, fallback = 0;
+  };
+  const GeostatResults* geostat = nullptr;
   /// Stage 4A: the contact graph (C26, topology.json), computed once at topology_spacing().
   const ContactGraph& contact_graph();
   /// outputs.voxel_spacing (x) when given, else max(surface spacing, largest extent / 64).

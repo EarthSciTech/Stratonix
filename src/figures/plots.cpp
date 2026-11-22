@@ -2269,6 +2269,138 @@ Figure histogram_figure(const FigureContext& c, const std::string& key, const st
   return f;
 }
 
+Figure variogram_figure(const FigureContext& c, const std::string& property, const std::string& unit, double sill, const std::vector<VariogramSeries>& ss) {
+  Figure f(842, 520);
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - variograms of " + property + " in " + unit,
+        "Experimental semivariance (points sized by their number of pairs) and the model (line), per direction; normal scores or indicators, sill " + short_num(sill));
+  double hmax = 0, gmax = sill;
+  std::size_t pmax = 1;
+  for (auto& s : ss) {
+    for (std::size_t k = 0; k < s.lag.size(); ++k)
+      if (std::isfinite(s.gamma[k])) { hmax = std::max(hmax, s.lag[k]); gmax = std::max(gmax, s.gamma[k]); pmax = std::max(pmax, s.pairs[k]); }
+    for (double h : s.model_lag) hmax = std::max(hmax, h);
+  }
+  if (!(hmax > 0)) hmax = 1;
+  gmax *= 1.15;
+  const double px = 70, py = 60, pw = 842 - 70 - 250, ph = 520 - 60 - 80;
+  auto X = [&](double h) { return px + h / hmax * pw; };
+  auto Y = [&](double g) { return py + ph - g / gmax * ph; };
+  for (double t : nice_ticks(0, hmax, 7)) {
+    f.line({X(t), py}, {X(t), py + ph}, kGrid, 0.4);
+    f.text({X(t), py + ph + 12}, short_num(t), 7, Anchor::Middle, false, kInk);
+  }
+  for (double t : nice_ticks(0, gmax, 5)) {
+    f.line({px, Y(t)}, {px + pw, Y(t)}, kGrid, 0.4);
+    f.text({px - 4, Y(t) + 2.5}, short_num(t), 7, Anchor::End, false, kInk);
+  }
+  f.line({px, Y(sill)}, {px + pw, Y(sill)}, rgb(120, 120, 120), 0.8, {4, 3});
+  f.text({px + pw - 2, Y(sill) - 3}, "sill", 7, Anchor::End, false, rgb(90, 90, 90));
+  const Color pal[] = {rgb(31, 119, 180), rgb(214, 39, 40), rgb(44, 160, 44), rgb(148, 103, 189)};
+  std::vector<LegendEntry> es;
+  for (std::size_t q = 0; q < ss.size(); ++q) {
+    const auto& s = ss[q];
+    const Color col = pal[q % 4];
+    for (std::size_t k = 0; k + 1 < s.model_lag.size(); ++k)
+      f.line({X(s.model_lag[k]), Y(s.model_gamma[k])}, {X(s.model_lag[k + 1]), Y(s.model_gamma[k + 1])}, col, 1.2);
+    for (std::size_t k = 0; k < s.lag.size(); ++k) {
+      if (!std::isfinite(s.gamma[k]) || s.pairs[k] == 0) continue;
+      const double r = 1.5 + 3.5 * std::sqrt(static_cast<double>(s.pairs[k]) / static_cast<double>(pmax));
+      f.rect(X(s.lag[k]) - r, Y(s.gamma[k]) - r, 2 * r, 2 * r, col, kInk, 0.3);
+    }
+    es.push_back({"Directions", s.label + " (experimental)", col});
+    es.push_back({"Directions", s.label + " (model)", none(), true, col, 1.2});
+  }
+  f.rect(px, py, pw, ph, none(), kInk, 0.6);
+  f.text({px + pw / 2, py + ph + 26}, "Lag (m)", 8, Anchor::Middle, false, kInk);
+  f.text({px - 44, py + ph / 2}, "Semivariance", 8, Anchor::Middle, false, kInk, -90);
+  double ly = legend(f, 842 - 214, 56, 196, es, 520.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 214, ly, 196);
+  footer(f, c);
+  return f;
+}
+
+Figure property_histogram_figure(const FigureContext& c, const std::string& property, const std::string& unit, const std::string& value_unit,
+                                 const std::vector<double>& simulated, const std::vector<double>& wells, const std::vector<std::string>& codes) {
+  Figure f(842, 520);
+  const bool cat = !codes.empty();
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - " + property + " in " + unit + " against the wells",
+        cat ? "Proportion of each code in the grid cells and in the wells' upscaled cells"
+            : "Fraction of the grid cells (bars) and of the wells' upscaled cells (line) per bin");
+  std::vector<double> sv, wv;
+  for (double x : simulated)
+    if (std::isfinite(x)) sv.push_back(x);
+  for (double x : wells)
+    if (std::isfinite(x)) wv.push_back(x);
+  double lo = 0, hi = 1;
+  int nb;
+  if (cat) {
+    lo = -0.5;
+    hi = static_cast<double>(codes.size()) - 0.5;
+    nb = static_cast<int>(codes.size());
+  } else {
+    lo = sv.empty() ? 0 : *std::min_element(sv.begin(), sv.end());
+    hi = sv.empty() ? 1 : *std::max_element(sv.begin(), sv.end());
+    for (double x : wv) { lo = std::min(lo, x); hi = std::max(hi, x); }
+    if (!(hi > lo)) { lo -= 0.5; hi += 0.5; }
+    nb = 24;
+  }
+  auto bin_of = [&](double x) {
+    if (cat) {  // codes are listed as "<code> <name>"; the bin is the code's position in the list
+      for (std::size_t k = 0; k < codes.size(); ++k)
+        if (std::lround(x) == std::atol(codes[k].c_str())) return static_cast<int>(k);
+      return -1;
+    }
+    return std::clamp(static_cast<int>((x - lo) / (hi - lo) * nb), 0, nb - 1);
+  };
+  std::vector<double> fs(static_cast<std::size_t>(nb), 0.0), fw(static_cast<std::size_t>(nb), 0.0);
+  for (double x : sv) { const int b = bin_of(x); if (b >= 0) fs[static_cast<std::size_t>(b)] += 1.0 / static_cast<double>(sv.size()); }
+  for (double x : wv) { const int b = bin_of(x); if (b >= 0) fw[static_cast<std::size_t>(b)] += 1.0 / static_cast<double>(wv.size()); }
+  double fmax = 0.05;
+  for (int b = 0; b < nb; ++b) fmax = std::max({fmax, fs[static_cast<std::size_t>(b)], fw[static_cast<std::size_t>(b)]});
+  fmax *= 1.1;
+  const double px = 70, py = 60, pw = 842 - 70 - 250, ph = 520 - 60 - 80;
+  auto X = [&](double t) { return px + (t - lo) / (hi - lo) * pw; };
+  auto Y = [&](double v) { return py + ph - v / fmax * ph; };
+  for (double t : nice_ticks(0, fmax, 5)) {
+    f.line({px, Y(t)}, {px + pw, Y(t)}, kGrid, 0.4);
+    f.text({px - 4, Y(t) + 2.5}, short_num(t), 7, Anchor::End, false, kInk);
+  }
+  if (cat) {
+    for (int b = 0; b < nb; ++b) f.text({X(b), py + ph + 12}, codes[static_cast<std::size_t>(b)], 7, Anchor::Middle, false, kInk);
+  } else {
+    for (double t : nice_ticks(lo, hi, 7)) {
+      f.line({X(t), py + ph}, {X(t), py + ph + 3}, kInk, 0.5);
+      f.text({X(t), py + ph + 12}, short_num(t), 7, Anchor::Middle, false, kInk);
+    }
+  }
+  for (int b = 0; b < nb; ++b) {
+    const double a = lo + (hi - lo) * b / nb, e = lo + (hi - lo) * (b + 1) / nb, w = cat ? 0.35 * (X(e) - X(a)) : X(e) - X(a);
+    const double xa = cat ? X(a) + 0.12 * (X(e) - X(a)) : X(a);
+    f.rect(xa, Y(fs[static_cast<std::size_t>(b)]), w, py + ph - Y(fs[static_cast<std::size_t>(b)]), rgb(120, 160, 200), rgb(60, 90, 130), 0.4);
+    if (cat && !wv.empty())
+      f.rect(xa + w + 0.06 * (X(e) - X(a)), Y(fw[static_cast<std::size_t>(b)]), w, py + ph - Y(fw[static_cast<std::size_t>(b)]), rgb(230, 150, 60), rgb(150, 90, 30), 0.4);
+  }
+  if (!cat && !wv.empty())
+    for (int b = 0; b + 1 < nb; ++b) {
+      const double xa = lo + (hi - lo) * (b + 0.5) / nb, xb = lo + (hi - lo) * (b + 1.5) / nb;
+      f.line({X(xa), Y(fw[static_cast<std::size_t>(b)])}, {X(xb), Y(fw[static_cast<std::size_t>(b + 1)])}, rgb(230, 120, 30), 1.4);
+    }
+  f.rect(px, py, pw, ph, none(), kInk, 0.6);
+  f.text({px + pw / 2, py + ph + 26}, cat ? "Code" : property + (value_unit.empty() ? std::string() : " (" + value_unit + ")"), 8, Anchor::Middle, false, kInk);
+  f.text({px - 44, py + ph / 2}, "Fraction of cells", 8, Anchor::Middle, false, kInk, -90);
+  std::vector<LegendEntry> es{{"Cells", "Grid cells (" + std::to_string(sv.size()) + ")", rgb(120, 160, 200)}};
+  if (!wv.empty()) {
+    if (cat) es.push_back({"Cells", "Well cells (" + std::to_string(wv.size()) + ")", rgb(230, 150, 60)});
+    else es.push_back({"Cells", "Well cells (" + std::to_string(wv.size()) + ")", none(), true, rgb(230, 120, 30), 1.4});
+  } else {
+    es.push_back({"Cells", "No well data (unconditioned)", none(), true, rgb(200, 200, 200), 0.5});
+  }
+  double ly = legend(f, 842 - 214, 56, 196, es, 520.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 214, ly, 196);
+  footer(f, c);
+  return f;
+}
+
 Figure sobol_figure(const FigureContext& c, const std::string& key, const std::vector<std::pair<std::string, double>>& idx_in, double threshold,
                     const EnsembleLabel& l) {
   Figure f(842, 520);

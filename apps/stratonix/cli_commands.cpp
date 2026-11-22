@@ -6,11 +6,13 @@
 #include <cctype>
 #include <cmath>
 #include <iostream>
+#include <sstream>
 
 #include "stratonix/checks/manifest.hpp"
 #include "stratonix/core/util.hpp"
 #include "stratonix/desc/description.hpp"
 #include "stratonix/engines/foldframe.hpp"
+#include "stratonix/engines/geostat.hpp"
 #include "stratonix/io/export.hpp"
 #include "stratonix/io/io.hpp"
 #include "stratonix/io/welldata.hpp"
@@ -242,6 +244,44 @@ int cmd_read_seismic(Args& a) {
   rf.replace_extension(".report.txt");
   std::ofstream(rf, std::ios::binary) << r;
   std::cout << "SEG-Y revision " << v.revision << " format " << v.format << ": " << v.traces.size() << " traces of " << v.samples << " samples -> " << out.string() << "\n";
+  return 0;
+}
+int cmd_variogram(Args& a) {
+  if (a.positional().empty() || !a.has("o") || !a.has("lag") || !a.has("lags"))
+    throw Error(ErrorCode::InvalidArgument,
+                "usage: stratonix variogram <points.csv: x,y,z,value> --lag <m> --lags <n> [--tolerance <m>] [--azimuth <deg> --angle-tolerance <deg> "
+                "--bandwidth <m> --dip <deg>] -o <variogram.csv>");
+  std::ifstream in(a.positional()[0]);
+  if (!in) throw Error(ErrorCode::Io, "cannot open " + a.positional()[0]);
+  std::vector<Vec3> pts;
+  std::vector<double> val;
+  std::string line;
+  std::getline(in, line);  // header
+  while (std::getline(in, line)) {
+    if (line.empty()) continue;
+    std::vector<double> f;
+    std::stringstream ss(line);
+    std::string c;
+    while (std::getline(ss, c, ',')) f.push_back(parse_double(c));
+    if (f.size() < 4) throw Error(ErrorCode::Parse, "variogram: each line holds x,y,z,value");
+    pts.push_back({f[0], f[1], f[2]});
+    val.push_back(f[3]);
+  }
+  geo::VariogramDirection d;
+  d.lag = parse_double(a.get("lag"));
+  d.lags = static_cast<std::size_t>(parse_double(a.get("lags")));
+  d.lag_tolerance = a.has("tolerance") ? parse_double(a.get("tolerance")) : 0.5 * d.lag;
+  d.azimuth = a.has("azimuth") ? parse_double(a.get("azimuth")) : 0.0;
+  d.dip = a.has("dip") ? parse_double(a.get("dip")) : 0.0;
+  d.angle_tolerance = a.has("angle-tolerance") ? parse_double(a.get("angle-tolerance")) : 90.0;
+  d.bandwidth = a.has("bandwidth") ? parse_double(a.get("bandwidth")) : 1e30;
+  const auto e = geo::experimental_variogram(pts, val, d);
+  std::string t = "lag,distance,gamma,pairs\n";
+  for (std::size_t k = 0; k < e.gamma.size(); ++k)
+    t += std::to_string(k + 1) + "," + fmt_shortest(e.distance[k]) + "," + (std::isfinite(e.gamma[k]) ? fmt_shortest(e.gamma[k]) : std::string()) + "," +
+         std::to_string(e.pairs[k]) + "\n";
+  std::ofstream(a.get("o"), std::ios::binary) << t;
+  std::cout << "experimental variogram of " << pts.size() << " points, " << d.lags << " lags -> " << a.get("o") << "\n";
   return 0;
 }
 int cmd_plugins(Args&) {

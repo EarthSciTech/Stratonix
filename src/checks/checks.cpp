@@ -1528,6 +1528,56 @@ class C35 final : public Check {
   }
 };
 
+/// C39 property conditioning and C40 reproduced statistics (STX-TN-17 section 8).
+class C39 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const auto* gs = c.geostat;
+    if (!gs) return out;
+    for (auto& k : gs->conditioning) {
+      auto r = base(c, "C39", "property conditioning", k.property);
+      r.unit = "cells";
+      r.value = static_cast<double>(k.mismatched);
+      if (k.exact) {
+        r.tolerance = 0;
+        r.tolerance_source = "Stratonix rule: simulated values equal the upscaled logs at the well cells";
+        r.passed = k.mismatched == 0;
+      } else {  // object facies: honoured by placement, misfit reported (STX-TN-17 section 1.5)
+        r.tolerance = std::floor(0.05 * static_cast<double>(k.cells));
+        r.tolerance_source = "Stratonix default: object facies honour at least 95 % of the well cells";
+        r.passed = r.value <= r.tolerance;
+      }
+      r.detail = std::to_string(k.cells) + " well cells, " + std::to_string(k.mismatched) + " not honoured" +
+                 (k.exact && k.cells ? "; largest difference " + fmt_shortest(k.largest) : std::string());
+      out.push_back(r);
+    }
+    for (auto& st : gs->statistics) {
+      auto r = base(c, "C40", "reproduced statistics", st.property + ": " + st.what);
+      r.unit = st.what.rfind("proportion", 0) == 0 ? "fraction" : "distance";
+      r.value = st.what.rfind("proportion", 0) == 0 ? std::fabs(st.got - st.target) : st.got;
+      r.tolerance = st.tolerance;
+      r.tolerance_source = "Stratonix default (one realisation; a warning, not a failure)";
+      r.passed = r.value <= r.tolerance;
+      r.warn_only = true;
+      r.detail = st.what.rfind("proportion", 0) == 0 ? fmt_fixed(st.got, 3) + " against the target " + fmt_fixed(st.target, 3)
+                                                   : "Kolmogorov-Smirnov distance " + fmt_fixed(st.got, 3);
+      out.push_back(r);
+    }
+    if (gs->cells) {
+      auto r = base(c, "C40", "reproduced statistics", "cells in geological time");
+      r.unit = "fraction";
+      r.value = static_cast<double>(gs->fallback) / static_cast<double>(gs->cells);
+      r.tolerance = 0.1;
+      r.tolerance_source = "Stratonix default: at most 10 % of the cells simulated in present-day coordinates";
+      r.passed = r.value <= r.tolerance;
+      r.warn_only = true;
+      r.detail = std::to_string(gs->fallback) + " of " + std::to_string(gs->cells) + " cells outside the geological-time mapping";
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 /// C36 time-depth ties (STX-TN-16 section 6): each well top after depth conversion, per layer.
 class C36 final : public Check {
   std::vector<CheckResult> run(CheckContext& c) const override {
@@ -1666,6 +1716,8 @@ STRATONIX_REGISTER(check_c35, registry::Kind::Check, "C35_well_data", "1.0.0", "
                    [] { return std::make_unique<C35>(); })
 STRATONIX_REGISTER(check_c36, registry::Kind::Check, "C36_time_depth", "1.0.0", "Time-depth ties: well tops after depth conversion within the tolerance",
                    [] { return std::make_unique<C36>(); })
+STRATONIX_REGISTER(check_c39, registry::Kind::Check, "C39_geostatistics", "1.0.0", "Geostatistical properties: conditioning at the well cells (C39) and reproduced statistics (C40)",
+                   [] { return std::make_unique<C39>(); })
 STRATONIX_REGISTER(check_c31, registry::Kind::Check, "C31_restoration", "1.0.0", "Restoration strain and bed length within their limits",
                    [] { return std::make_unique<C31>(); })
 STRATONIX_REGISTER(check_c29, registry::Kind::Check, "C29_potential_fields", "1.0.0", "Potential-field misfit: reduced chi-square of the stations (warning above 2)",

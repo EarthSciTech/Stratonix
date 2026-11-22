@@ -813,6 +813,34 @@ separately, with their covariance. Example: `time_depth_uncertainty` (`stratonix
 GeoPackage through SQLite). `stratonix read-seismic <file.sgy> -o traces.csv` writes the traces of
 a SEG-Y file as read, with its read report.
 
+## 2.24 Geostatistical properties (2026.4)
+
+`grid.geostatistics` lists properties simulated on the grid, each in one unit (rule F49). Cells
+are simulated in geological-time coordinates (u, v, w): u and v from the restoration of stage
+4A, w the relative stratigraphic position in the unit scaled by its mean thickness. Ranges are
+therefore distances along the layering, through folds and across faults.
+- **`kind: sgs`** (sequential Gaussian simulation, Deutsch and Journel 1998): a standardised
+  variogram (`nugget` and `structures` adding up to 1; each structure `type` spherical,
+  exponential or gaussian with `ranges` [major, minor, vertical] and `azimuth`), the property's
+  range (`distribution: {min, max}`) for the normal-score tails, and either `condition_to` (an
+  upscaled log, `grid.upscaled_logs`) or a stated `mean` and `sd`. `fit_vertical: true` fits the
+  vertical range to the wells (reported, or "not fitted" with the reason); `trend` names a grid
+  property used as the local mean; `decluster_cell` declusters the wells' values.
+- **`kind: sis`** (sequential indicator simulation): `codes` with `proportion` and a standardised
+  `variogram` each (scaled to p (1 - p)); conditioning codes from an upscaled log (most frequent).
+- **`kind: objects`**: channels (`width`, `thickness`, `sinuosity`, `wavelength`, `azimuth`) or
+  lobes (`radius`, `thickness`) placed until the target `proportion`, honouring the wells' codes;
+  `geobody` takes unstated sizes from a stage 4B geobody.
+- `search: {radii, azimuth, max_data}` and `seed` are stated for each property.
+Realisations are reproducible byte for byte on Windows and Linux for a seed; in an ensemble each
+member draws its own realisation. Outputs: the properties on the grid (all grid exports),
+`geostatistics_report.txt`, `variograms.csv`, variogram and histogram figures. **C39** checks the
+simulated values at the well cells; **C40** reports the reproduced proportions or histogram (a
+warning for one realisation) and the share of cells outside the geological-time mapping.
+`stratonix variogram points.csv --lag 50 --lags 10 [--azimuth 30 --angle-tolerance 22.5
+--bandwidth 100] -o variogram.csv` computes an experimental variogram as GSLIB `gamv` does.
+Example: `geostat_properties`.
+
 # 3. Running
 
 | Command | What it does |

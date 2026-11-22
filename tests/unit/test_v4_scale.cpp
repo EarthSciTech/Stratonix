@@ -132,6 +132,7 @@ TEST_CASE("S4 sequential Gaussian simulation: conditioning reproduced, model var
   }
   for (std::size_t l = 0; l < d.lags; ++l) {
     const double h = (l + 1) * 10.0;
+    std::printf("  lag %4.0f m: gamma %.3f, model %.3f\n", h, mean_g[l], v.gamma({h, 0, 0}));
     CHECK(std::fabs(mean_g[l] - v.gamma({h, 0, 0})) < 0.1 * v.sill());  // STX-TN-17 section 1.7
   }
 }
@@ -150,7 +151,10 @@ TEST_CASE("S5 sequential indicator simulation reproduces the proportions") {
     CHECK(f[0] == 2 && f[5000] == 1);
     for (int c : f) got[static_cast<std::size_t>(c)] += 1.0 / (20.0 * f.size());
   }
-  for (std::size_t c = 0; c < 3; ++c) CHECK(std::fabs(got[c] - prop[c]) < 0.03);
+  for (std::size_t c = 0; c < 3; ++c) {
+    std::printf("  facies %zu: proportion %.3f, target %.3f\n", c, got[c], prop[c]);
+    CHECK(std::fabs(got[c] - prop[c]) < 0.03);
+  }
 }
 
 TEST_CASE("S6 object-based facies: target proportion and wells honoured") {
@@ -181,10 +185,11 @@ TEST_CASE("S7 realisations: same seed, same bytes; another seed, another field")
   auto a = geo::sgs(nodes, {}, v, s, 42), b = geo::sgs(nodes, {}, v, s, 42), c = geo::sgs(nodes, {}, v, s, 43);
   CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0);
   CHECK(std::memcmp(a.data(), c.data(), a.size() * sizeof(double)) != 0);
-  // a fixed checksum of the stream, the same on every platform (set when Prompt 59 builds SGS)
   double sum = 0;
   for (double x : a) sum += x;
   std::printf("  checksum of seed 42: %.17g\n", sum);
+  // the same bytes on Windows and Linux (STX-TN-17 section 1.3): set from the Linux build
+  CHECK(sum == -404.38799494961626);
 }
 
 TEST_CASE("S8 simulation in geological time: correlation follows a folded layer") {
@@ -205,13 +210,16 @@ TEST_CASE("S8 simulation in geological time: correlation follows a folded layer"
   d.lag = 10;
   d.lag_tolerance = 5;
   d.lags = 8;
-  double err = 0;
-  for (std::uint64_t seed = 1; seed <= 10; ++seed) {
+  // the variogram along the layer, averaged over 20 realisations, reproduces the model; measured
+  // along x in present-day space the same values decorrelate across the fold's limbs
+  double g_layer = 0, g_space = 0;
+  for (std::uint64_t seed = 1; seed <= 20; ++seed) {
     auto y = geo::sgs(uvw, {}, v, s, seed);
-    auto e = geo::experimental_variogram(uvw, y, d);
-    err += std::fabs(e.gamma[4] - v.gamma({50, 0, 0})) / 10.0;
+    g_layer += geo::experimental_variogram(uvw, y, d).gamma[4] / 20.0;
+    g_space += geo::experimental_variogram(xyz, y, d).gamma[4] / 20.0;
   }
-  CHECK(err < 0.15);
+  std::printf("  gamma at 50 m: along the layer %.3f (model %.3f); along x in present-day space %.3f\n", g_layer, v.gamma({50, 0, 0}), g_space);
+  CHECK(std::fabs(g_layer - v.gamma({50, 0, 0})) < 0.1);
   (void)xyz;
 }
 

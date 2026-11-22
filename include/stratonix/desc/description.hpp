@@ -284,6 +284,26 @@ struct GridDesc {
   /// stage 4C: logs upscaled to the cells the wells pass through
   struct Upscaled { std::string curve, method, name; Param min_valid; };
   std::vector<Upscaled> upscaled_logs;
+  /// stage 4D (STX-TN-17 section 1): properties simulated by geostatistics
+  struct VariogramDesc {
+    bool present = false, fit_vertical = false;
+    Param nugget;
+    struct Structure { std::string type; Param contribution, ranges, azimuth; };  ///< ranges [major, minor, vertical]
+    std::vector<Structure> structures;
+  };
+  struct Geostat {
+    std::string name, kind, unit, property_unit, condition_to, trend;
+    VariogramDesc variogram;
+    struct Code { int code = 0; std::string name; Param proportion; VariogramDesc variogram; };
+    std::vector<Code> codes;
+    Param min, max, mean, sd, decluster_cell;
+    Param search_radii, search_azimuth, max_data;
+    std::string object_kind, geobody;
+    int object_code = 1;
+    Param width, thickness, sinuosity, wavelength, azimuth, radius, proportion, max_iterations;
+    Param seed;
+  };
+  std::vector<Geostat> geostatistics;
 };
 
 /// Restoration (stage 4B, STX-TN-15 section 4): volumetric restoration of the whole model to a

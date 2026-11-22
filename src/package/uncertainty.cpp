@@ -409,6 +409,18 @@ desc::Node member_document(const desc::Node& base, const EnsembleSpec& s, const 
       n->set("perturbation", pert);
     }
   }
+  // stage 4D (STX-TN-17 section 1.6): each member is its own realisation of every geostatistical
+  // property - the seed comes from the member's stream (the base case keeps the stated seed)
+  if (m.index > 0)
+    if (desc::Node* grid = doc.get("grid"))
+      if (desc::Node* gs = grid->get("geostatistics"))
+        for (std::size_t k = 0; k < gs->seq.size(); ++k) {
+          desc::Node& e = gs->seq[k];
+          Rng r(m.seed ^ (0xD1B54A32D192ED03ull * (k + 1)));
+          const std::uint64_t sd = r.next() & 0xFFFFFFFFull;
+          e.set("seed", desc::Node::make_string(std::to_string(sd) + " ordinal | assumed | realisation of member " + std::to_string(m.index) +
+                                                 " (seed from the member's stream, base seed " + std::to_string(s.seed) + ")"));
+        }
   for (std::size_t k = 0; k < s.scenarios.size(); ++k) {
     const auto& o = s.scenarios[k].options[static_cast<std::size_t>(m.options[k])];
     for (auto& [path, node] : o.set) {

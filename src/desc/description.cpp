@@ -134,6 +134,17 @@ std::vector<const Param*> Description::all_params() const {
     add(L.perturbation.v0_sigma); add(L.perturbation.k_sigma); add(L.perturbation.correlation_length);
   }
   add(velocity.tolerance);
+  for (auto& q : grid.geostatistics) {
+    auto vario = [&](const GridDesc::VariogramDesc& v) {
+      add(v.nugget);
+      for (auto& st : v.structures) { add(st.contribution); add(st.ranges); add(st.azimuth); }
+    };
+    vario(q.variogram);
+    for (auto& c : q.codes) { add(c.proportion); vario(c.variogram); }
+    for (auto* p : {&q.min, &q.max, &q.mean, &q.sd, &q.decluster_cell, &q.search_radii, &q.search_azimuth, &q.max_data, &q.width, &q.thickness, &q.sinuosity,
+                    &q.wavelength, &q.azimuth, &q.radius, &q.proportion, &q.max_iterations, &q.seed})
+      add(*p);
+  }
   add(geological_map.sample_spacing);
   for (auto& q : uncertainty.picks) { add(q.sigma); add(q.correlation_length); }
   for (auto& q : uncertainty.velocity) { add(q.v0_sigma); add(q.k_sigma); add(q.correlation_length); }
@@ -242,13 +253,15 @@ const Param* Description::param_by_name(const std::string& path) const {
   };
   std::vector<std::string> fn, pn, hn, wn, vn;
   for (auto& L : velocity.layers) vn.push_back(L.name);
+  std::vector<std::string> gn;
+  for (auto& q : grid.geostatistics) gn.push_back(q.name);
   for (auto& f : faults) fn.push_back(f.name);
   for (auto& p : primitives) pn.push_back(p.name);
   for (auto& h : horizons) hn.push_back(h.name);
   for (auto& w : wells) wn.push_back(w.name);
   if (!take("faults.", "faults", fn) && !take("structure.primitives.", "structure.primitives", pn) &&
       !take("stratigraphy.horizons.", "stratigraphy.horizons", hn) && !take("wells.", "wells", wn) &&
-      !take("velocity_model.layers.", "velocity_model.layers", vn))
+      !take("velocity_model.layers.", "velocity_model.layers", vn) && !take("grid.geostatistics.", "grid.geostatistics", gn))
     ip = path;
   for (auto* p : all_params())
     if (p->path == ip) return p;
@@ -1325,6 +1338,74 @@ struct Typer {
       if (const Node* ft = gn->get("fault_transmissibility")) g.transmissibility = S(ft, "calibration");
       if (const Node* tt = gn->get("tetrahedral")) g.tetrahedral = tt->boolean || tt->str == "true";
       g.pillars = S(gn, "pillars", "fault_conforming");
+      if (const Node* gs = gn->get("geostatistics"))
+        for (std::size_t k = 0; k < gs->seq.size(); ++k) {
+          const Node& x = gs->seq[k];
+          const std::string b = "grid.geostatistics[" + std::to_string(k) + "]";
+          GridDesc::Geostat q;
+          q.name = S(&x, "name");
+          q.kind = S(&x, "kind");
+          q.unit = S(&x, "unit");
+          q.property_unit = S(&x, "property_unit");
+          q.condition_to = S(&x, "condition_to");
+          q.trend = S(&x, "trend");
+          auto vario = [&](const Node* v, const std::string& vb) {
+            GridDesc::VariogramDesc vd;
+            if (!v) return vd;
+            vd.present = true;
+            vd.nugget = P(v, "nugget", vb, Dimension::Dimensionless, false, 1);
+            if (const Node* fv = v->get("fit_vertical")) vd.fit_vertical = fv->boolean || fv->str == "true";
+            if (const Node* ss = v->get("structures"))
+              for (std::size_t i = 0; i < ss->seq.size(); ++i) {
+                const Node& st = ss->seq[i];
+                const std::string sb = vb + ".structures[" + std::to_string(i) + "]";
+                vd.structures.push_back({S(&st, "type"), P(&st, "contribution", sb, Dimension::Dimensionless, true, 1), P(&st, "ranges", sb, Dimension::Length, true, 3),
+                                         P(&st, "azimuth", sb, Dimension::Angle, false, 1)});
+              }
+            return vd;
+          };
+          q.variogram = vario(x.get("variogram"), b + ".variogram");
+          if (const Node* cs = x.get("codes"))
+            for (std::size_t i = 0; i < cs->seq.size(); ++i) {
+              const Node& c = cs->seq[i];
+              const std::string cb = b + ".codes[" + std::to_string(i) + "]";
+              GridDesc::Geostat::Code cd;
+              if (const Node* cn = c.get("code")) cd.code = static_cast<int>(cn->is_number() ? cn->number : std::stod(cn->str));
+              cd.name = S(&c, "name");
+              cd.proportion = P(&c, "proportion", cb, Dimension::Dimensionless, true, 1);
+              cd.variogram = vario(c.get("variogram"), cb + ".variogram");
+              q.codes.push_back(std::move(cd));
+            }
+          if (const Node* ds = x.get("distribution")) {
+            const std::string db = b + ".distribution";
+            q.min = P(ds, "min", db, Dimension::Any, true, 1);
+            q.max = P(ds, "max", db, Dimension::Any, true, 1);
+            q.mean = P(ds, "mean", db, Dimension::Any, false, 1);
+            q.sd = P(ds, "sd", db, Dimension::Any, false, 1);
+            q.decluster_cell = P(ds, "decluster_cell", db, Dimension::Length, false, 1);
+          }
+          if (const Node* se = x.get("search")) {
+            q.search_radii = P(se, "radii", b + ".search", Dimension::Length, true, 3);
+            q.search_azimuth = P(se, "azimuth", b + ".search", Dimension::Angle, false, 1);
+            q.max_data = P(se, "max_data", b + ".search", Dimension::Ordinal, true, 1);
+          }
+          if (const Node* ob = x.get("object")) {
+            const std::string obb = b + ".object";
+            q.object_kind = S(ob, "kind");
+            q.geobody = S(ob, "geobody");
+            if (const Node* oc = ob->get("code")) q.object_code = static_cast<int>(oc->is_number() ? oc->number : std::stod(oc->str));
+            q.width = P(ob, "width", obb, Dimension::Length, false, 1);
+            q.thickness = P(ob, "thickness", obb, Dimension::Length, true, 1);
+            q.sinuosity = P(ob, "sinuosity", obb, Dimension::Dimensionless, false, 1);
+            q.wavelength = P(ob, "wavelength", obb, Dimension::Length, false, 1);
+            q.azimuth = P(ob, "azimuth", obb, Dimension::Angle, false, 1);
+            q.radius = P(ob, "radius", obb, Dimension::Length, false, 1);
+            q.proportion = P(ob, "proportion", obb, Dimension::Dimensionless, true, 1);
+            q.max_iterations = P(ob, "max_iterations", obb, Dimension::Ordinal, false, 1);
+          }
+          q.seed = P(&x, "seed", b, Dimension::Ordinal, true, 1);
+          g.geostatistics.push_back(std::move(q));
+        }
       if (const Node* ul = gn->get("upscaled_logs"))
         for (std::size_t k = 0; k < ul->seq.size(); ++k) {
           const Node& x = ul->seq[k];
@@ -1918,6 +1999,59 @@ struct Typer {
       if (fr.seal_a.present && !(fr.seal_a.si() > 0)) c.err("fault_rock.seal_calibration.a", "F27", "a must be positive");
       if (!fr.seal_type.empty() && std::none_of(d.units.begin(), d.units.end(), [](const UnitDesc& u) { return u.clay_fraction.present; }))
         c.err("fault_rock.seal_calibration", "F27", "a seal calibration needs clay fractions on the units");
+    }
+    // STX-TN-17 section 1 (F49): geostatistical properties
+    {
+      std::set<std::string> names;
+      for (std::size_t k = 0; k < d.grid.geostatistics.size(); ++k) {
+        const auto& q = d.grid.geostatistics[k];
+        const std::string b = "grid.geostatistics[" + std::to_string(k) + "]";
+        if (!names.insert(q.name).second) c.err(b + ".name", "F49", "'" + q.name + "' is simulated twice");
+        bool unit_ok = false;
+        for (auto& u : d.units) unit_ok = unit_ok || u.name == q.unit;
+        if (!unit_ok) c.err(b + ".unit", "F49", "unknown unit '" + q.unit + "'");
+        auto vario_ok = [&](const GridDesc::VariogramDesc& v, const std::string& vb) {
+          if (!v.present || v.structures.empty()) { c.err(vb, "F49", "a variogram with at least one structure is stated"); return; }
+          double s = v.nugget.present ? v.nugget.si() : 0.0;
+          for (auto& st : v.structures) s += st.contribution.si();
+          if (std::fabs(s - 1.0) > 1e-6) c.err(vb, "F49", "a standardised variogram: nugget and contributions add up to 1 (they add up to " + fmt_shortest(s) + ")");
+          for (auto& st : v.structures)
+            for (std::size_t i = 0; i < st.ranges.values.size(); ++i)
+              if (!(st.ranges.si(i) > 0)) c.err(vb, "F49", "variogram ranges are positive");
+        };
+        bool cond_ok = q.condition_to.empty();
+        for (auto& up : d.grid.upscaled_logs) cond_ok = cond_ok || (up.name.empty() ? up.curve : up.name) == q.condition_to;
+        if (!cond_ok) c.err(b + ".condition_to", "F49", "'" + q.condition_to + "' is not one of grid.upscaled_logs (conditioning data are upscaled logs)");
+        if (q.kind == "sgs" || q.kind == "sis") {
+          if (!q.search_radii.present) c.err(b + ".search", "F49", "the search neighbourhood (radii, max_data) is stated");
+        }
+        if (q.kind == "sgs") {
+          vario_ok(q.variogram, b + ".variogram");
+          if (!q.min.present || !q.max.present) c.err(b + ".distribution", "F49", "the property's range (distribution min and max) is stated for the normal-score tails");
+          else if (!(q.min.si() < q.max.si())) c.err(b + ".distribution", "F49", "min is below max");
+          if (q.condition_to.empty() && (!q.mean.present || !q.sd.present))
+            c.err(b + ".distribution", "F49", "without conditioning data the target distribution (mean and sd) is stated");
+        } else if (q.kind == "sis") {
+          if (q.codes.size() < 2) c.err(b + ".codes", "F49", "indicator simulation needs at least two facies codes");
+          double s = 0;
+          for (std::size_t i = 0; i < q.codes.size(); ++i) {
+            s += q.codes[i].proportion.si();
+            vario_ok(q.codes[i].variogram, b + ".codes[" + std::to_string(i) + "].variogram");
+          }
+          if (!q.codes.empty() && std::fabs(s - 1.0) > 1e-6) c.err(b + ".codes", "F49", "facies proportions add up to 1 (they add up to " + fmt_shortest(s) + ")");
+        } else if (q.kind == "objects") {
+          if (q.object_kind.empty()) c.err(b + ".object", "F49", "object facies state their object (channel or lobe)");
+          if (q.object_kind == "channel" && !q.width.present) c.err(b + ".object.width", "F49", "a channel states its width");
+          if (q.object_kind == "lobe" && !q.radius.present) c.err(b + ".object.radius", "F49", "a lobe states its radius");
+          if (q.sinuosity.present && !(q.sinuosity.si() >= 1)) c.err(b + ".object.sinuosity", "F49", "sinuosity is 1 or more");
+          if (q.proportion.present && !(q.proportion.si() > 0 && q.proportion.si() < 1)) c.err(b + ".object.proportion", "F49", "the target proportion is between 0 and 1");
+          if (!q.geobody.empty()) {
+            bool found = false;
+            for (auto& gb : d.geobodies) found = found || gb.name == q.geobody;
+            if (!found) c.err(b + ".object.geobody", "F49", "unknown geobody '" + q.geobody + "'");
+          }
+        }
+      }
     }
     // STX-TN-16 section 3 (F48): pick and velocity uncertainty
     {

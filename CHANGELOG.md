@@ -43,6 +43,13 @@ has its own version (`stratonix_schema`).
     properties `P32` and `P32_DFN` (realised network intensity per cell), and temperature and
     overpressure are drawn over the burial curves at each well.
 
+- Geostatistical properties (stage 4D, Prompt 59): variograms (experimental, models, weighted
+  least-squares fit), normal scores with declustering, sequential Gaussian and indicator
+  simulation (multiple-grid path, servosystem) and object-based channels and lobes, in
+  geological-time coordinates, conditioned to upscaled logs (`grid.geostatistics`, F49, C39,
+  C40); seeded and reproducible byte for byte on every platform; realisations as ensemble
+  members; variogram and histogram figures; `stratonix variogram`; experimental variograms
+  equal GeostatsPy's gamv in CI; example `geostat_properties`.
 - Stage 4D opened (Prompt 58): interfaces for geostatistics (variograms, sequential Gaussian and
   indicator simulation, object facies), fault-following grids, total-effect sensitivity, build
   caching, streamed grids and parallel builds; tests S1 to S13 written first (expected to fail).

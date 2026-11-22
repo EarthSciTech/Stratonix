@@ -184,6 +184,17 @@ struct EnsembleLabel { std::size_t members_ok = 0, members_failed = 0; std::uint
 struct TornadoBar { std::string parameter; double low = 0, high = 0; };
 Figure tornado_figure(const FigureContext& c, const std::string& key, double base, const std::vector<TornadoBar>& bars, const EnsembleLabel& l);
 /// Histogram of a key number over the ok members, with P10, P50 and P90 marked.
+/// Stage 4D (STX-TN-17 section 1.6): experimental variograms (points sized by their pairs) with
+/// the model, per direction, and a property's histogram against the wells' upscaled values.
+struct VariogramSeries {
+  std::string label;
+  std::vector<double> lag, gamma;
+  std::vector<std::size_t> pairs;
+  std::vector<double> model_lag, model_gamma;
+};
+Figure variogram_figure(const FigureContext& c, const std::string& property, const std::string& unit, double sill, const std::vector<VariogramSeries>& s);
+Figure property_histogram_figure(const FigureContext& c, const std::string& property, const std::string& unit, const std::string& value_unit,
+                                 const std::vector<double>& simulated, const std::vector<double>& wells, const std::vector<std::string>& codes);
 Figure histogram_figure(const FigureContext& c, const std::string& key, const std::vector<double>& values, double p10, double p50, double p90,
                         const EnsembleLabel& l);
 /// First-order variance-based indices of one key number, per parameter.

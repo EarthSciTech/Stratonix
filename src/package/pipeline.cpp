@@ -1,6 +1,7 @@
 // Pipeline shared by the command line and the C API.
 #include "stratonix/package/pipeline.hpp"
 #include "stratonix/package/welldata.hpp"
+#include "stratonix/package/geostat_props.hpp"
 #include "stratonix/io/maps.hpp"
 #include "stratonix/io/seismic.hpp"
 #include "stratonix/io/velocity.hpp"
@@ -1330,6 +1331,21 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     write_file(out_dir / "well_data_report.txt", wdb.report);
     for (auto& [name, text] : wdb.csv) write_file(out_dir / name, text);
   }
+  // stage 4D (STX-TN-17 section 1): geostatistical properties, conditioned to the upscaled logs
+  GeostatBuild gsb;
+  CheckContext::GeostatResults gsr;
+  if (!d.grid.geostatistics.empty() && ctx.grid_products()) {
+    const GridProducts* gp = ctx.grid_products();
+    gsb = geostat_properties(d, *o.model, gp->grid, gp->props);
+    for (auto& prop : gsb.props) ctx.add_grid_property(prop);
+    for (auto& k : gsb.conditioning) gsr.conditioning.push_back({k.property, k.cells, k.mismatched, k.largest, k.exact});
+    for (auto& st : gsb.statistics) gsr.statistics.push_back({st.property, st.what, st.target, st.got, st.tolerance});
+    gsr.cells = gsb.cells;
+    gsr.fallback = gsb.fallback;
+    ctx.geostat = &gsr;
+    write_file(out_dir / "geostatistics_report.txt", gsb.report);
+    write_file(out_dir / "variograms.csv", gsb.csv);
+  }
   // stage 4C (STX-TN-16 section 2.5): what the geological map gave the builder
   if (d.geological_map.present) {
     const io::ModelData md = io::geological_map_data(d);
@@ -1439,6 +1455,34 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
         fig::write_figure(fig::correlation_figure(c, wdb.corr), out_dir / "figures", fig::figure_basename(c, "well_correlation", "wells"),
                           c.model_name + " - well correlation", "Wells side by side with the correlation lines and what each rests on.",
                           "Correlation by age where the horizon is dated and the wells have age data, else by tops, else by the model.");
+    }
+    if (opt.figures && gsb.present) {
+      // stage 4D: variograms per property and direction, histograms against the wells
+      auto c = figure_context(d, *o.model, keys);
+      std::map<std::string, std::vector<fig::VariogramSeries>> by;
+      std::map<std::string, std::pair<std::string, double>> meta;
+      for (auto& vp : gsb.variograms) {
+        fig::VariogramSeries s{vp.direction, vp.lag, vp.gamma, vp.pairs, {}, {}};
+        double hmax = 0;
+        for (double h : vp.lag) hmax = std::max(hmax, h);
+        const double a = vp.azimuth * 3.14159265358979323846 / 180.0;
+        for (int k = 0; k <= 60; ++k) {
+          const double h = hmax * k / 60.0;
+          s.model_lag.push_back(h);
+          s.model_gamma.push_back(vp.model.gamma(vp.vertical ? Vec3{0, 0, h} : Vec3{h * std::sin(a), h * std::cos(a), 0}));
+        }
+        by[vp.property].push_back(std::move(s));
+        meta[vp.property] = {vp.unit, vp.model.sill()};
+      }
+      for (auto& [prop, series] : by)
+        fig::write_figure(fig::variogram_figure(c, prop, meta[prop].first, meta[prop].second, series), out_dir / "figures", fig::figure_basename(c, "variogram", prop),
+                          c.model_name + " - variograms of " + prop, "Experimental and model variograms of " + prop + " in geological-time coordinates.",
+                          "Model parameters labelled in the description; see geostatistics_report.txt and variograms.csv.");
+      for (auto& hg : gsb.histograms)
+        fig::write_figure(fig::property_histogram_figure(c, hg.property, hg.unit, hg.value_unit, hg.simulated, hg.wells, hg.codes), out_dir / "figures",
+                          fig::figure_basename(c, "property_histogram", hg.property), c.model_name + " - " + hg.property + " against the wells",
+                          "Distribution of " + hg.property + " in the grid cells against the wells' upscaled cells.",
+                          "One realisation (seed in geostatistics_report.txt).");
     }
     if (opt.figures && !d.events.empty()) write_restoration(d, *o.model, out_dir / "restoration");
     if (opt.figures) write_data_figures(d, *o.model, keys, out_dir / "figures");

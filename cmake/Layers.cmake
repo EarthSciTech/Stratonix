@@ -99,6 +99,7 @@ add_library(stratonix_package STATIC
   src/package/bench.cpp
   src/package/delivery.cpp
   src/package/uncertainty.cpp
-  src/package/welldata.cpp)
+  src/package/welldata.cpp
+  src/package/geostat_props.cpp)
 target_link_libraries(stratonix_package PUBLIC stratonix_checks stratonix_io stratonix_figures)
 stx_layer(stratonix_package 6)

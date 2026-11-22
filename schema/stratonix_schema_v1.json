@@ -2291,6 +2291,250 @@
               }
             }
           }
+        },
+        "geostatistics": {
+          "type": "array",
+          "description": "stage 4D: properties simulated by geostatistics in geological-time coordinates (STX-TN-17 section 1)",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "kind",
+              "unit",
+              "seed"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "sgs",
+                  "sis",
+                  "objects"
+                ]
+              },
+              "unit": {
+                "type": "string"
+              },
+              "property_unit": {
+                "type": "string"
+              },
+              "condition_to": {
+                "type": "string"
+              },
+              "trend": {
+                "type": "string"
+              },
+              "variogram": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "a standardised variogram (sill 1): nugget plus nested structures (STX-TN-17 section 1.2)",
+                "properties": {
+                  "nugget": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "fit_vertical": {
+                    "type": "boolean"
+                  },
+                  "structures": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "contribution",
+                        "ranges"
+                      ],
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "spherical",
+                            "exponential",
+                            "gaussian"
+                          ]
+                        },
+                        "contribution": {
+                          "$ref": "#/$defs/param"
+                        },
+                        "ranges": {
+                          "$ref": "#/$defs/param"
+                        },
+                        "azimuth": {
+                          "$ref": "#/$defs/param"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "codes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "name",
+                    "proportion",
+                    "variogram"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "proportion": {
+                      "$ref": "#/$defs/param"
+                    },
+                    "variogram": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "description": "a standardised variogram (sill 1): nugget plus nested structures (STX-TN-17 section 1.2)",
+                      "properties": {
+                        "nugget": {
+                          "$ref": "#/$defs/param"
+                        },
+                        "fit_vertical": {
+                          "type": "boolean"
+                        },
+                        "structures": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "contribution",
+                              "ranges"
+                            ],
+                            "properties": {
+                              "type": {
+                                "enum": [
+                                  "spherical",
+                                  "exponential",
+                                  "gaussian"
+                                ]
+                              },
+                              "contribution": {
+                                "$ref": "#/$defs/param"
+                              },
+                              "ranges": {
+                                "$ref": "#/$defs/param"
+                              },
+                              "azimuth": {
+                                "$ref": "#/$defs/param"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "distribution": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "min",
+                  "max"
+                ],
+                "properties": {
+                  "min": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "max": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "mean": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "sd": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "decluster_cell": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              },
+              "search": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "radii",
+                  "max_data"
+                ],
+                "properties": {
+                  "radii": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "azimuth": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "max_data": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              },
+              "object": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "thickness",
+                  "proportion"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "channel",
+                      "lobe"
+                    ]
+                  },
+                  "geobody": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "integer"
+                  },
+                  "width": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "thickness": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "sinuosity": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "wavelength": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "azimuth": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "radius": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "proportion": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "max_iterations": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              },
+              "seed": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
         }
       }
     },
