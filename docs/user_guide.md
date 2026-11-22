@@ -700,6 +700,48 @@ history, in Gibson's (1958) moving-boundary form.
 
 Rule F41 covers heat and pressure, F42 mechanics and fractures. Units: degC, W/m/K, mW/m2, uW/m3,
 mPa.s (cP). Example: `basin_heat_pressure_fractures`.
+With a grid, fracture intensity is also written as the cell properties `P32` and, with a network,
+`P32_DFN` (realised); temperature and overpressure are drawn over the burial curves at each well.
+
+## 2.22 Wells with logs, surveys and ages (2026.4)
+
+Files are read as delivered and never rewritten; units and null values come from the files, and
+`well_data_report.txt` says what was read and what was not, with line or byte offsets.
+
+**Logs** (`wells[].logs`): a list of `{file, curves, frame, index}`.
+- **Formats:** LAS 2.0 (wrapped or not), LAS 3.0 (log, tops and inclinometry groups, any
+  delimiter) and DLIS (RP66 V1: channels, frames and frame data) by the file's extension.
+- `curves` selects curves (all when absent); `frame` selects a DLIS frame; `index: md | tvd`
+  states the index where the file does not (DEPT and DEPTH are read as measured depth).
+- **Outputs:** `well_logs_<well>.csv` (MD, TVD, x, y, z and the curves), a log panel per well with
+  its tops, age data and the model's units along the path.
+- `stratonix read-log <file> -o <curves.csv>` reads one file and writes its curves and read report.
+
+**Surveys** (`wells[].trajectory`): `stations` (as in v3) or `file`, a CSV whose header names
+`md`, `inc` and `azi` with their units in brackets (`md [m],inc [deg],azi [deg]`). A survey given
+by file or with a `method` states both its `method` (`minimum_curvature`,
+`radius_of_curvature`, `balanced_tangential`, `average_angle`, `tangential`) and its
+`azimuth_reference` (`true_north`, `grid_north`, `magnetic_north` with `declination`; grid
+`convergence` for true and magnetic azimuths). A v3 trajectory without them keeps its meaning:
+minimum curvature in grid azimuths.
+
+**Ages** (`wells[].ages`): biostratigraphic or chronostratigraphic data with `name`, `depth` (TVD
+below the model datum, as tops; `depth_base` for a range), `age` (Ma), `sigma`, `timescale` and
+`source`. With ages, `well_correlation: {rule}` is required (`linear_in_depth` between dated
+samples, or `constant_rate_per_unit`). Horizons with an `age` are then placed in each well where
+that age falls; the correlation panel and `well_correlation.csv` state, per well, whether a point
+rests on the ages, a top or the model.
+
+**Upscaling** (`grid.upscaled_logs`): `{curve, method, name, min_valid}` fills the cells the wells
+pass through by `arithmetic`, `harmonic`, `geometric`, `rms`, `minimum`, `maximum` or
+`most_frequent`, weighted by the measured-depth length of each sample in the cell. Cells with fewer
+valid samples than `min_valid` (default 0.5) are left missing with the reason, as are cells no well
+crosses (stage 4D fills them).
+
+**Checks.** C35 reports each well's survey, its logs (nulls and units per curve) and whether logs
+and tops lie on the path. C38 fails an age inversion in a well, or a top whose age at its depth
+differs from its horizon's age by more than twice the age uncertainty. Rule F44. Example:
+`wells_logs_ages`.
 
 # 3. Running
 

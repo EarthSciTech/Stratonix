@@ -67,6 +67,13 @@ jobs:
         run: |
           python3 -m pip install "harmonica>=0.6"
           python3 tests/tools/harmonica_v4.py build/linux-gcc-release/apps/stratonix/stratonix crosscheck_report --require-harmonica
+      # Stage 4C (STX-TN-16 section 7): the LAS reader against lasio on its public example files,
+      # the DLIS reader against dlisio on files written by dliswriter (test tools only)
+      - name: Well logs against lasio and dlisio
+        run: |
+          python3 -m pip install lasio dlisio dliswriter
+          git clone --depth 1 https://github.com/kinverarity1/lasio.git lasio-src
+          python3 tests/tools/welldata_crosscheck.py build/linux-gcc-release/apps/stratonix/stratonix lasio-src/tests/examples crosscheck_report/welldata
       - uses: actions/upload-artifact@v4
         if: always()
         with:

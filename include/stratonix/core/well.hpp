@@ -20,6 +20,13 @@ class WellPath {
   WellPath(std::string name, double x, double y, double datum_z, double total_depth);
   /// Deviated well from survey stations (first station at md 0).
   WellPath(std::string name, double x, double y, double datum_z, std::vector<WellStation> stations);
+  /// Stage 4C: a well from positions computed by a stated survey method: measured depth and
+  /// (north, east, TVD) offsets from the head, TVD positive down.
+  static WellPath from_positions(std::string name, double x, double y, double datum_z, const std::vector<double>& md,
+                                 const std::vector<Vec3>& north_east_tvd, std::string method);
+  /// Point at a measured depth (interpolated along the path; vertical beyond total depth).
+  Vec3 at_md(double md) const;
+  const std::string& survey_method() const { return method_; }
   const std::string& name() const { return name_; }
   double x() const { return x_; }
   double y() const { return y_; }
@@ -39,6 +46,7 @@ class WellPath {
   std::vector<WellStation> stations_;
   Polyline pts_;
   std::vector<double> md_;
+  std::string method_;
 };
 
 }  // namespace stratonix

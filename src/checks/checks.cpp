@@ -1487,6 +1487,44 @@ class C32 final : public Check {
   }
 };
 
+/// C35 well data and C38 age consistency (STX-TN-16 section 6).
+class C35 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const auto* wd = c.well_data;
+    if (!wd) return out;
+    for (auto& w : wd->wells) {
+      auto r = base(c, "C35", "well data", w.well);
+      r.unit = "m";
+      r.value = std::max(w.beyond, w.tops_off_path);
+      r.tolerance = 1.0;
+      r.tolerance_source = "Stratonix rule: logs and tops within the well path (1 m)";
+      r.passed = r.value <= r.tolerance;
+      std::string det = w.survey + "; " + std::to_string(w.logs) + " log file" + (w.logs == 1 ? "" : "s") + ", " + std::to_string(w.curves) + " curves";
+      if (w.beyond > 1.0) det += "; logs run " + fmt_fixed(w.beyond, 1) + " m beyond the path's total depth";
+      if (w.tops_off_path > 1.0) det += "; a top lies " + fmt_fixed(w.tops_off_path, 1) + " m below the path's total depth";
+      for (std::size_t k = 0; k < w.notes.size() && k < 4; ++k) det += "; " + w.notes[k];
+      if (w.notes.size() > 4) det += " and " + std::to_string(w.notes.size() - 4) + " more (well_data_report.txt)";
+      r.detail = det;
+      out.push_back(r);
+    }
+    if (wd->ages) {
+      auto r = base(c, "C38", "age consistency", "wells");
+      r.unit = "conflicts";
+      r.value = static_cast<double>(wd->conflicts.size());
+      r.tolerance = 0;
+      r.tolerance_source = "Stratonix rule: no age inversion in a well; tops agree with the age data within their uncertainty";
+      r.passed = wd->conflicts.empty();
+      std::string det = std::to_string(wd->dated) + " age data";
+      for (std::size_t k = 0; k < wd->conflicts.size() && k < 4; ++k) det += "; " + wd->conflicts[k].well + ": " + wd->conflicts[k].what;
+      if (wd->conflicts.size() > 4) det += " and " + std::to_string(wd->conflicts.size() - 4) + " more";
+      r.detail = det;
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 /// C29: potential-field misfit (STX-TN-14 section 7): reduced chi-square of the stations reported;
 /// a warning above 2.
 class C29 final : public Check {
@@ -1591,6 +1629,8 @@ STRATONIX_REGISTER(check_c30, registry::Kind::Check, "C30_bodies", "1.0.0", "Bod
                    [] { return std::make_unique<C30>(); })
 STRATONIX_REGISTER(check_c32, registry::Kind::Check, "C32_basin", "1.0.0", "Heat balance, pore-pressure bounds and fracture-network intensity",
                    [] { return std::make_unique<C32>(); })
+STRATONIX_REGISTER(check_c35, registry::Kind::Check, "C35_well_data", "1.0.0", "Well data: survey method stated, logs and tops on the well path; age consistency (C38)",
+                   [] { return std::make_unique<C35>(); })
 STRATONIX_REGISTER(check_c31, registry::Kind::Check, "C31_restoration", "1.0.0", "Restoration strain and bed length within their limits",
                    [] { return std::make_unique<C31>(); })
 STRATONIX_REGISTER(check_c29, registry::Kind::Check, "C29_potential_fields", "1.0.0", "Potential-field misfit: reduced chi-square of the stations (warning above 2)",

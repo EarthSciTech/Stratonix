@@ -12,6 +12,7 @@
 #include "stratonix/desc/description.hpp"
 #include "stratonix/engines/foldframe.hpp"
 #include "stratonix/io/io.hpp"
+#include "stratonix/io/welldata.hpp"
 #include "stratonix/model/model_suite.hpp"
 #include "stratonix/package/bench.hpp"
 #include "stratonix/package/delivery.hpp"
@@ -182,6 +183,41 @@ int cmd_fold_frame(Args& a) {
             << fmt_fixed(rad2deg(F.plunge), 1) << " deg, interlimb " << fmt_fixed(rad2deg(F.interlimb), 1) << " deg, wavelength "
             << fmt_fixed(F.wavelength, 0) << " m -> " << a.get("o") << "\n";
   return F.ok ? 0 : 4;
+}
+int cmd_read_log(Args& a) {
+  if (a.positional().empty() || !a.has("o")) throw Error(ErrorCode::InvalidArgument, "usage: stratonix read-log <file.las|file.dlis> -o <curves.csv>");
+  const std::filesystem::path in = a.positional()[0], out = a.get("o");
+  std::string ext = in.extension().string();
+  for (auto& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  std::vector<io::WellLogSet> sets;
+  if (ext == ".dlis" || ext == ".dls") sets = io::read_dlis(in);
+  else sets.push_back(io::read_las(in));
+  for (std::size_t k = 0; k < sets.size(); ++k) {
+    const auto& s = sets[k];
+    std::filesystem::path f = out;
+    if (sets.size() > 1) f.replace_filename(out.stem().string() + "_" + std::to_string(k + 1) + out.extension().string());
+    // header: mnemonic [unit]; values as read, empty at nulls; text columns quoted
+    std::string t = s.index.mnemonic + " [" + s.index.unit + "]";
+    for (auto& c : s.curves) t += "," + c.mnemonic + " [" + c.unit + "]";
+    t += "\n";
+    for (std::size_t i = 0; i < s.index.values.size(); ++i) {
+      t += std::isfinite(s.index.values[i]) ? fmt_shortest(s.index.values[i]) : std::string();
+      for (auto& c : s.curves) {
+        t += ",";
+        if (i < c.values.size() && std::isfinite(c.values[i])) t += fmt_shortest(c.values[i]);
+        else if (i < c.text.size() && !c.text[i].empty()) t += "\"" + c.text[i] + "\"";
+      }
+      t += "\n";
+    }
+    std::ofstream(f, std::ios::binary) << t;
+    std::string r = s.source + "\nversion " + s.version + ", well '" + s.well + "', index type " + (s.index_type.empty() ? "not stated" : s.index_type) + "\n";
+    for (auto& line : s.report) r += line + "\n";
+    std::filesystem::path rf = f;
+    rf.replace_extension(".report.txt");
+    std::ofstream(rf, std::ios::binary) << r;
+    std::cout << s.version << " " << s.well << ": " << s.curves.size() << " curves, " << s.index.values.size() << " samples -> " << f.string() << "\n";
+  }
+  return 0;
 }
 int cmd_plugins(Args&) {
   for (auto* e : registry::Registry::global().all())

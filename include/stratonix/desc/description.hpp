@@ -1,6 +1,7 @@
 /// @file description.hpp
 /// @brief Typed, validated model description (schema version 1) with evidence on every parameter.
 #pragma once
+#include <array>
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -44,9 +45,20 @@ struct Param {
 struct ModelMeta { std::string name, version, status, title, description, contact; };
 struct InputDesc { std::string id, path, role, sharing, source, evidence; std::filesystem::path resolved; };
 struct CompletionDesc { std::string name; Param top, base; };  ///< depths positive down
+/// Stage 4C (STX-TN-16 section 1): log files of a well, read as delivered.
+struct WellLogDesc { std::string file, frame, index; std::vector<std::string> curves; std::filesystem::path resolved; };
+/// Stage 4C: an age datum in a well (TVD below the model datum, positive down, as the tops).
+struct WellAgeDesc { std::string kind, name, timescale, source; Param depth, depth_base, age, sigma; };
 struct WellDesc {
   std::string name, role;
   Param head, datum_elevation, total_depth, stations;
+  /// stage 4C (rule F44): the survey's calculation method and azimuth reference; both empty for a
+  /// trajectory written as in v3 (minimum curvature, grid azimuths)
+  std::string survey_method, azimuth_reference, survey_file;
+  Param declination, convergence;
+  std::vector<std::array<double, 3>> survey;  ///< md (m), inclination and azimuth (rad), from stations or the file
+  std::vector<WellLogDesc> logs;
+  std::vector<WellAgeDesc> ages;
   std::vector<std::pair<std::string, Param>> tops;  ///< horizon name -> depth (positive down)
   Param top_uncertainty;           ///< stage 3A: uncertainty of the tops (m)
   std::vector<CompletionDesc> completions;
@@ -260,6 +272,9 @@ struct GridDesc {
   std::string transmissibility;             ///< "" or "manzocchi_1999"
   bool tetrahedral = false;
   std::string pillars = "fault_conforming";  ///< stage 4B: fault_conforming | vertical (dense intersecting networks)
+  /// stage 4C: logs upscaled to the cells the wells pass through
+  struct Upscaled { std::string curve, method, name; Param min_valid; };
+  std::vector<Upscaled> upscaled_logs;
 };
 
 /// Restoration (stage 4B, STX-TN-15 section 4): volumetric restoration of the whole model to a
@@ -365,6 +380,7 @@ struct Description {
   Param origin, size, depth_range, grid_spacing;
   std::vector<InputDesc> inputs;
   std::vector<WellDesc> wells;
+  std::string correlation_rule;  ///< stage 4C: well_correlation.rule ("" when not given)
   std::string ref_well;
   Param ref_point;
   std::vector<HorizonDesc> horizons;

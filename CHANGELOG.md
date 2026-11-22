@@ -43,6 +43,12 @@ has its own version (`stratonix_schema`).
     properties `P32` and `P32_DFN` (realised network intensity per cell), and temperature and
     overpressure are drawn over the burial curves at each well.
 
+- Wells with logs, surveys and ages (stage 4C, Prompt 55): LAS 2.0 and 3.0 and DLIS (RP66 V1)
+  read as delivered with units and nulls from the files; deviation surveys from CSV by a stated
+  method and azimuth reference (rule F44); ages in wells and correlation by age; logs upscaled to
+  grid cells (`grid.upscaled_logs`); well log and correlation panels; checks C35 (well data) and
+  C38 (age consistency); `stratonix read-log`; example `wells_logs_ages`. CI compares the LAS
+  reader with lasio and the DLIS reader with dlisio.
 - Stage 4C opened (STX-TN-16): interfaces for well logs (LAS 2.0 and 3.0, DLIS), deviation
   surveys, ages and well correlation, log upscaling, SEG-Y volumes, horizon picks and fault
   sticks, layer-cake time-to-depth conversion, coordinate transformations and geological maps;

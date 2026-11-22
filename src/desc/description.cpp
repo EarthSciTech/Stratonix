@@ -413,7 +413,34 @@ struct Typer {
         wd.datum_elevation = P(&w, "datum_elevation", b, Dimension::Length, false, 1);
         wd.total_depth = P(&w, "total_depth", b, Dimension::Length, false, 1);
         wd.top_uncertainty = P(&w, "top_uncertainty", b, Dimension::Length, false, 1);
-        if (const Node* tr = w.get("trajectory")) wd.stations = P(tr, "stations", b + ".trajectory", Dimension::Any, true, 2, 3);
+        if (const Node* tr = w.get("trajectory")) {
+          wd.stations = P(tr, "stations", b + ".trajectory", Dimension::Any, false, 2, 3);
+          wd.survey_file = S(tr, "file");
+          wd.survey_method = S(tr, "method");
+          wd.azimuth_reference = S(tr, "azimuth_reference");
+          wd.declination = P(tr, "declination", b + ".trajectory", Dimension::Angle, false, 1);
+          wd.convergence = P(tr, "convergence", b + ".trajectory", Dimension::Angle, false, 1);
+          if (!wd.stations.present && wd.survey_file.empty())
+            c.err(b + ".trajectory", "F44", "a trajectory needs stations or a survey file");
+          for (std::size_t r = 0; wd.stations.present && r < wd.stations.rows(); ++r)
+            wd.survey.push_back({wd.stations.values[3 * r] * wd.stations.to_si, deg2rad(wd.stations.values[3 * r + 1]),
+                                 deg2rad(wd.stations.values[3 * r + 2])});
+        }
+        if (const Node* ls = w.get("logs"))
+          for (auto& l : ls->seq) {
+            WellLogDesc ld{S(&l, "file"), S(&l, "frame"), S(&l, "index"), {}, {}};
+            if (const Node* cv = l.get("curves"))
+              for (auto& x : cv->seq) ld.curves.push_back(x.str);
+            wd.logs.push_back(ld);
+          }
+        if (const Node* as = w.get("ages"))
+          for (std::size_t q = 0; q < as->seq.size(); ++q) {
+            const Node& a = as->seq[q];
+            const std::string ba = b + ".ages[" + std::to_string(q) + "]";
+            wd.ages.push_back({S(&a, "kind"), S(&a, "name"), S(&a, "timescale"), S(&a, "source"), P(&a, "depth", ba, Dimension::Length, true, 1),
+                               P(&a, "depth_base", ba, Dimension::Length, false, 1), P(&a, "age", ba, Dimension::Time, true, 1),
+                               P(&a, "sigma", ba, Dimension::Time, false, 1)});
+          }
         if (const Node* cs = w.get("completions"))
           for (std::size_t q = 0; q < cs->seq.size(); ++q) {
             std::string bc = b + ".completions[" + std::to_string(q) + "]";
@@ -1253,7 +1280,14 @@ struct Typer {
       if (const Node* ft = gn->get("fault_transmissibility")) g.transmissibility = S(ft, "calibration");
       if (const Node* tt = gn->get("tetrahedral")) g.tetrahedral = tt->boolean || tt->str == "true";
       g.pillars = S(gn, "pillars", "fault_conforming");
+      if (const Node* ul = gn->get("upscaled_logs"))
+        for (std::size_t k = 0; k < ul->seq.size(); ++k) {
+          const Node& x = ul->seq[k];
+          g.upscaled_logs.push_back({S(&x, "curve"), S(&x, "method"), S(&x, "name"),
+                                     P(&x, "min_valid", "grid.upscaled_logs[" + std::to_string(k) + "]", Dimension::Dimensionless, false, 1)});
+        }
     }
+    if (const Node* wc = root.get("well_correlation")) d.correlation_rule = S(wc, "rule");
     if (const Node* fr = root.get("fault_rock")) {
       d.fault_rock.present = true;
       d.fault_rock.shale_threshold = P(fr, "shale_threshold", "fault_rock", Dimension::Dimensionless, false, 1);
@@ -2088,6 +2122,22 @@ struct Typer {
           c.err("wells[" + std::to_string(k) + "].tops." + h, "W1", "unknown horizon '" + h + "'");
       if (w.role == "control" && w.tops.empty())
         c.err("wells[" + std::to_string(k) + "]", "W2", "a control well must have tops");
+      // F44 (stage 4C): a survey read from a file, or given with a method, states its method and
+      // azimuth reference; a trajectory written as in v3 keeps its documented meaning
+      const std::string bw = "wells[" + std::to_string(k) + "].trajectory";
+      if ((!w.survey_file.empty() || !w.survey_method.empty() || !w.azimuth_reference.empty()) &&
+          (w.survey_method.empty() || w.azimuth_reference.empty()))
+        c.err(bw, "F44", "a survey states its calculation method and azimuth reference (they are never assumed)");
+      if (w.azimuth_reference == "magnetic_north" && !w.declination.present)
+        c.err(bw + ".declination", "F44", "a magnetic azimuth reference needs the declination");
+      if (!w.ages.empty() && d.correlation_rule.empty())
+        c.err("wells[" + std::to_string(k) + "].ages", "F44", "age data need well_correlation.rule (the rule a correlation rests on is stated, never assumed)");
+      for (std::size_t q = 0; q < w.ages.size(); ++q) {
+        const auto& a = w.ages[q];
+        if (a.depth_base.present && a.depth_base.si() < a.depth.si())
+          c.err("wells[" + std::to_string(k) + "].ages[" + std::to_string(q) + "]", "F44", "depth_base lies above depth");
+        if (a.sigma.present && a.sigma.si() < 0) c.err("wells[" + std::to_string(k) + "].ages[" + std::to_string(q) + "].sigma", "F44", "an age uncertainty is zero or positive");
+      }
     }
     {
       int controls = 0;
@@ -2846,6 +2896,77 @@ static void expand_fault_systems(Node& doc, std::vector<Issue>& out) {
   }
 }
 
+namespace {
+/// A survey CSV: a header naming md, inc and azi with their units in brackets (md [m], inc [deg],
+/// azi [deg]); units are taken from the file and never assumed.
+bool read_survey_csv(const std::filesystem::path& file, std::vector<std::array<double, 3>>& out, std::string& why) {
+  std::string text;
+  try { text = read_file(file); } catch (const Error& e) { why = e.what(); return false; }
+  std::vector<std::string> lines;
+  {
+    std::string cur;
+    for (char ch : text) {
+      if (ch == '\n') { if (!cur.empty() && cur.back() == '\r') cur.pop_back(); lines.push_back(cur); cur.clear(); }
+      else cur += ch;
+    }
+    if (!cur.empty()) lines.push_back(cur);
+  }
+  auto split = [](const std::string& l) {
+    std::vector<std::string> v;
+    std::string c;
+    for (char ch : l) { if (ch == ',') { v.push_back(c); c.clear(); } else c += ch; }
+    v.push_back(c);
+    for (auto& x : v) {
+      while (!x.empty() && std::isspace(static_cast<unsigned char>(x.front()))) x.erase(x.begin());
+      while (!x.empty() && std::isspace(static_cast<unsigned char>(x.back()))) x.pop_back();
+    }
+    return v;
+  };
+  std::size_t h = 0;
+  while (h < lines.size() && (lines[h].empty() || lines[h][0] == '#')) ++h;
+  if (h >= lines.size()) { why = file.generic_string() + ": no header line"; return false; }
+  auto head = split(lines[h]);
+  int col[3] = {-1, -1, -1};
+  double scale[3] = {1, 1, 1};
+  const char* names[3] = {"md", "inc", "azi"};
+  for (std::size_t i = 0; i < head.size(); ++i) {
+    std::string nm = head[i], unit;
+    const auto lb = nm.find('['), rb = nm.find(']');
+    if (lb != std::string::npos && rb != std::string::npos && rb > lb) { unit = nm.substr(lb + 1, rb - lb - 1); nm = nm.substr(0, lb); }
+    while (!nm.empty() && std::isspace(static_cast<unsigned char>(nm.back()))) nm.pop_back();
+    for (auto& ch : nm) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    for (int q = 0; q < 3; ++q)
+      if (nm == names[q]) {
+        col[q] = static_cast<int>(i);
+        if (unit.empty()) { why = file.generic_string() + ": column '" + head[i] + "' states no unit (write e.g. 'md [m]', 'inc [deg]')"; return false; }
+        const auto u = find_unit(unit);
+        if (!u || (q == 0 && u->dim != Dimension::Length) || (q > 0 && u->dim != Dimension::Angle)) {
+          why = file.generic_string() + ": unit '" + unit + "' of column '" + nm + "' is not a " + (q == 0 ? "length" : "angle") + " unit";
+          return false;
+        }
+        scale[q] = u->to_si;
+      }
+  }
+  for (int q = 0; q < 3; ++q)
+    if (col[q] < 0) { why = file.generic_string() + ": no column '" + names[q] + "'"; return false; }
+  for (std::size_t r = h + 1; r < lines.size(); ++r) {
+    if (lines[r].empty() || lines[r][0] == '#') continue;
+    auto v = split(lines[r]);
+    std::array<double, 3> st{};
+    for (int q = 0; q < 3; ++q) {
+      const std::size_t c = static_cast<std::size_t>(col[q]);
+      char* end = nullptr;
+      const double x = c < v.size() ? std::strtod(v[c].c_str(), &end) : 0.0;
+      if (c >= v.size() || !end || *end) { why = file.generic_string() + ": line " + std::to_string(r + 1) + " is not three numbers"; return false; }
+      st[static_cast<std::size_t>(q)] = x * scale[q];
+    }
+    out.push_back(st);
+  }
+  if (out.size() < 2) { why = file.generic_string() + ": a survey needs at least two stations"; return false; }
+  return true;
+}
+}  // namespace
+
 ValidationReport validate_description_text(std::string_view text, const std::filesystem::path& base_dir,
                                            Description* out) {
   ValidationReport rep;
@@ -2881,6 +3002,22 @@ ValidationReport validate_description_text(std::string_view text, const std::fil
     std::filesystem::path p(in.path);
     in.resolved = p.is_absolute() ? p : base_dir / p;
   }
+  // stage 4C: well files relative to the description; survey files read here (CSV with units)
+  for (std::size_t k = 0; k < d.wells.size(); ++k) {
+    auto& w = d.wells[k];
+    for (auto& l : w.logs) {
+      std::filesystem::path p(l.file);
+      l.resolved = p.is_absolute() ? p : base_dir / p;
+    }
+    if (!w.survey_file.empty()) {
+      std::filesystem::path p(w.survey_file);
+      if (!p.is_absolute()) p = base_dir / p;
+      std::string why;
+      if (!read_survey_csv(p, w.survey, why))
+        rep.issues.push_back({"wells[" + std::to_string(k) + "].trajectory.file", "F44", why, true, 0});
+    }
+  }
+  if (!rep.ok()) return rep;
   d.resolved = std::move(doc);
   d.file_sha256 = sha256_hex(text);
   if (out) *out = std::move(d);

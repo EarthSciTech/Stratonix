@@ -2388,3 +2388,171 @@ Figure scalar_map_figure(const FigureContext& c, const std::string& ttl, const s
 }
 
 }  // namespace stratonix::fig
+
+// ---- stage 4C: well log and correlation panels (STX-TN-16 section 1.6) ---------------------
+namespace stratonix::fig {
+
+namespace {
+void log_track(Figure& f, double x, double y, double w, double h, const WellPanel::Track& t, const std::vector<double>& idx, double d0, double d1,
+               Color col) {
+  f.rect(x, y, w, h, none(), kInk, 0.5);
+  double vmin = 1e300, vmax = -1e300;
+  for (double v : t.v)
+    if (std::isfinite(v)) { vmin = std::min(vmin, v); vmax = std::max(vmax, v); }
+  f.text({x + w / 2, y - 14}, t.name, 7, Anchor::Middle, true, kInk);
+  f.text({x + w / 2, y - 5}, t.unit.empty() ? "(no unit)" : t.unit, 6, Anchor::Middle, false, kInk);
+  if (!(vmax > vmin)) { vmax = vmin + 1; }
+  f.text({x, y + h + 9}, fmt_shortest(vmin), 5.5, Anchor::Start, false, kInk);
+  f.text({x + w, y + h + 9}, fmt_shortest(vmax), 5.5, Anchor::End, false, kInk);
+  std::vector<Pt> seg;
+  auto flush = [&]() { if (seg.size() >= 2) f.path(seg, false, none(), col, 0.7); seg.clear(); };
+  for (std::size_t i = 0; i < idx.size() && i < t.v.size(); ++i) {
+    if (!std::isfinite(t.v[i]) || !std::isfinite(idx[i]) || idx[i] < d0 || idx[i] > d1) { flush(); continue; }
+    seg.push_back({x + (t.v[i] - vmin) / (vmax - vmin) * w, y + (idx[i] - d0) / (d1 - d0) * h});
+  }
+  flush();
+}
+Color track_color(std::size_t k) {
+  static const Color cs[] = {rgb(31, 119, 180), rgb(214, 39, 40), rgb(44, 160, 44), rgb(148, 103, 189), rgb(140, 86, 75), rgb(23, 190, 207)};
+  return cs[k % 6];
+}
+}  // namespace
+
+Figure well_log_figure(const FigureContext& c, const WellPanel& p) {
+  Figure f(842, 595);
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - logs of " + p.well,
+        "Curves as read from the well's log files (units and nulls from the files), with tops, age data and the model's units along the well");
+  double d0 = 1e300, d1 = -1e300;
+  for (double v : p.index)
+    if (std::isfinite(v)) { d0 = std::min(d0, v); d1 = std::max(d1, v); }
+  for (auto& t : p.tops) { d0 = std::min(d0, t.second); d1 = std::max(d1, t.second); }
+  if (!(d1 > d0)) { d0 = 0; d1 = 1; }
+  const double pad = 0.02 * (d1 - d0);
+  d0 -= pad;
+  d1 += pad;
+  const double py = 95, ph = 595 - 95 - 60, px = 70;
+  const std::size_t nt = std::min<std::size_t>(p.tracks.size(), 6);
+  const double tw = nt ? std::min(110.0, (842 - 230 - px - 40) / static_cast<double>(nt) - 8) : 0;
+  auto Y = [&](double d) { return py + (d - d0) / (d1 - d0) * ph; };
+  // depth axis and the unit column
+  f.rect(px, py, 18, ph, none(), kInk, 0.5);
+  for (auto& u : p.units) {
+    const double a = std::max(d0, u.top), b = std::min(d1, u.base);
+    if (b <= a) continue;
+    f.rect(px, Y(a), 18, Y(b) - Y(a), unit_color(c, static_cast<std::size_t>(std::max(0, u.unit))), none());
+  }
+  for (double t : nice_ticks(d0, d1, 8)) {
+    f.line({px - 3, Y(t)}, {px, Y(t)}, kInk, 0.5);
+    f.text({px - 5, Y(t) + 2.5}, fmt_fixed(t, 0), 6.5, Anchor::End, false, kInk);
+  }
+  f.text({px - 45, py + ph / 2}, p.index_label, 7.5, Anchor::Middle, false, kInk, -90);
+  f.text({px + 9, py - 5}, "Units", 6, Anchor::Middle, false, kInk);
+  double x = px + 30;
+  for (std::size_t k = 0; k < nt; ++k) {
+    log_track(f, x, py, tw, ph, p.tracks[k], p.index, d0, d1, track_color(k));
+    x += tw + 8;
+  }
+  const double xr = x - 8;
+  for (auto& t : p.tops) {
+    f.line({px, Y(t.second)}, {xr, Y(t.second)}, rgb(200, 30, 30), 0.8, {4, 2});
+    f.text({xr + 3, Y(t.second) + 2.5}, t.first, 6.5, Anchor::Start, true, rgb(200, 30, 30));
+  }
+  for (auto& a : p.ages) {
+    f.path({{px + 18, Y(a.depth) - 3}, {px + 24, Y(a.depth)}, {px + 18, Y(a.depth) + 3}}, true, rgb(60, 60, 60), none());
+    f.text({px + 25, Y(a.depth) - 3}, a.name + " " + fmt_shortest(a.age) + " Ma", 5.5, Anchor::Start, false, rgb(60, 60, 60));
+  }
+  std::vector<LegendEntry> es;
+  es.push_back({"Markers", "Top (dashed)", none(), true, rgb(200, 30, 30), 0.8});
+  if (!p.ages.empty()) es.push_back({"Markers", "Age datum (triangle)", rgb(60, 60, 60), false, none(), 1, 2});
+  std::vector<int> seen;
+  for (auto& u : p.units)
+    if (u.unit >= 0 && std::find(seen.begin(), seen.end(), u.unit) == seen.end()) {
+      seen.push_back(u.unit);
+      const auto& inf = c.model->info();
+      es.push_back({"Model units", static_cast<std::size_t>(u.unit) < inf.units.size() ? inf.units[static_cast<std::size_t>(u.unit)].name : "unit",
+                    unit_color(c, static_cast<std::size_t>(u.unit))});
+    }
+  double ly = legend(f, 842 - 200, py, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 200, ly, 190);
+  footer(f, c);
+  return f;
+}
+
+Figure correlation_figure(const FigureContext& c, const CorrelationPanel& p) {
+  Figure f(842, 595);
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - well correlation",
+        "Wells by TVD below the model datum; each line labelled with the ages and rule, the tops or the model it rests on" +
+            (p.note.empty() ? std::string() : " (" + p.note + ")"));
+  double d0 = 1e300, d1 = -1e300;
+  for (auto& w : p.wells)
+    for (double v : w.index)
+      if (std::isfinite(v)) { d0 = std::min(d0, v); d1 = std::max(d1, v); }
+  for (auto& row : p.depth)
+    for (double v : row)
+      if (std::isfinite(v)) { d0 = std::min(d0, v); d1 = std::max(d1, v); }
+  if (!(d1 > d0)) { d0 = 0; d1 = 1; }
+  const double pad = 0.03 * (d1 - d0);
+  d0 -= pad;
+  d1 += pad;
+  const double py = 110, ph = 595 - 110 - 60, px = 75, pw = 842 - 230 - px;
+  auto Y = [&](double d) { return py + (d - d0) / (d1 - d0) * ph; };
+  const std::size_t nw = p.wells.size();
+  const double slot = nw ? pw / static_cast<double>(nw) : pw, tw = std::min(60.0, slot * 0.45);
+  for (double t : nice_ticks(d0, d1, 8)) {
+    f.line({px - 3, Y(t)}, {px + pw, Y(t)}, kGrid, 0.3);
+    f.text({px - 5, Y(t) + 2.5}, fmt_fixed(t, 0), 6.5, Anchor::End, false, kInk);
+  }
+  f.text({px - 48, py + ph / 2}, "TVD below the model datum (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  std::vector<double> xs;
+  for (std::size_t k = 0; k < nw; ++k) {
+    const double x = px + slot * (static_cast<double>(k) + 0.5) - tw / 2;
+    xs.push_back(x);
+    const auto& w = p.wells[k];
+    f.rect(x, py, tw, ph, rgb(250, 250, 250), kInk, 0.5);
+    f.text({x + tw / 2, py - 30}, w.well, 8.5, Anchor::Middle, true, kInk);
+    for (auto& u : w.units) {
+      const double a = std::max(d0, u.top), b = std::min(d1, u.base);
+      if (b > a) f.rect(x, Y(a), 6, Y(b) - Y(a), unit_color(c, static_cast<std::size_t>(std::max(0, u.unit))), none());
+    }
+    if (!w.tracks.empty()) log_track(f, x + 6, py, tw - 6, ph, w.tracks[0], w.index, d0, d1, track_color(0));
+    for (auto& a : w.ages) {
+      f.path({{x - 6, Y(a.depth) - 3}, {x, Y(a.depth)}, {x - 6, Y(a.depth) + 3}}, true, rgb(60, 60, 60), none());
+      f.text({x - 7, Y(a.depth) + 2}, fmt_shortest(a.age), 5, Anchor::End, false, rgb(60, 60, 60));
+    }
+  }
+  for (std::size_t h = 0; h < p.horizons.size(); ++h) {
+    Color col = unit_color(c, h + 1);
+    Color dark = rgb(static_cast<std::uint8_t>(col.r * 0.55), static_cast<std::uint8_t>(col.g * 0.55), static_cast<std::uint8_t>(col.b * 0.55));
+    std::vector<Pt> seg;
+    for (std::size_t k = 0; k < nw && k < p.depth[h].size(); ++k) {
+      const double d = p.depth[h][k];
+      if (!std::isfinite(d)) {
+        if (seg.size() >= 2) f.path(seg, false, none(), dark, 1.1);
+        seg.clear();
+        continue;
+      }
+      if (!seg.empty()) seg.push_back({xs[k], Y(d)});
+      seg.push_back({xs[k], Y(d)});
+      seg.push_back({xs[k] + tw, Y(d)});
+    }
+    if (seg.size() >= 2) f.path(seg, false, none(), dark, 1.1);
+    for (std::size_t k = nw; k-- > 0;)
+      if (k < p.depth[h].size() && std::isfinite(p.depth[h][k])) {
+        f.text({xs[k] + tw + 3, Y(p.depth[h][k]) + 2.5}, p.horizons[h], 6.5, Anchor::Start, true, dark);
+        break;
+      }
+  }
+  std::vector<LegendEntry> es;
+  for (std::size_t h = 0; h < p.horizons.size(); ++h) {
+    Color col = unit_color(c, h + 1);
+    Color dark = rgb(static_cast<std::uint8_t>(col.r * 0.55), static_cast<std::uint8_t>(col.g * 0.55), static_cast<std::uint8_t>(col.b * 0.55));
+    es.push_back({"Correlation lines", p.horizons[h] + ": " + (h < p.basis.size() ? p.basis[h] : std::string()), none(), true, dark, 1.1});
+  }
+  if (!p.wells.empty() && !p.wells[0].tracks.empty()) es.push_back({"Track", p.wells[0].tracks[0].name + " (" + p.wells[0].tracks[0].unit + ")", none(), true, track_color(0), 0.7});
+  double ly = legend(f, 842 - 200, py, 190, es, 595.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 200, ly, 190);
+  footer(f, c);
+  return f;
+}
+
+}  // namespace stratonix::fig

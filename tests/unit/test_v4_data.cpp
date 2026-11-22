@@ -18,6 +18,7 @@
 #include "../stx_test.hpp"
 #include "stratonix/core/crs.hpp"
 #include "stratonix/core/error.hpp"
+#include "stratonix/desc/description.hpp"
 #include "stratonix/engines/ages.hpp"
 #include "stratonix/engines/surveys.hpp"
 #include "stratonix/engines/timedepth.hpp"
@@ -422,6 +423,37 @@ TEST_CASE("D9 ages: age at depth, correlation of three wells, an inversion repor
   bool inversion = false;
   for (auto& k : cor.conflicts) inversion = inversion || (k.well == "C" && k.what.find("inversion") != std::string::npos);
   CHECK(inversion);
+}
+
+TEST_CASE("D7b descriptions: a survey file without its method, and ages without a correlation rule, are refused (F44)") {
+  const fs::path dir = tmp("d7b");
+  fs::create_directories(dir);
+  write_text(dir / "s.csv", "md [m],inc [deg],azi [deg]\n0,0,0\n500,10,45\n");
+  write_text(dir / "bad.csv", "md,inc,azi\n0,0,0\n500,10,45\n");
+  auto yaml = [](const std::string& well) {
+    return std::string("stratonix_schema: 1\nmodel: {name: t, version: \"1.0.0\", status: DESIGN}\n") +
+           "crs: {name: local, epsg: 0, vertical_datum: datum, length_unit: m}\n"
+           "domain: {origin: \"[0, 0] m | user_instruction | t\", size: \"[2000, 2000] m | user_instruction | t\", "
+           "depth_range: \"[0, 2000] m | user_instruction | t\", grid_spacing: \"50 m | user_instruction | t\"}\n"
+           "wells:\n  - {name: W1, role: control, head: \"[1000, 1000] m | user_instruction | t\", tops: {H1: \"800 m | user_instruction | t\"}}\n" +
+           well + "stratigraphy: {reference: {well: W1}, horizons: [{name: H1}, {name: H2, thickness_above: \"200 m | user_instruction | t\"}], units: [{name: U, top: H1, base: H2}]}\n"
+           "structure: {regional: {type: flat}}\n";
+  };
+  auto has = [](const desc::ValidationReport& r, const std::string& rule) {
+    for (auto& i : r.issues)
+      if (i.rule == rule && i.error) return true;
+    return false;
+  };
+  const std::string head = "  - {name: W2, role: check, head: \"[500, 500] m | user_instruction | t\", ";
+  auto r1 = desc::validate_description_text(yaml(head + "trajectory: {file: s.csv}}\n"), dir, nullptr);
+  CHECK(has(r1, "F44"));
+  auto r2 = desc::validate_description_text(yaml(head + "trajectory: {file: bad.csv, method: minimum_curvature, azimuth_reference: grid_north}}\n"), dir, nullptr);
+  CHECK(has(r2, "F44"));  // the file states no units
+  auto r3 = desc::validate_description_text(yaml(head + "trajectory: {file: s.csv, method: minimum_curvature, azimuth_reference: grid_north}}\n"), dir, nullptr);
+  CHECK(r3.ok());
+  auto r4 = desc::validate_description_text(
+      yaml(head + "ages: [{kind: biostratigraphic, name: z, depth: \"900 m | assumed | t\", age: \"10 Ma | assumed | t\"}]}\n"), dir, nullptr);
+  CHECK(has(r4, "F44"));
 }
 
 // ---- 2. Seismic, depth conversion, coordinates and maps (Prompt 56)

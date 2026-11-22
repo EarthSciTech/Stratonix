@@ -79,6 +79,30 @@ Figure map_figure(const FigureContext& c, int horizon, const repr::FaultedSurfac
 Figure unfolded_figure(const FigureContext& c, const std::string& section, const std::vector<repr::UnfoldedHorizon>& beds);
 /// Burial-history curves at one location (stage 2D).
 Figure burial_figure(const FigureContext& c, const FigureContext::Burial& b);
+
+/// Stage 4C (STX-TN-16 section 1.6): a well log panel - tracks of curves by depth with tops, age
+/// data and the model's units along the well.
+struct WellPanel {
+  std::string well, index_label;                    ///< e.g. "MD (m)"
+  std::vector<double> index;                        ///< depth of each sample
+  struct Track { std::string name, unit; std::vector<double> v; };
+  std::vector<Track> tracks;
+  std::vector<std::pair<std::string, double>> tops; ///< name, index depth
+  struct Age { std::string name; double depth = 0, age = 0; };
+  std::vector<Age> ages;
+  struct Interval { int unit = -1; double top = 0, base = 0; };
+  std::vector<Interval> units;                      ///< model units along the well
+};
+Figure well_log_figure(const FigureContext& c, const WellPanel& p);
+/// Wells side by side by TVD below the model datum with the correlation lines, each labelled with
+/// the age and rule (or the tops) it rests on.
+struct CorrelationPanel {
+  std::vector<WellPanel> wells;                     ///< index in TVD (m); one track drawn when present
+  std::vector<std::string> horizons, basis;         ///< per line: name and what it rests on
+  std::vector<std::vector<double>> depth;           ///< [line][well], NaN where it cannot be placed
+  std::string note;                                 ///< the correlation rule, shown under the title
+};
+Figure correlation_figure(const FigureContext& c, const CorrelationPanel& p);
 /// The burial curves coloured by a field between consecutive horizons and steps (stage 4B).
 Figure burial_field_figure(const FigureContext& c, const FigureContext::Burial& b, const FigureContext::Burial::Field& fd);
 /// Isopach map of a unit (stage 2C): vertical thickness per fault block, with its termination lines.

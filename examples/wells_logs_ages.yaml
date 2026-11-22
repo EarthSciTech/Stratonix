@@ -1,0 +1,93 @@
+# Stage 4C example (STX-TN-16 section 1): wells with logs, a deviation survey, tops and ages.
+# - W1: vertical control well, LAS 2.0 (gamma ray, density with a washout of nulls, sonic in us/ft).
+# - W2: deviated well; survey read from a CSV with its units, by minimum curvature in grid azimuths;
+#   LAS 3.0 log with a comma delimiter and an inclinometry section; biostratigraphic ages.
+# - W3: vertical check well, wrapped LAS 2.0; chronostratigraphic ages.
+# Logs are upscaled to the grid (gamma ray by arithmetic mean, density by arithmetic mean) and the
+# wells are correlated by age (rule: linear in depth between dated samples).
+# DESIGN model: the logs are synthetic (tools/make_wells_example.py), every parameter labelled.
+stratonix_schema: 1
+model: {name: wells_logs_ages, version: "1.0.0", status: DESIGN,
+        title: "Wells with logs, surveys, tops and ages"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[6000, 6000] m | user_instruction | worked example"
+  depth_range: "[0, 2500] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1500, 1500] m | user_instruction | worked example"
+    tops:
+      H1: "800 m | interpreted | worked example: pick on W1.las gamma ray"
+      H2: "1200 m | interpreted | worked example"
+      H3: "1500 m | interpreted | worked example"
+      H4: "1900 m | interpreted | worked example"
+    logs: [{file: data/wells/W1.las, curves: [GR, RHOB, DT]}]
+  - name: W2
+    role: check
+    head: "[3000, 2500] m | user_instruction | worked example"
+    trajectory:
+      file: data/wells/W2_survey.csv
+      method: minimum_curvature
+      azimuth_reference: grid_north
+    tops:
+      H1: "800 m | interpreted | worked example: TVD below the datum"
+      H2: "1200 m | interpreted | worked example"
+      H3: "1500 m | interpreted | worked example"
+      H4: "1900 m | interpreted | worked example"
+    logs: [{file: data/wells/W2.las, curves: [GR, RHOB]}]
+    ages:
+      - {kind: biostratigraphic, name: "zone A base", depth: "1000 m | assumed | worked example: synthetic event in cuttings", age: "14 Ma | assumed | worked example: synthetic zone age", sigma: "0.5 Ma | assumed | worked example", timescale: GTS2020}
+      - {kind: biostratigraphic, name: "zone B top", depth: "1400 m | assumed | worked example: synthetic event in cuttings", age: "30.3 Ma | assumed | worked example: synthetic zone age", sigma: "0.5 Ma | assumed | worked example", timescale: GTS2020}
+      - {kind: biostratigraphic, name: "zone C top", depth: "1650 m | assumed | worked example: synthetic event in cuttings", age: "40.4 Ma | assumed | worked example: synthetic zone age", sigma: "0.5 Ma | assumed | worked example", timescale: GTS2020}
+      - {kind: biostratigraphic, name: "zone D base", depth: "2000 m | assumed | worked example: synthetic event in a sidewall core", age: "74.5 Ma | assumed | worked example: synthetic zone age", sigma: "1 Ma | assumed | worked example", timescale: GTS2020}
+  - name: W3
+    role: check
+    head: "[4500, 4500] m | user_instruction | worked example"
+    tops:
+      H1: "800 m | interpreted | worked example"
+      H2: "1200 m | interpreted | worked example"
+      H3: "1500 m | interpreted | worked example"
+      H4: "1900 m | interpreted | worked example"
+    logs: [{file: data/wells/W3.las, curves: [GR, RHOB]}]
+    ages:
+      - {kind: chronostratigraphic, name: "tuff 1", depth: "700 m | assumed | worked example: synthetic", age: "4 Ma | assumed | worked example: synthetic Ar-Ar date", sigma: "0.1 Ma | assumed | worked example: synthetic"}
+      - {kind: chronostratigraphic, name: "tuff 2", depth: "900 m | assumed | worked example: synthetic", age: "6 Ma | assumed | worked example: synthetic Ar-Ar date", sigma: "0.1 Ma | assumed | worked example: synthetic"}
+      - {kind: chronostratigraphic, name: "ash A", depth: "1100 m | assumed | worked example: synthetic", age: "18 Ma | assumed | worked example: synthetic U-Pb date", sigma: "0.2 Ma | assumed | worked example: synthetic"}
+      - {kind: chronostratigraphic, name: "ash B", depth: "1300 m | assumed | worked example: synthetic", age: "28 Ma | assumed | worked example: synthetic U-Pb date", sigma: "0.2 Ma | assumed | worked example: synthetic"}
+      - {kind: chronostratigraphic, name: "ash C", depth: "1400 m | assumed | worked example: synthetic", age: "31 Ma | assumed | worked example: synthetic", sigma: "0.3 Ma | assumed | worked example: synthetic"}
+      - {kind: chronostratigraphic, name: "ash D", depth: "1600 m | assumed | worked example: synthetic", age: "37 Ma | assumed | worked example: synthetic", sigma: "0.3 Ma | assumed | worked example: synthetic"}
+      - {kind: chronostratigraphic, name: "bentonite", depth: "1800 m | assumed | worked example: synthetic", age: "56 Ma | assumed | worked example: synthetic", sigma: "0.5 Ma | assumed | worked example: synthetic"}
+      - {kind: chronostratigraphic, name: "basalt", depth: "2000 m | assumed | worked example: synthetic", age: "76 Ma | assumed | worked example: synthetic", sigma: "0.5 Ma | assumed | worked example: synthetic"}
+well_correlation: {rule: linear_in_depth}
+stratigraphy:
+  reference: {well: W1}
+  horizons:
+    - {name: H1, age: "5 Ma | assumed | worked example"}
+    - {name: H2, age: "23 Ma | literature_derived | GTS 2020, base Miocene 23.03 Ma (rounded)"}
+    - {name: H3, age: "34 Ma | literature_derived | GTS 2020, base Oligocene 33.9 Ma (rounded)"}
+    - {name: H4, age: "66 Ma | literature_derived | GTS 2020, base Cenozoic 66.0 Ma"}
+  units:
+    - {name: Shale_1, top: H1, base: H2}
+    - {name: Sand, top: H2, base: H3}
+    - {name: Shale_2, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+grid:
+  spacing: "[250, 250] m | user_instruction | worked example: areal cell size"
+  margin: "50 m | user_instruction | worked example"
+  zones:
+    - {unit: Shale_1, layers: "4 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Sand, layers: "6 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Shale_2, layers: "4 ordinal | user_instruction | worked example", layering: proportional}
+  upscaled_logs:
+    - {curve: GR, method: arithmetic, name: GR_UP}
+    - {curve: RHOB, method: arithmetic, name: RHOB_UP, min_valid: "0.6 fraction | user_instruction | worked example: cells with less than 60 % valid density are left missing"}
+outputs:
+  sections:
+    - name: XS_W1_W3
+      polyline: "[[1500, 1500], [3000, 2500], [4500, 4500]] m | user_instruction | worked example: through the wells"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv]

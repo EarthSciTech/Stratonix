@@ -36,6 +36,29 @@ WellPath::WellPath(std::string name, double x, double y, double datum_z, std::ve
   }
 }
 
+WellPath WellPath::from_positions(std::string name, double x, double y, double datum_z, const std::vector<double>& md,
+                                  const std::vector<Vec3>& net, std::string method) {
+  if (md.size() < 2 || md.size() != net.size()) throw Error(ErrorCode::InvalidArgument, "a deviated well needs at least two positions");
+  WellPath w(std::move(name), x, y, datum_z, md.back() - md.front());
+  w.pts_.clear();
+  w.md_ = md;
+  for (auto& p : net) w.pts_.push_back({x + p.y, y + p.x, datum_z - p.z});
+  w.stations_ = {{md.front(), 0, 0}, {md.back(), 0, 0}};  // marks the path as deviated
+  w.method_ = std::move(method);
+  return w;
+}
+
+Vec3 WellPath::at_md(double m) const {
+  if (pts_.empty()) return {x_, y_, datum_z_ - m};
+  if (md_.size() < 2 || m <= md_.front()) return {pts_.front().x, pts_.front().y, pts_.front().z - (m - (md_.empty() ? 0 : md_.front()))};
+  for (std::size_t i = 1; i < md_.size(); ++i)
+    if (m <= md_[i]) {
+      const double t = (m - md_[i - 1]) / (md_[i] - md_[i - 1]);
+      return pts_[i - 1] + (pts_[i] - pts_[i - 1]) * t;
+    }
+  return {pts_.back().x, pts_.back().y, pts_.back().z - (m - md_.back())};
+}
+
 Vec3 WellPath::at_elevation(double z) const {
   if (pts_.empty()) return {x_, y_, z};
   if (z >= pts_.front().z) return {pts_.front().x, pts_.front().y, z};

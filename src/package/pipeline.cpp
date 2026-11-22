@@ -1,5 +1,6 @@
 // Pipeline shared by the command line and the C API.
 #include "stratonix/package/pipeline.hpp"
+#include "stratonix/package/welldata.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -1317,6 +1318,15 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     }
     if (!basin.heat_balance.empty() || !basin.pressure.empty() || basin.dfn) ctx.basin = &basin;
   }
+  // stage 4C (STX-TN-16 section 1): logs, surveys, ages; upscaled logs as grid properties
+  const GridProducts* gp_wd = ctx.grid_products();
+  WellDataBuild wdb = well_data(d, *o.model, gp_wd ? &gp_wd->grid : nullptr);
+  if (wdb.present) {
+    for (auto& prop : wdb.upscaled) ctx.add_grid_property(prop);
+    ctx.well_data = &wdb.results;
+    write_file(out_dir / "well_data_report.txt", wdb.report);
+    for (auto& [name, text] : wdb.csv) write_file(out_dir / name, text);
+  }
   CheckReport rep = run_checks(ctx);
   o.checks_passed = rep.passed();
   write_file(out_dir / "topology.json", ctx.contact_graph().json());  // stage 4A (STX-TN-14 section 6)
@@ -1349,6 +1359,18 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     log(LogLevel::Error, "checks failed: exports and figures are not written (see checks_report.txt)");
   } else {
     if (opt.figures) write_figures(d, *o.model, keys, out_dir / "figures", ctx.surfaces(), &burial_fields);
+    if (opt.figures && wdb.present) {
+      // stage 4C: well log panels and the correlation panel
+      auto c = figure_context(d, *o.model, keys);
+      for (auto& pan : wdb.panels)
+        fig::write_figure(fig::well_log_figure(c, pan), out_dir / "figures", fig::figure_basename(c, "well_logs", pan.well),
+                          c.model_name + " - logs of " + pan.well, "Logs of " + pan.well + " as read from its files, with tops, age data and the model's units.",
+                          "Units and null values from the log files; see well_data_report.txt.");
+      if (wdb.correlation)
+        fig::write_figure(fig::correlation_figure(c, wdb.corr), out_dir / "figures", fig::figure_basename(c, "well_correlation", "wells"),
+                          c.model_name + " - well correlation", "Wells side by side with the correlation lines and what each rests on.",
+                          "Correlation by age where the horizon is dated and the wells have age data, else by tops, else by the model.");
+    }
     if (opt.figures && !d.events.empty()) write_restoration(d, *o.model, out_dir / "restoration");
     if (opt.figures) write_data_figures(d, *o.model, keys, out_dir / "figures");
     if (opt.figures && !pf.stations.empty()) write_geophysics_figures(d, *o.model, keys, pf, out_dir / "figures");

@@ -46,6 +46,8 @@ std::map<std::string, Command>& commands() {
       {"fold-frame", {"Fit a fold frame to bedding orientations and predict bedding normals (stage 4A)",
                       "stratonix fold-frame <bedding.csv> [--foliation <axial_foliation.csv>] [--at <points.csv>] -o <frame.json>",
                       cli::cmd_fold_frame}},
+      {"read-log", {"Read a LAS 2.0, LAS 3.0 or DLIS file as delivered and write its curves and read report (stage 4C)",
+                    "stratonix read-log <file.las|file.dlis> -o <curves.csv>", cli::cmd_read_log}},
       {"plugins", {"List the registered plugins", "stratonix plugins", cli::cmd_plugins}},
       {"bench", {"Run timing benchmarks (reference and optimised kernels)",
                  "stratonix bench [description.yaml] [--spacing 50,25] [--mode both|reference|optimised] "

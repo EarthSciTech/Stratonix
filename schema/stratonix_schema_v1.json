@@ -179,11 +179,33 @@
           "trajectory": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "stations"
-            ],
             "properties": {
               "stations": {
+                "$ref": "#/$defs/param"
+              },
+              "file": {
+                "type": "string"
+              },
+              "method": {
+                "enum": [
+                  "minimum_curvature",
+                  "radius_of_curvature",
+                  "balanced_tangential",
+                  "average_angle",
+                  "tangential"
+                ]
+              },
+              "azimuth_reference": {
+                "enum": [
+                  "true_north",
+                  "grid_north",
+                  "magnetic_north"
+                ]
+              },
+              "declination": {
+                "$ref": "#/$defs/param"
+              },
+              "convergence": {
                 "$ref": "#/$defs/param"
               }
             }
@@ -219,6 +241,78 @@
           },
           "top_uncertainty": {
             "$ref": "#/$defs/param"
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "file"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "curves": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "frame": {
+                  "type": "string"
+                },
+                "index": {
+                  "enum": [
+                    "md",
+                    "tvd"
+                  ]
+                }
+              }
+            }
+          },
+          "ages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "name",
+                "depth",
+                "age"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "biostratigraphic",
+                    "chronostratigraphic"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "depth": {
+                  "$ref": "#/$defs/param"
+                },
+                "depth_base": {
+                  "$ref": "#/$defs/param"
+                },
+                "age": {
+                  "$ref": "#/$defs/param"
+                },
+                "sigma": {
+                  "$ref": "#/$defs/param"
+                },
+                "timescale": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }
@@ -487,7 +581,13 @@
           ],
           "additionalProperties": false,
           "properties": {
-            "burial": {"enum": ["block", "restored"], "description": "Stage 4B: porosity at the maximum burial in the fault block (default) or column-wise in the restored frame (stage 2D)."},
+            "burial": {
+              "enum": [
+                "block",
+                "restored"
+              ],
+              "description": "Stage 4B: porosity at the maximum burial in the fault block (default) or column-wise in the restored frame (stage 2D)."
+            },
             "geometry": {
               "enum": [
                 "present",
@@ -788,38 +888,110 @@
       "description": "Stage 4B (STX-TN-15 sections 2.1 to 2.3): polygonal fault networks, flower structures and duplexes, expanded into ordinary faults before typing.",
       "items": {
         "type": "object",
-        "required": ["name", "type", "age"],
+        "required": [
+          "name",
+          "type",
+          "age"
+        ],
         "additionalProperties": false,
         "properties": {
-          "age": {"$ref": "#/$defs/param"},
-          "area": {"$ref": "#/$defs/param"},
-          "reference_depth": {"$ref": "#/$defs/param"},
-          "spacing": {"$ref": "#/$defs/param"},
-          "dip_mean": {"$ref": "#/$defs/param"},
-          "dip_sd": {"$ref": "#/$defs/param"},
-          "throw_ratio": {"$ref": "#/$defs/param"},
-          "seed": {"$ref": "#/$defs/param"},
-          "vertical_component": {"$ref": "#/$defs/param"},
-          "spread": {"$ref": "#/$defs/param"},
-          "splays": {"$ref": "#/$defs/param"},
-          "branch_depth": {"$ref": "#/$defs/param"},
-          "start": {"$ref": "#/$defs/param"},
-          "strike": {"$ref": "#/$defs/param"},
-          "horses": {"$ref": "#/$defs/param"},
-          "horse_length": {"$ref": "#/$defs/param"},
-          "ramp_angle": {"$ref": "#/$defs/param"},
-          "slip": {"$ref": "#/$defs/param"},
-          "length": {"$ref": "#/$defs/param"},
-          "thickness": {"$ref": "#/$defs/param"},
-          "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
-          "type": {"type": "string", "enum": ["polygonal", "flower", "duplex"]},
-          "unit_top": {"type": "string"},
-          "unit_base": {"type": "string"},
-          "master": {"type": "string"},
-          "sense": {"type": "string", "enum": ["positive", "negative"]},
-          "floor_depth": {"$ref": "#/$defs/param"},
-          "roof_depth": {"$ref": "#/$defs/param"},
-          "note": {"type": "string"}
+          "age": {
+            "$ref": "#/$defs/param"
+          },
+          "area": {
+            "$ref": "#/$defs/param"
+          },
+          "reference_depth": {
+            "$ref": "#/$defs/param"
+          },
+          "spacing": {
+            "$ref": "#/$defs/param"
+          },
+          "dip_mean": {
+            "$ref": "#/$defs/param"
+          },
+          "dip_sd": {
+            "$ref": "#/$defs/param"
+          },
+          "throw_ratio": {
+            "$ref": "#/$defs/param"
+          },
+          "seed": {
+            "$ref": "#/$defs/param"
+          },
+          "vertical_component": {
+            "$ref": "#/$defs/param"
+          },
+          "spread": {
+            "$ref": "#/$defs/param"
+          },
+          "splays": {
+            "$ref": "#/$defs/param"
+          },
+          "branch_depth": {
+            "$ref": "#/$defs/param"
+          },
+          "start": {
+            "$ref": "#/$defs/param"
+          },
+          "strike": {
+            "$ref": "#/$defs/param"
+          },
+          "horses": {
+            "$ref": "#/$defs/param"
+          },
+          "horse_length": {
+            "$ref": "#/$defs/param"
+          },
+          "ramp_angle": {
+            "$ref": "#/$defs/param"
+          },
+          "slip": {
+            "$ref": "#/$defs/param"
+          },
+          "length": {
+            "$ref": "#/$defs/param"
+          },
+          "thickness": {
+            "$ref": "#/$defs/param"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "polygonal",
+              "flower",
+              "duplex"
+            ]
+          },
+          "unit_top": {
+            "type": "string"
+          },
+          "unit_base": {
+            "type": "string"
+          },
+          "master": {
+            "type": "string"
+          },
+          "sense": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative"
+            ]
+          },
+          "floor_depth": {
+            "$ref": "#/$defs/param"
+          },
+          "roof_depth": {
+            "$ref": "#/$defs/param"
+          },
+          "note": {
+            "type": "string"
+          }
         }
       }
     },
@@ -837,7 +1009,10 @@
         ],
         "additionalProperties": false,
         "properties": {
-          "linking": {"type": "boolean", "description": "Stage 4B: the connecting fault of a breached relay, generated; it has no slip of its own."},
+          "linking": {
+            "type": "boolean",
+            "description": "Stage 4B: the connecting fault of a breached relay, generated; it has no slip of its own."
+          },
           "name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9_.-]+$"
@@ -2036,8 +2211,44 @@
         },
         "pillars": {
           "type": "string",
-          "enum": ["fault_conforming", "vertical"],
+          "enum": [
+            "fault_conforming",
+            "vertical"
+          ],
           "description": "Stage 4B: vertical pillars for dense intersecting fault networks (faults stair-stepped across cells)."
+        },
+        "upscaled_logs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "curve",
+              "method"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "curve": {
+                "type": "string"
+              },
+              "method": {
+                "enum": [
+                  "arithmetic",
+                  "harmonic",
+                  "geometric",
+                  "rms",
+                  "minimum",
+                  "maximum",
+                  "most_frequent"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "min_valid": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
         }
       }
     },
@@ -2474,16 +2685,64 @@
       "description": "Stage 4B (STX-TN-15 section 4): volumetric restoration of the model to a horizon (decision 18) and the bed-length limit of C31.",
       "additionalProperties": false,
       "properties": {
-        "bed_length_limit": {"$ref": "#/$defs/param"},
+        "bed_length_limit": {
+          "$ref": "#/$defs/param"
+        },
         "volumetric": {
           "type": "object",
-          "required": ["horizon", "datum", "pin", "young", "poisson"],
+          "required": [
+            "horizon",
+            "datum",
+            "pin",
+            "young",
+            "poisson"
+          ],
           "additionalProperties": false,
           "properties": {
-            "horizon": {"type": "string"}, "datum": {"$ref": "#/$defs/param"}, "pin": {"$ref": "#/$defs/param"}, "young": {"$ref": "#/$defs/param"}, "poisson": {"$ref": "#/$defs/param"},
-            "mesh_size": {"$ref": "#/$defs/param"}, "max_strain": {"$ref": "#/$defs/param"},
-            "units": {"type": "array", "items": {"type": "object", "required": ["unit", "young", "poisson"], "additionalProperties": false,
-                      "properties": {"unit": {"type": "string"}, "young": {"$ref": "#/$defs/param"}, "poisson": {"$ref": "#/$defs/param"}}}}
+            "horizon": {
+              "type": "string"
+            },
+            "datum": {
+              "$ref": "#/$defs/param"
+            },
+            "pin": {
+              "$ref": "#/$defs/param"
+            },
+            "young": {
+              "$ref": "#/$defs/param"
+            },
+            "poisson": {
+              "$ref": "#/$defs/param"
+            },
+            "mesh_size": {
+              "$ref": "#/$defs/param"
+            },
+            "max_strain": {
+              "$ref": "#/$defs/param"
+            },
+            "units": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "unit",
+                  "young",
+                  "poisson"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "unit": {
+                    "type": "string"
+                  },
+                  "young": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "poisson": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2491,48 +2750,441 @@
     "backstripping": {
       "type": "object",
       "description": "Stage 4B (STX-TN-15 section 4.4): tectonic subsidence by Airy or flexural backstripping of the burial history.",
-      "required": ["basement", "mantle_density", "water_density", "grain_density", "te", "steps"],
+      "required": [
+        "basement",
+        "mantle_density",
+        "water_density",
+        "grain_density",
+        "te",
+        "steps"
+      ],
       "additionalProperties": false,
       "properties": {
-        "basement": {"type": "string"}, "mantle_density": {"$ref": "#/$defs/param"}, "water_density": {"$ref": "#/$defs/param"}, "grain_density": {"$ref": "#/$defs/param"}, "te": {"$ref": "#/$defs/param"},
-        "young": {"$ref": "#/$defs/param"}, "poisson": {"$ref": "#/$defs/param"},
-        "steps": {"type": "array", "items": {"type": "object", "required": ["horizon", "water_depth"], "additionalProperties": false,
-                  "properties": {"horizon": {"type": "string"}, "water_depth": {"$ref": "#/$defs/param"}, "sea_level": {"$ref": "#/$defs/param"}}}}
+        "basement": {
+          "type": "string"
+        },
+        "mantle_density": {
+          "$ref": "#/$defs/param"
+        },
+        "water_density": {
+          "$ref": "#/$defs/param"
+        },
+        "grain_density": {
+          "$ref": "#/$defs/param"
+        },
+        "te": {
+          "$ref": "#/$defs/param"
+        },
+        "young": {
+          "$ref": "#/$defs/param"
+        },
+        "poisson": {
+          "$ref": "#/$defs/param"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "horizon",
+              "water_depth"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "horizon": {
+                "type": "string"
+              },
+              "water_depth": {
+                "$ref": "#/$defs/param"
+              },
+              "sea_level": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        }
       }
     },
     "eroded_section": {
       "type": "array",
       "description": "Stage 4B (STX-TN-15 section 4.5): eroded section at an unconformity from a porosity log against a normal compaction trend.",
-      "items": {"type": "object", "required": ["name", "well", "unconformity", "log", "surface_porosity", "decay"], "additionalProperties": false,
-                "properties": {"name": {"type": "string"}, "well": {"type": "string"}, "unconformity": {"type": "string"}, "log": {"type": "string"},
-                               "surface_porosity": {"$ref": "#/$defs/param"}, "decay": {"$ref": "#/$defs/param"}, "vitrinite_estimate": {"$ref": "#/$defs/param"}}}
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "well",
+          "unconformity",
+          "log",
+          "surface_porosity",
+          "decay"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "well": {
+            "type": "string"
+          },
+          "unconformity": {
+            "type": "string"
+          },
+          "log": {
+            "type": "string"
+          },
+          "surface_porosity": {
+            "$ref": "#/$defs/param"
+          },
+          "decay": {
+            "$ref": "#/$defs/param"
+          },
+          "vitrinite_estimate": {
+            "$ref": "#/$defs/param"
+          }
+        }
+      }
     },
-    "mechanics": {"type": "object", "additionalProperties": false, "properties": {"units": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["unit", "young", "poisson"], "properties": {"unit": {"type": "string"}, "young": {"$ref": "#/$defs/param"}, "poisson": {"$ref": "#/$defs/param"}, "ucs": {"$ref": "#/$defs/param"}, "biot": {"$ref": "#/$defs/param"}}}}, "tectonic_strain": {"type": "object", "additionalProperties": false, "required": ["min", "max"], "properties": {"min": {"$ref": "#/$defs/param"}, "max": {"$ref": "#/$defs/param"}}}}},
-    "fractures": {"type": "object", "additionalProperties": false, "properties": {"units": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["unit", "p32_0", "a_k", "p32_max"], "properties": {"unit": {"type": "string"}, "p32_0": {"$ref": "#/$defs/param"}, "a_k": {"$ref": "#/$defs/param"}, "a_e": {"$ref": "#/$defs/param"}, "p32_max": {"$ref": "#/$defs/param"}}}}, "dfn": {"type": "object", "additionalProperties": false, "required": ["unit", "area", "seed", "sets"], "properties": {"unit": {"type": "string"}, "area": {"$ref": "#/$defs/param"}, "seed": {"$ref": "#/$defs/param"}, "limit": {"$ref": "#/$defs/param"}, "sets": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "pole", "kappa", "exponent", "rmin", "rmax", "weight"], "properties": {"name": {"type": "string"}, "pole": {"$ref": "#/$defs/param"}, "kappa": {"$ref": "#/$defs/param"}, "exponent": {"$ref": "#/$defs/param"}, "rmin": {"$ref": "#/$defs/param"}, "rmax": {"$ref": "#/$defs/param"}, "weight": {"$ref": "#/$defs/param"}}}}}}}},
-    "heat": {"type": "object", "additionalProperties": false, "required": ["surface_temperature", "basal_heat_flow", "water_conductivity", "units"], "properties": {"surface_temperature": {"$ref": "#/$defs/param"}, "basal_heat_flow": {"$ref": "#/$defs/param"}, "water_conductivity": {"$ref": "#/$defs/param"}, "column_depth": {"$ref": "#/$defs/param"}, "vitrinite": {"type": "boolean"}, "history": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["age", "basal_heat_flow"], "properties": {"age": {"$ref": "#/$defs/param"}, "basal_heat_flow": {"$ref": "#/$defs/param"}}}}, "units": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["unit", "conductivity", "heat_production"], "properties": {"unit": {"type": "string"}, "conductivity": {"$ref": "#/$defs/param"}, "heat_production": {"$ref": "#/$defs/param"}}}}}},
-    "pressure": {"type": "object", "additionalProperties": false, "required": ["viscosity", "water_density", "grain_density", "units"], "properties": {"viscosity": {"$ref": "#/$defs/param"}, "water_density": {"$ref": "#/$defs/param"}, "grain_density": {"$ref": "#/$defs/param"}, "units": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["unit", "law", "k0", "phi0"], "properties": {"unit": {"type": "string"}, "law": {"type": "string", "enum": ["exponential", "kozeny_carman"]}, "k0": {"$ref": "#/$defs/param"}, "b": {"$ref": "#/$defs/param"}, "phi0": {"$ref": "#/$defs/param"}}}}}},
+    "mechanics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "units": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "unit",
+              "young",
+              "poisson"
+            ],
+            "properties": {
+              "unit": {
+                "type": "string"
+              },
+              "young": {
+                "$ref": "#/$defs/param"
+              },
+              "poisson": {
+                "$ref": "#/$defs/param"
+              },
+              "ucs": {
+                "$ref": "#/$defs/param"
+              },
+              "biot": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "tectonic_strain": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "min",
+            "max"
+          ],
+          "properties": {
+            "min": {
+              "$ref": "#/$defs/param"
+            },
+            "max": {
+              "$ref": "#/$defs/param"
+            }
+          }
+        }
+      }
+    },
+    "fractures": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "units": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "unit",
+              "p32_0",
+              "a_k",
+              "p32_max"
+            ],
+            "properties": {
+              "unit": {
+                "type": "string"
+              },
+              "p32_0": {
+                "$ref": "#/$defs/param"
+              },
+              "a_k": {
+                "$ref": "#/$defs/param"
+              },
+              "a_e": {
+                "$ref": "#/$defs/param"
+              },
+              "p32_max": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "dfn": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unit",
+            "area",
+            "seed",
+            "sets"
+          ],
+          "properties": {
+            "unit": {
+              "type": "string"
+            },
+            "area": {
+              "$ref": "#/$defs/param"
+            },
+            "seed": {
+              "$ref": "#/$defs/param"
+            },
+            "limit": {
+              "$ref": "#/$defs/param"
+            },
+            "sets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "pole",
+                  "kappa",
+                  "exponent",
+                  "rmin",
+                  "rmax",
+                  "weight"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "pole": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "kappa": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "exponent": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "rmin": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "rmax": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "weight": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "heat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "surface_temperature",
+        "basal_heat_flow",
+        "water_conductivity",
+        "units"
+      ],
+      "properties": {
+        "surface_temperature": {
+          "$ref": "#/$defs/param"
+        },
+        "basal_heat_flow": {
+          "$ref": "#/$defs/param"
+        },
+        "water_conductivity": {
+          "$ref": "#/$defs/param"
+        },
+        "column_depth": {
+          "$ref": "#/$defs/param"
+        },
+        "vitrinite": {
+          "type": "boolean"
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "age",
+              "basal_heat_flow"
+            ],
+            "properties": {
+              "age": {
+                "$ref": "#/$defs/param"
+              },
+              "basal_heat_flow": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "unit",
+              "conductivity",
+              "heat_production"
+            ],
+            "properties": {
+              "unit": {
+                "type": "string"
+              },
+              "conductivity": {
+                "$ref": "#/$defs/param"
+              },
+              "heat_production": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        }
+      }
+    },
+    "pressure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "viscosity",
+        "water_density",
+        "grain_density",
+        "units"
+      ],
+      "properties": {
+        "viscosity": {
+          "$ref": "#/$defs/param"
+        },
+        "water_density": {
+          "$ref": "#/$defs/param"
+        },
+        "grain_density": {
+          "$ref": "#/$defs/param"
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "unit",
+              "law",
+              "k0",
+              "phi0"
+            ],
+            "properties": {
+              "unit": {
+                "type": "string"
+              },
+              "law": {
+                "type": "string",
+                "enum": [
+                  "exponential",
+                  "kozeny_carman"
+                ]
+              },
+              "k0": {
+                "$ref": "#/$defs/param"
+              },
+              "b": {
+                "$ref": "#/$defs/param"
+              },
+              "phi0": {
+                "$ref": "#/$defs/param"
+              }
+            }
+          }
+        }
+      }
+    },
     "geobodies": {
       "type": "array",
       "description": "Stage 4B (STX-TN-15 section 3.3): channel belts and lobes placed inside a unit in geological-time coordinates.",
       "items": {
         "type": "object",
-        "required": ["name", "type", "unit", "count", "seed", "thickness", "orientation"],
+        "required": [
+          "name",
+          "type",
+          "unit",
+          "count",
+          "seed",
+          "thickness",
+          "orientation"
+        ],
         "additionalProperties": false,
         "properties": {
-          "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
-          "type": {"type": "string", "enum": ["channels", "lobes"]},
-          "unit": {"type": "string"},
-          "color": {"type": "string"},
-          "shape": {"type": "string", "enum": ["rectangular", "parabolic"]},
-          "count": {"$ref": "#/$defs/param"},
-          "seed": {"$ref": "#/$defs/param"},
-          "width": {"$ref": "#/$defs/param"},
-          "thickness": {"$ref": "#/$defs/param"},
-          "wavelength": {"$ref": "#/$defs/param"},
-          "amplitude": {"$ref": "#/$defs/param"},
-          "orientation": {"$ref": "#/$defs/param"},
-          "radius": {"$ref": "#/$defs/param"},
-          "aspect": {"$ref": "#/$defs/param"}
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "channels",
+              "lobes"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "shape": {
+            "type": "string",
+            "enum": [
+              "rectangular",
+              "parabolic"
+            ]
+          },
+          "count": {
+            "$ref": "#/$defs/param"
+          },
+          "seed": {
+            "$ref": "#/$defs/param"
+          },
+          "width": {
+            "$ref": "#/$defs/param"
+          },
+          "thickness": {
+            "$ref": "#/$defs/param"
+          },
+          "wavelength": {
+            "$ref": "#/$defs/param"
+          },
+          "amplitude": {
+            "$ref": "#/$defs/param"
+          },
+          "orientation": {
+            "$ref": "#/$defs/param"
+          },
+          "radius": {
+            "$ref": "#/$defs/param"
+          },
+          "aspect": {
+            "$ref": "#/$defs/param"
+          }
         }
       }
     },
@@ -2654,6 +3306,21 @@
               }
             }
           }
+        }
+      }
+    },
+    "well_correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule"
+      ],
+      "properties": {
+        "rule": {
+          "enum": [
+            "linear_in_depth",
+            "constant_rate_per_unit"
+          ]
         }
       }
     }

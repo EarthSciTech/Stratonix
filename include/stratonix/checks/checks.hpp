@@ -103,6 +103,23 @@ class CheckContext {
     std::size_t dfn_count = 0;
   };
   const BasinResults* basin = nullptr;
+  /// Stage 4C (STX-TN-16 section 6): well data (C35) and age consistency (C38), set by the pipeline.
+  struct WellDataResults {
+    struct Well {
+      std::string well;
+      std::string survey;                 ///< method and azimuth reference, or how the path was given
+      std::size_t logs = 0, curves = 0;
+      double beyond = 0;                  ///< m of log index beyond the well path's total depth
+      double tops_off_path = 0;           ///< largest distance of a top below the path's total depth (m)
+      std::vector<std::string> notes;     ///< nulls and units per curve
+    };
+    std::vector<Well> wells;
+    struct Conflict { std::string well, what; };
+    bool ages = false;
+    std::size_t dated = 0;                ///< age data used
+    std::vector<Conflict> conflicts;
+  };
+  const WellDataResults* well_data = nullptr;
   /// Stage 4A: the contact graph (C26, topology.json), computed once at topology_spacing().
   const ContactGraph& contact_graph();
   /// outputs.voxel_spacing (x) when given, else max(surface spacing, largest extent / 64).
