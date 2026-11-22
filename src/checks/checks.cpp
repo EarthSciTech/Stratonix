@@ -392,7 +392,8 @@ class C4 final : public Check {
               const Fault& G = net->faults()[g];
               if (G.curved || std::fabs(dot(mid - G.p0, G.s)) >= 0.5 * G.length) continue;
               // between the cut-offs, or close enough to one that its offset reaches the cut-off search
-              const double near = std::max(5.0, 2 * std::fabs(G.tmax)), s1 = G.sigma(chw), s2 = G.sigma(cfw);
+              // the neighbour's vertical offset (none for strike-slip) is what reaches a cut-off
+              const double near = std::max(5.0, 2 * std::fabs(G.tmax * G.slip.z)), s1 = G.sigma(chw), s2 = G.sigma(cfw);
               crossed = (s1 > 0) != (s2 > 0) || std::fabs(s1) < near || std::fabs(s2) < near;
             }
             if (crossed) { ++set_aside; continue; }
