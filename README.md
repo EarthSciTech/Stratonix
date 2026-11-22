@@ -122,6 +122,14 @@ docker run --rm -v "$PWD:/work" ghcr.io/earthscitech/stratonix:latest build mode
 
 Windows installer, portable zip and Linux archive: see the Releases page.
 
+Optional components. From 2026.4 the Windows and Linux release packages include the RESQML 2.0.1
+grid exporter (FESAPI, Apache 2.0), coordinate transformations (PROJ) and GeoPackage maps
+(SQLite); LAS, DLIS and SEG-Y readers are always built in. Each package lists what it includes
+in `share/doc/stratonix/COMPONENTS.txt`, and `stratonix version` prints the same list. On Linux
+the RESQML exporter and PROJ use the system's HDF5, minizip and PROJ libraries (Ubuntu 22.04:
+`sudo apt install libhdf5-103-1 libminizip1 libproj22`). Builds from source include these components only
+when configured with `STRATONIX_WITH_FESAPI`, `STRATONIX_WITH_PROJ` and SQLite found.
+
 ## Licence
 
 MIT, see `LICENSE`. Third-party components and their licences are listed in `THIRD_PARTY.md`.

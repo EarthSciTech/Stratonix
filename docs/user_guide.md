@@ -743,6 +743,76 @@ and tops lie on the path. C38 fails an age inversion in a well, or a top whose a
 differs from its horizon's age by more than twice the age uncertainty. Rule F44. Example:
 `wells_logs_ages`.
 
+## 2.23 Interpretation in time, seismic volumes, coordinates and maps (2026.4)
+
+**Horizons in time** (`stratigraphy.horizons[].surface` with `z_is: twt_ms` or `twt_s`) are
+converted to depth by the `velocity_model`, never mixed with depth without it (rule F45).
+- **Velocity model:** `layers`, from the top down, each with its `base` horizon (in time), `v0`
+  (m/s) and `k` (1/s) of v(z) = v0 + k z (z below the model datum; time zero at the datum), or
+  `fit_k: true` to fit k to the wells.
+- **Calibration:** wells with `tops` (depth) and `tops_twt` (two-way time) give v0 at each well
+  so the layer's base ties the top; between wells v0 is interpolated by `inverse_distance`
+  (squared) or `constant` (the wells' mean). `exclude: [{well, reason}]` keeps a well out as a
+  blind check. Wells are never re-weighted automatically.
+- **Outputs:** `velocity_report.txt`, `velocity_calibration.csv` (per well and layer: v0, k, the
+  tie residual and the leave-one-out residual). **C36** checks the residual of every top after
+  conversion against `velocity_model.tolerance` (default 5 m); blind wells are in the detail.
+
+**Seismic volumes** (`seismic: {input, domain, layout}`) are SEG-Y revisions 0 to 2.1 (IBM or IEEE
+floats, integers, either byte order), read for display. `layout` gives the trace-header byte
+positions (`inline_byte`, `crossline_byte`, `x_byte`, `y_byte`) where a file departs from the
+standard. Every section is drawn as `seismic_section_<name>` with the amplitude in depth (through
+the velocity model for a time volume) and the model's horizons and faults over it.
+
+**Picks and fault sticks** in time or depth are read from Charisma, CSV, IESX and Petrel ASCII
+exports with their domain stated (`io::read_picks`, `io::read_fault_sticks`).
+
+**Coordinate reference systems.** `inputs[].crs: {epsg | wkt}` states an input's CRS; map inputs
+in another CRS than the model's are transformed by PROJ, and the operation and its stated
+accuracy are reported (rule F46). Builds without PROJ refuse the transformation with the reason.
+A local frame (`epsg: 0`) is never mixed with a CRS.
+
+**Models from geological maps** (`geological_map`, rule F47), built by the implicit builder:
+- `units: {input, format, field}`: map polygons from a shapefile, GeoJSON or GeoPackage, with the
+  attribute that names the unit;
+- `unit_order`: the map units youngest first, each with the model horizon at its `base`; map
+  units with the same base form one model unit; the oldest may have an empty base (below the
+  model);
+- `measurements`: bedding from a point layer (`dip_field`, `direction_field`, `convention`:
+  `dip_direction` or `strike_rhr`);
+- `elevation_model`: GeoTIFF (uncompressed, strips) or ESRI ASCII grid; `sample_spacing` samples
+  the contacts on a coarser lattice;
+- `faults`: mapped traces, read and reported.
+Contacts between neighbouring map units, draped on the elevation model, become points on the base
+of the younger unit; each measurement belongs to the base of the unit it lies in. The builder's
+data are written to `map_contact_points.csv`, `map_orientations.csv`, `map_fault_traces.csv` and
+`geological_map_report.txt`. Horizons below the youngest can take a stated stratigraphic column
+(`thickness_above`) for their field values.
+**Limitation:** the model is not clipped by the elevation model, and map data alone leave the
+geometry at depth loosely constrained (`examples/experimental/hamersley_from_map.yaml` does not yet
+pass its checks).
+
+Units: m/s, km/s, ft/s, 1/s, ms, s. Example: `time_depth_conversion`.
+
+**Interpretation uncertainty in ensembles** (`uncertainty.interpretation`, rule F48):
+- `picks: [{horizon, sigma, correlation_length}]`: a two-way time error on a horizon in time (one
+  standard deviation, e.g. `"6 ms | assumed | ..."`);
+- `velocity: [{layer, v0_sigma, k_sigma, correlation_length}]`: errors of a velocity layer's v0
+  (m/s) and k (1/s).
+Every member draws its own realisation of each source: a seeded error field with covariance
+sigma^2 exp(-(r/L)^2) for L = `correlation_length` (one value for the whole model when it is not
+stated); the v0 error is conditioned to vanish at the wells that calibrate the layer. Each member's
+description carries its realisation as a `perturbation` (with its seed) on the horizon's surface or
+on the velocity layer, so any member can be rebuilt alone. Velocity parameters can also be
+sampled as ordinary uncertain parameters (`path: velocity_model.layers.<name>.k`), and so take
+part in the posteriors of stage 4A. `depth_variance_split.csv` reports, for every horizon of the
+velocity model, the depth variance from the conversion (picks and velocity) and from the structure
+separately, with their covariance. Example: `time_depth_uncertainty` (`stratonix ensemble`).
+
+**Optional components** of a build are listed by `stratonix version` (RESQML through FESAPI, PROJ,
+GeoPackage through SQLite). `stratonix read-seismic <file.sgy> -o traces.csv` writes the traces of
+a SEG-Y file as read, with its read report.
+
 # 3. Running
 
 | Command | What it does |

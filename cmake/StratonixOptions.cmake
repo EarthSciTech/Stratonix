@@ -2,7 +2,8 @@
 if(MSVC)
   add_compile_options(/W4 /permissive- /utf-8 /Zc:__cplusplus /EHsc /bigobj)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
-  if(STRATONIX_STATIC_RUNTIME)
+  # FESAPI's interface passes C++ objects across its DLL boundary: both sides use the DLL runtime
+  if(STRATONIX_STATIC_RUNTIME AND NOT STRATONIX_WITH_FESAPI)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   endif()
 else()

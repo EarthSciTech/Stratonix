@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <map>
 #include <cmath>
 #include <cstdlib>
 #include <sstream>
@@ -221,7 +222,9 @@ std::vector<CheckResult> thickness_checks(CheckContext& c, bool crossing) {
       for (std::size_t k = 0; k < g.size(); ++k) {
         if (std::isnan(a.v[k]) || std::isnan(z.v[k])) continue;
         double zm = 0.5 * (a.v[k] + z.v[k]);
-        if (zm > inf.domain.z_top || zm < inf.domain.z_base) continue;
+        // a unit whose horizons are both held at the domain's top or base lies outside the domain there
+        const double eps = 1e-6 * (inf.domain.z_top - inf.domain.z_base);
+        if (zm >= inf.domain.z_top - eps || zm <= inf.domain.z_base + eps) continue;
         p.push_back({g.x(k % g.nx), g.y(k / g.nx), zm});
         idx.push_back(k);
       }
@@ -1525,6 +1528,36 @@ class C35 final : public Check {
   }
 };
 
+/// C36 time-depth ties (STX-TN-16 section 6): each well top after depth conversion, per layer.
+class C36 final : public Check {
+  std::vector<CheckResult> run(CheckContext& c) const override {
+    std::vector<CheckResult> out;
+    const auto* td = c.time_depth;
+    if (!td) return out;
+    std::map<std::string, std::vector<const CheckContext::TimeDepthResults::Tie*>> by;
+    for (auto& t : td->ties) by[t.layer].push_back(&t);
+    for (auto& [layer, ts] : by) {
+      auto r = base(c, "C36", "time-depth ties", layer);
+      r.unit = "m";
+      double worst = 0, loo = 0;
+      std::string where, blind;
+      for (auto* t : ts) {
+        if (std::fabs(t->residual) > std::fabs(worst)) { worst = t->residual; where = t->well; }
+        if (std::isfinite(t->loo) && std::fabs(t->loo) > std::fabs(loo)) loo = t->loo;
+        if (t->excluded) blind += std::string(blind.empty() ? "" : ", ") + t->well + " " + fmt_fixed(t->residual, 2) + " m";
+      }
+      r.value = std::fabs(worst);
+      r.tolerance = td->tolerance;
+      r.tolerance_source = td->tolerance_source;
+      r.passed = r.value <= r.tolerance;
+      r.detail = std::to_string(ts.size()) + " tops; largest residual " + fmt_fixed(worst, 2) + " m" + (where.empty() ? "" : " at " + where) +
+                 "; leave-one-out (v0 from the other wells) up to " + fmt_fixed(std::fabs(loo), 2) + " m" + (blind.empty() ? "" : "; blind wells: " + blind);
+      out.push_back(r);
+    }
+    return out;
+  }
+};
+
 /// C29: potential-field misfit (STX-TN-14 section 7): reduced chi-square of the stations reported;
 /// a warning above 2.
 class C29 final : public Check {
@@ -1631,6 +1664,8 @@ STRATONIX_REGISTER(check_c32, registry::Kind::Check, "C32_basin", "1.0.0", "Heat
                    [] { return std::make_unique<C32>(); })
 STRATONIX_REGISTER(check_c35, registry::Kind::Check, "C35_well_data", "1.0.0", "Well data: survey method stated, logs and tops on the well path; age consistency (C38)",
                    [] { return std::make_unique<C35>(); })
+STRATONIX_REGISTER(check_c36, registry::Kind::Check, "C36_time_depth", "1.0.0", "Time-depth ties: well tops after depth conversion within the tolerance",
+                   [] { return std::make_unique<C36>(); })
 STRATONIX_REGISTER(check_c31, registry::Kind::Check, "C31_restoration", "1.0.0", "Restoration strain and bed length within their limits",
                    [] { return std::make_unique<C31>(); })
 STRATONIX_REGISTER(check_c29, registry::Kind::Check, "C29_potential_fields", "1.0.0", "Potential-field misfit: reduced chi-square of the stations (warning above 2)",

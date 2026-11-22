@@ -1,4 +1,5 @@
 // Core utilities: mesh quality, units, SHA-256, formatting, files, threads, build info, logging.
+#include <cmath>
 #include <atomic>
 #include <cctype>
 #include <charconv>
@@ -13,6 +14,10 @@
 #include <utility>
 
 #include "stratonix/core/crs.hpp"
+
+#ifdef STRATONIX_WITH_PROJ
+#include <proj.h>
+#endif
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/mesh.hpp"
 #include "stratonix/core/units.hpp"
@@ -87,6 +92,9 @@ std::optional<UnitDef> find_unit(std::string_view name) {
       {"W/m/K", Dimension::ThermalConductivity, 1.0},
       {"W/m2", Dimension::HeatFlow, 1.0},     {"mW/m2", Dimension::HeatFlow, 1.0e-3},
       {"W/m3", Dimension::HeatProduction, 1.0}, {"uW/m3", Dimension::HeatProduction, 1.0e-6},
+      {"m/s", Dimension::Velocity, 1.0},      {"km/s", Dimension::Velocity, 1000.0},  // stage 4C
+      {"ft/s", Dimension::Velocity, 0.3048},  {"1/s", Dimension::VelocityGradient, 1.0},
+      {"s", Dimension::TravelTime, 1.0},      {"ms", Dimension::TravelTime, 1.0e-3},
       {"Pa.s", Dimension::Viscosity, 1.0},    {"mPa.s", Dimension::Viscosity, 1.0e-3}, {"cP", Dimension::Viscosity, 1.0e-3},
   };
   for (auto& u : table)
@@ -114,6 +122,9 @@ const char* dimension_name(Dimension d) {
     case Dimension::HeatFlow: return "heat flow";
     case Dimension::HeatProduction: return "heat production";
     case Dimension::Viscosity: return "viscosity";
+    case Dimension::Velocity: return "velocity";
+    case Dimension::VelocityGradient: return "velocity gradient";
+    case Dimension::TravelTime: return "travel time";
     default: return "any";
   }
 }
@@ -126,14 +137,57 @@ bool crs_reprojection_available() {
 #endif
 }
 
-// Stage 4C stub (STX-TN-16 section 2.4): implemented by Prompt 56.
-CrsTransform::CrsTransform(const CrsInfo&, const CrsInfo&) {
-  throw Error(ErrorCode::NotImplemented, "CrsTransform: not implemented yet (Prompt 56)");
+// Stage 4C (STX-TN-16 section 2.4): a transformation between two CRS chosen by PROJ.
+#ifdef STRATONIX_WITH_PROJ
+namespace {
+std::string crs_def(const CrsInfo& c) {
+  if (!c.wkt.empty()) return c.wkt;
+  if (c.epsg > 0) return "EPSG:" + std::to_string(c.epsg);
+  throw Error(ErrorCode::Validation, "a local frame (epsg 0, no WKT) cannot be transformed to or from a coordinate reference system");
+}
+}  // namespace
+CrsTransform::CrsTransform(const CrsInfo& from, const CrsInfo& to) {
+  PJ_CONTEXT* ctx = proj_context_create();
+  PJ* p = proj_create_crs_to_crs(ctx, crs_def(from).c_str(), crs_def(to).c_str(), nullptr);
+  if (!p) {
+    const std::string why = proj_context_errno_string(ctx, proj_context_errno(ctx));
+    proj_context_destroy(ctx);
+    throw Error(ErrorCode::Validation, "PROJ found no transformation from " + from.label() + " to " + to.label() + ": " + why);
+  }
+  PJ* n = proj_normalize_for_visualization(ctx, p);  // easting/northing, longitude/latitude order
+  proj_destroy(p);
+  if (!n) { proj_context_destroy(ctx); throw Error(ErrorCode::Validation, "PROJ could not normalise the axis order"); }
+  const PJ_PROJ_INFO info = proj_pj_info(n);
+  op_.name = info.description ? info.description : "";
+  op_.method = info.definition ? info.definition : "";
+  op_.accuracy = info.accuracy;  // metres; negative when PROJ states none
+  ctx_ = ctx;
+  pj_ = n;
+}
+CrsTransform::~CrsTransform() {
+  if (pj_) proj_destroy(static_cast<PJ*>(pj_));
+  if (ctx_) proj_context_destroy(static_cast<PJ_CONTEXT*>(ctx_));
+}
+void CrsTransform::apply(std::vector<double>& x, std::vector<double>& y, std::vector<double>& z) const {
+  if (x.size() != y.size() || x.size() != z.size()) throw Error(ErrorCode::InvalidArgument, "CrsTransform::apply: x, y and z differ in length");
+  if (x.empty()) return;
+  const std::size_t n = proj_trans_generic(static_cast<PJ*>(pj_), PJ_FWD, x.data(), sizeof(double), x.size(), y.data(), sizeof(double), y.size(), z.data(),
+                                           sizeof(double), z.size(), nullptr, 0, 0);
+  if (n != x.size()) throw Error(ErrorCode::Internal, "PROJ transformed " + std::to_string(n) + " of " + std::to_string(x.size()) + " points");
+  for (std::size_t i = 0; i < x.size(); ++i)
+    if (!std::isfinite(x[i]) || !std::isfinite(y[i]) || x[i] == HUGE_VAL)
+      throw Error(ErrorCode::Validation, "PROJ could not transform point " + std::to_string(i + 1) + " (outside the operation's area?)");
+}
+#else
+CrsTransform::CrsTransform(const CrsInfo& from, const CrsInfo& to) {
+  throw Error(ErrorCode::Unsupported, "coordinate transformation from " + from.label() + " to " + to.label() +
+                                          " needs PROJ; this build has none (STRATONIX_WITH_PROJ=OFF)");
 }
 CrsTransform::~CrsTransform() = default;
 void CrsTransform::apply(std::vector<double>&, std::vector<double>&, std::vector<double>&) const {
-  throw Error(ErrorCode::NotImplemented, "CrsTransform::apply: not implemented yet (Prompt 56)");
+  throw Error(ErrorCode::Unsupported, "coordinate transformation needs PROJ; this build has none");
 }
+#endif
 
 // ---- SHA-256 (FIPS 180-4) -------------------------------------------------------------------
 namespace {

@@ -1,0 +1,80 @@
+# Stage 4C example (STX-TN-16 section 2.5): a model built from a public geological map.
+# The Hamersley Basin, Western Australia (map2loop's example data from the Geological Survey of
+# Western Australia; examples/data/hamersley/README.md): map polygons, bedding measurements and
+# the elevation model, in GDA94 / MGA zone 50 (EPSG:28350).
+# - Contacts between map units, draped on the elevation model, become points on the base of the
+#   younger unit; bedding measurements become orientations; the implicit builder interpolates.
+# - The unit order is the map's stratigraphy from its stated ages (Turee Creek Group youngest);
+#   the thin Woongarra Rhyolite is one model unit with the Boolgeeda Iron Formation; the Fortescue
+#   Group below the Jeerinah Formation is the basement; the Rocklea Inlier is left out (reported). The mapped faults are read and reported, not modelled in this example.
+# - The stratigraphic column (thickness_above) fixes the field values of the horizons below the
+#   youngest; the thicknesses are approximate and labelled as assumed.
+# EXPERIMENTAL (stage 4C, open item I-048): this model does not yet pass its checks. Map contacts at
+# the ground and about 80 bedding dips constrain the near-surface geometry; the keel of the syncline
+# at depth is not constrained, and the implicit field pinches the lower units there (C1, C26). It
+# is kept outside the tested examples to show the map workflow on public data.
+# DESIGN model: a regional first pass from map data; every parameter labelled.
+stratonix_schema: 1
+model: {name: hamersley_from_map, version: "1.0.0", status: DESIGN,
+        title: "Hamersley Basin from its geological map"}
+crs: {name: "GDA94 / MGA zone 50", epsg: 28350, vertical_datum: "AHD (elevation model)", length_unit: m}
+domain:
+  origin: "[515700, 7497000] m | user_instruction | the north-western plunging syncline of the map2loop example area"
+  size:   "[29300, 24200] m | user_instruction | the syncline and its Fortescue Group margins"
+  depth_range: "[-6000, 4000] m | user_instruction | from 6000 m above the datum, so the eroded continuation of the strata above the ground lies in the model, to 4000 m below"
+  grid_spacing: "500 m | user_instruction | regional model"
+inputs:
+  - {id: MAP, path: ../data/hamersley/geology.geojson, role: geological map, sharing: shareable, source: "GSWA via map2loop 078f8a6 (MIT)", evidence: interpreted}
+  - {id: FAULTS, path: ../data/hamersley/faults.geojson, role: fault traces, sharing: shareable, source: "GSWA via map2loop 078f8a6 (MIT)", evidence: interpreted}
+  - {id: BEDDING, path: ../data/hamersley/structures.geojson, role: bedding measurements, sharing: shareable, source: "GSWA via map2loop 078f8a6 (MIT)", evidence: measured}
+  - {id: DEM, path: ../data/hamersley/dtm_rp.tif, role: elevation model, sharing: shareable, source: "map2loop 078f8a6 (MIT)", evidence: measured}
+geological_map:
+  units: {input: MAP, format: geojson, field: unitname}
+  unit_order:
+    - {map_unit: "Turee Creek Group", base: Turee_Creek_base}
+    - {map_unit: "Boolgeeda Iron Formation", base: Woongarra_base}
+    - {map_unit: "Woongarra Rhyolite", base: Woongarra_base}   # one model unit with the Boolgeeda Iron Formation
+    - {map_unit: "Weeli Wolli Formation", base: Weeli_Wolli_base}
+    - {map_unit: "Brockman Iron Formation", base: Brockman_base}
+    - {map_unit: "Mount McRae Shale and Mount Sylvia Formation", base: McRae_base}
+    - {map_unit: "Wittenoom Formation", base: Wittenoom_base}
+    - {map_unit: "Marra Mamba Iron Formation", base: Marra_Mamba_base}
+    - {map_unit: "Jeerinah Formation", base: Jeerinah_base}
+    - {map_unit: "Fortescue Group", base: ""}   # the oldest units: below the model's last horizon
+    - {map_unit: "Bunjinah Formation", base: ""}
+  faults: {input: FAULTS, format: geojson}
+  measurements: {input: BEDDING, format: geojson, dip_field: dip, direction_field: azimuth2, convention: dip_direction, source: "GSWA bedding measurements via map2loop"}
+  elevation_model: {input: DEM, format: geotiff}
+  sample_spacing: "1500 m | user_instruction | contacts sampled every 1500 m, so the bedding dips weigh against the many contacts"
+stratigraphy:
+  reference: {point: "[530000, 7509000] m | user_instruction | centre of the window"}
+  horizons:
+    - {name: Turee_Creek_base}
+    - {name: Woongarra_base, thickness_above: "700 m | assumed | approximate regional thickness of the Boolgeeda Iron Formation and Woongarra Rhyolite together; to be checked against Trendall and Blockley (1970), GSWA Bulletin 119"}
+    - {name: Weeli_Wolli_base, thickness_above: "450 m | assumed | approximate regional thickness of the Weeli Wolli Formation; to be checked against Trendall and Blockley (1970), GSWA Bulletin 119"}
+    - {name: Brockman_base, thickness_above: "620 m | assumed | approximate regional thickness of the Brockman Iron Formation; to be checked against Trendall and Blockley (1970), GSWA Bulletin 119"}
+    - {name: McRae_base, thickness_above: "100 m | assumed | approximate regional thickness of the Mount McRae Shale and Mount Sylvia Formation; to be checked against Trendall and Blockley (1970), GSWA Bulletin 119"}
+    - {name: Wittenoom_base, thickness_above: "450 m | assumed | approximate regional thickness of the Wittenoom Formation; to be checked against Trendall and Blockley (1970), GSWA Bulletin 119"}
+    - {name: Marra_Mamba_base, thickness_above: "230 m | assumed | approximate regional thickness of the Marra Mamba Iron Formation; to be checked against Trendall and Blockley (1970), GSWA Bulletin 119"}
+    - {name: Jeerinah_base, thickness_above: "400 m | assumed | approximate regional thickness of the Jeerinah Formation; to be checked against Trendall and Blockley (1970), GSWA Bulletin 119"}
+  units:
+    - {name: Boolgeeda_Woongarra, top: Turee_Creek_base, base: Woongarra_base}
+    - {name: Weeli_Wolli, top: Woongarra_base, base: Weeli_Wolli_base}
+    - {name: Brockman, top: Weeli_Wolli_base, base: Brockman_base}
+    - {name: McRae_Sylvia, top: Brockman_base, base: McRae_base}
+    - {name: Wittenoom, top: McRae_base, base: Wittenoom_base}
+    - {name: Marra_Mamba, top: Wittenoom_base, base: Marra_Mamba_base}
+    - {name: Jeerinah, top: Marra_Mamba_base, base: Jeerinah_base}
+implicit:
+  use_well_tops: false
+  kernel: cubic
+  nugget: "50 m | assumed | map contacts at 1500 m sampling on a 1:500 000 map are not exact"
+  surface_spacing: "500 m | assumed | the grid spacing"
+  iterations: "10 ordinal | assumed | maximum restoration passes"
+  vertical_stretch: "5 ratio | assumed | at 1 the limbs stayed near vertical (dips outweighed by contacts); 5 gives the syncline its bowl"
+outputs:
+  sections:
+    - name: XS_NS
+      polyline: "[[527000, 7497500], [527000, 7520500]] m | user_instruction | north-south across the syncline"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv]

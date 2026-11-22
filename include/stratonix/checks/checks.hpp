@@ -120,6 +120,14 @@ class CheckContext {
     std::vector<Conflict> conflicts;
   };
   const WellDataResults* well_data = nullptr;
+  /// Stage 4C: time-depth ties after conversion (C36), set by the pipeline.
+  struct TimeDepthResults {
+    struct Tie { std::string well, layer; double residual = 0, loo = 0; bool excluded = false; };
+    std::vector<Tie> ties;
+    double tolerance = 5;
+    std::string tolerance_source;
+  };
+  const TimeDepthResults* time_depth = nullptr;
   /// Stage 4A: the contact graph (C26, topology.json), computed once at topology_spacing().
   const ContactGraph& contact_graph();
   /// outputs.voxel_spacing (x) when given, else max(surface spacing, largest extent / 64).

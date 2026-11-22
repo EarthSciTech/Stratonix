@@ -125,7 +125,18 @@ std::vector<const Param*> Description::all_params() const {
     for (auto& [h, p] : w.tops) add(p);
     for (auto& c : w.completions) { add(c.top); add(c.base); }
   }
-  for (auto& h : horizons) { add(h.depth); add(h.thickness_above); add(h.iso_thickness); add(h.iso_gradient); add(h.iso_centre); }
+  for (auto& h : horizons) {
+    add(h.depth); add(h.thickness_above); add(h.iso_thickness); add(h.iso_gradient); add(h.iso_centre);
+    add(h.surface_perturbation.sigma); add(h.surface_perturbation.correlation_length);
+  }
+  for (auto& L : velocity.layers) {
+    add(L.v0); add(L.k);
+    add(L.perturbation.v0_sigma); add(L.perturbation.k_sigma); add(L.perturbation.correlation_length);
+  }
+  add(velocity.tolerance);
+  add(geological_map.sample_spacing);
+  for (auto& q : uncertainty.picks) { add(q.sigma); add(q.correlation_length); }
+  for (auto& q : uncertainty.velocity) { add(q.v0_sigma); add(q.k_sigma); add(q.correlation_length); }
   for (auto& h : horizons) add(h.age);
   for (auto& u : units) add(u.clay_fraction);
   for (auto& x : implicit.data) add(x.uncertainty);
@@ -229,13 +240,15 @@ const Param* Description::param_by_name(const std::string& path) const {
       if (names[k] == nm) { ip = indexed + "[" + std::to_string(k) + "]" + tail; return true; }
     return false;
   };
-  std::vector<std::string> fn, pn, hn, wn;
+  std::vector<std::string> fn, pn, hn, wn, vn;
+  for (auto& L : velocity.layers) vn.push_back(L.name);
   for (auto& f : faults) fn.push_back(f.name);
   for (auto& p : primitives) pn.push_back(p.name);
   for (auto& h : horizons) hn.push_back(h.name);
   for (auto& w : wells) wn.push_back(w.name);
   if (!take("faults.", "faults", fn) && !take("structure.primitives.", "structure.primitives", pn) &&
-      !take("stratigraphy.horizons.", "stratigraphy.horizons", hn) && !take("wells.", "wells", wn))
+      !take("stratigraphy.horizons.", "stratigraphy.horizons", hn) && !take("wells.", "wells", wn) &&
+      !take("velocity_model.layers.", "velocity_model.layers", vn))
     ip = path;
   for (auto* p : all_params())
     if (p->path == ip) return p;
@@ -399,8 +412,16 @@ struct Typer {
     d.grid_spacing = P(dom, "grid_spacing", "domain", Dimension::Length, true, 1);
 
     if (const Node* in = root.get("inputs"))
-      for (auto& i : in->seq)
-        d.inputs.push_back({S(&i, "id"), S(&i, "path"), S(&i, "role"), S(&i, "sharing"), S(&i, "source"), S(&i, "evidence"), {}});
+      for (auto& i : in->seq) {
+        InputDesc x{S(&i, "id"), S(&i, "path"), S(&i, "role"), S(&i, "sharing"), S(&i, "source"), S(&i, "evidence"), {}, {}, false};
+        if (const Node* cr = i.get("crs")) {
+          x.has_crs = true;
+          x.crs.name = S(cr, "name");
+          if (cr->get("epsg")) x.crs.epsg = static_cast<int>(cr->get("epsg")->number);
+          x.crs.wkt = S(cr, "wkt");
+        }
+        d.inputs.push_back(x);
+      }
 
     if (const Node* ws = root.get("wells"))
       for (std::size_t k = 0; k < ws->seq.size(); ++k) {
@@ -449,6 +470,8 @@ struct Typer {
           }
         if (const Node* tops = w.get("tops"))
           for (auto& [h, tn] : tops->map) wd.tops.emplace_back(h, P(tops, h, b + ".tops", Dimension::Length, true, 1));
+        if (const Node* tt = w.get("tops_twt"))
+          for (auto& [h, tn] : tt->map) wd.tops_twt.emplace_back(h, P(tt, h, b + ".tops_twt", Dimension::TravelTime, true, 1));
         d.wells.push_back(std::move(wd));
       }
 
@@ -470,6 +493,13 @@ struct Typer {
           hd.surface_input = S(s, "input");
           hd.surface_format = S(s, "format");
           hd.surface_z_is = S(s, "z_is", "depth");
+          if (const Node* pp = s->get("perturbation")) {
+            auto& q = hd.surface_perturbation;
+            q.present = true;
+            q.sigma = P(pp, "sigma", b + ".surface.perturbation", Dimension::TravelTime, true, 1);
+            q.correlation_length = P(pp, "correlation_length", b + ".surface.perturbation", Dimension::Length, false, 1);
+            if (const Node* sd = pp->get("seed")) q.seed = static_cast<std::uint64_t>(sd->is_number() ? sd->number : std::stod(sd->str));
+          }
         }
         if (const Node* s = h.get("isochore")) {
           hd.iso_from = S(s, "from");
@@ -1246,6 +1276,21 @@ struct Typer {
         }
       if (const Node* kn = un->get("key_numbers"))
         for (auto& x : kn->seq) u.key_numbers.push_back(x.str);
+      if (const Node* in = un->get("interpretation")) {
+        if (const Node* ps = in->get("picks"))
+          for (std::size_t k = 0; k < ps->seq.size(); ++k) {
+            const Node& x = ps->seq[k];
+            const std::string b = "uncertainty.interpretation.picks[" + std::to_string(k) + "]";
+            u.picks.push_back({S(&x, "horizon"), P(&x, "sigma", b, Dimension::TravelTime, true, 1), P(&x, "correlation_length", b, Dimension::Length, false, 1)});
+          }
+        if (const Node* vs = in->get("velocity"))
+          for (std::size_t k = 0; k < vs->seq.size(); ++k) {
+            const Node& x = vs->seq[k];
+            const std::string b = "uncertainty.interpretation.velocity[" + std::to_string(k) + "]";
+            u.velocity.push_back({S(&x, "layer"), P(&x, "v0_sigma", b, Dimension::Velocity, false, 1), P(&x, "k_sigma", b, Dimension::VelocityGradient, false, 1),
+                                  P(&x, "correlation_length", b, Dimension::Length, false, 1)});
+          }
+      }
     }
     if (const Node* gn = root.get("grid")) {
       auto& g = d.grid;
@@ -1288,6 +1333,68 @@ struct Typer {
         }
     }
     if (const Node* wc = root.get("well_correlation")) d.correlation_rule = S(wc, "rule");
+    if (const Node* vm = root.get("velocity_model")) {
+      auto& V = d.velocity;
+      V.present = true;
+      if (const Node* ls = vm->get("layers"))
+        for (std::size_t k = 0; k < ls->seq.size(); ++k) {
+          const Node& l = ls->seq[k];
+          const std::string b = "velocity_model.layers[" + std::to_string(k) + "]";
+          const Node* fk = l.get("fit_k");
+          V.layers.push_back({S(&l, "name"), S(&l, "base"), P(&l, "v0", b, Dimension::Velocity, true, 1), P(&l, "k", b, Dimension::VelocityGradient, false, 1),
+                              fk && (fk->boolean || fk->str == "true"), {}});
+          if (const Node* pp = l.get("perturbation")) {
+            auto& q = V.layers.back().perturbation;
+            q.present = true;
+            q.v0_sigma = P(pp, "v0_sigma", b + ".perturbation", Dimension::Velocity, false, 1);
+            q.k_sigma = P(pp, "k_sigma", b + ".perturbation", Dimension::VelocityGradient, false, 1);
+            q.correlation_length = P(pp, "correlation_length", b + ".perturbation", Dimension::Length, false, 1);
+            if (const Node* sd = pp->get("seed")) q.seed = static_cast<std::uint64_t>(sd->is_number() ? sd->number : std::stod(sd->str));
+          }
+        }
+      if (const Node* ca = vm->get("calibration")) {
+        V.interpolation = S(ca, "interpolation", "inverse_distance");
+        if (const Node* ex = ca->get("exclude"))
+          for (auto& e : ex->seq) V.exclude.push_back({S(&e, "well"), S(&e, "reason")});
+      }
+      V.tolerance = P(vm, "tolerance", "velocity_model", Dimension::Length, false, 1);
+    }
+    if (const Node* sm = root.get("seismic")) {
+      d.seismic.present = true;
+      d.seismic.input = S(sm, "input");
+      d.seismic.domain = S(sm, "domain");
+      if (const Node* lo = sm->get("layout")) {
+        auto gi = [&](const char* k) { const Node* n = lo->get(k); return n ? static_cast<int>(n->number) : 0; };
+        d.seismic.il = gi("inline_byte");
+        d.seismic.xl = gi("crossline_byte");
+        d.seismic.x = gi("x_byte");
+        d.seismic.y = gi("y_byte");
+      }
+    }
+    if (const Node* gm = root.get("geological_map")) {
+      auto& G = d.geological_map;
+      G.present = true;
+      auto src = [&](const Node* n) { return Description::MapSource{S(n, "input"), S(n, "format"), S(n, "layer"), S(n, "field")}; };
+      G.units = src(gm->get("units"));
+      if (gm->get("faults")) G.faults = src(gm->get("faults"));
+      if (const Node* ms = gm->get("measurements")) {
+        G.measurements = src(ms);
+        G.dip_field = S(ms, "dip_field");
+        G.direction_field = S(ms, "direction_field");
+        G.convention = S(ms, "convention");
+        G.filter_field = S(ms, "filter_field");
+        G.filter_value = S(ms, "filter_value");
+        G.source = S(ms, "source");
+        G.date = S(ms, "date");
+      }
+      if (const Node* uo = gm->get("unit_order"))
+        for (auto& u : uo->seq) G.unit_order.push_back({S(&u, "map_unit"), S(&u, "base")});
+      if (const Node* em = gm->get("elevation_model")) { G.dem_input = S(em, "input"); G.dem_format = S(em, "format"); }
+      G.sample_spacing = P(gm, "sample_spacing", "geological_map", Dimension::Length, false, 1);
+      // the map's contacts and measurements enter the implicit builder as data
+      d.implicit.data.push_back({"geological_map:contacts", "points", "geological_map", "", Param{}});
+      if (!G.measurements.input.empty()) d.implicit.data.push_back({"geological_map:orientations", "orientations", "geological_map", "", Param{}});
+    }
     if (const Node* fr = root.get("fault_rock")) {
       d.fault_rock.present = true;
       d.fault_rock.shale_threshold = P(fr, "shale_threshold", "fault_rock", Dimension::Dimensionless, false, 1);
@@ -1812,6 +1919,34 @@ struct Typer {
       if (!fr.seal_type.empty() && std::none_of(d.units.begin(), d.units.end(), [](const UnitDesc& u) { return u.clay_fraction.present; }))
         c.err("fault_rock.seal_calibration", "F27", "a seal calibration needs clay fractions on the units");
     }
+    // STX-TN-16 section 3 (F48): pick and velocity uncertainty
+    {
+      const auto& u = d.uncertainty;
+      for (std::size_t k = 0; k < u.picks.size(); ++k) {
+        const auto& q = u.picks[k];
+        const std::string b = "uncertainty.interpretation.picks[" + std::to_string(k) + "]";
+        const int hi = d.horizon_index(q.horizon);
+        if (hi < 0) { c.err(b + ".horizon", "F48", "unknown horizon '" + q.horizon + "'"); continue; }
+        const auto& z = d.horizons[static_cast<std::size_t>(hi)].surface_z_is;
+        if (z != "twt_ms" && z != "twt_s") c.err(b + ".horizon", "F48", "pick uncertainty is in time: '" + q.horizon + "' is not a surface in two-way time");
+        if (q.sigma.present && !(q.sigma.si() > 0)) c.err(b + ".sigma", "F48", "the pick uncertainty is a positive standard deviation");
+        if (q.correlation_length.present && !(q.correlation_length.si() > 0)) c.err(b + ".correlation_length", "F48", "the correlation length is positive");
+      }
+      for (std::size_t k = 0; k < u.velocity.size(); ++k) {
+        const auto& q = u.velocity[k];
+        const std::string b = "uncertainty.interpretation.velocity[" + std::to_string(k) + "]";
+        bool found = false;
+        for (auto& L : d.velocity.layers) found = found || L.name == q.layer;
+        if (!found) c.err(b + ".layer", "F48", "unknown velocity_model layer '" + q.layer + "'");
+        if (!q.v0_sigma.present && !q.k_sigma.present) c.err(b, "F48", "a velocity uncertainty states v0_sigma, k_sigma or both");
+        if (q.v0_sigma.present && !(q.v0_sigma.si() > 0)) c.err(b + ".v0_sigma", "F48", "v0_sigma is a positive standard deviation");
+        if (q.k_sigma.present && !(q.k_sigma.si() > 0)) c.err(b + ".k_sigma", "F48", "k_sigma is a positive standard deviation");
+        if (q.correlation_length.present && !(q.correlation_length.si() > 0)) c.err(b + ".correlation_length", "F48", "the correlation length is positive");
+      }
+      for (std::size_t h = 0; h < d.horizons.size(); ++h)
+        if (d.horizons[h].surface_perturbation.present && d.horizons[h].surface_z_is.rfind("twt", 0) != 0)
+          c.err("stratigraphy.horizons." + d.horizons[h].name + ".surface.perturbation", "F48", "a pick perturbation applies to a surface in two-way time");
+    }
     // STX-TN-13 (F33): the uncertainty block
     if (d.uncertainty.present) {
       const auto& u = d.uncertainty;
@@ -2179,12 +2314,78 @@ struct Typer {
           pd.array_step_along.si() == 0 && pd.array_step_across.si() == 0)
         c.err(b + ".array", "F19", "an en echelon array needs a non-zero step along or across the axis");
     }
+    // stage 4C (STX-TN-16): time inputs (F45), coordinate systems (F46), geological maps (F47)
+    {
+      auto has_input = [&](const std::string& id) { return std::any_of(d.inputs.begin(), d.inputs.end(), [&](const InputDesc& i) { return i.id == id; }); };
+      bool time_surfaces = false;
+      for (auto& h : d.horizons) time_surfaces = time_surfaces || h.surface_z_is.rfind("twt", 0) == 0;
+      if (time_surfaces && !d.velocity.present)
+        c.err("velocity_model", "F45", "horizons given in two-way time need a velocity_model (time and depth are never mixed without a stated conversion)");
+      const auto& V = d.velocity;
+      int prev = -1;
+      for (std::size_t k = 0; k < V.layers.size(); ++k) {
+        const auto& L = V.layers[k];
+        const std::string b = "velocity_model.layers[" + std::to_string(k) + "]";
+        const int h = d.horizon_index(L.base);
+        if (h < 0) { c.err(b + ".base", "F45", "unknown horizon '" + L.base + "'"); continue; }
+        if (h <= prev) c.err(b + ".base", "F45", "layers are listed from the top down: '" + L.base + "' lies above the previous base");
+        prev = h;
+        if (d.horizons[static_cast<std::size_t>(h)].surface_z_is.rfind("twt", 0) != 0)
+          c.err(b + ".base", "F45", "a layer's base horizon is given in two-way time (stratigraphy.horizons[].surface z_is: twt_ms or twt_s)");
+        if (L.v0.present && !(L.v0.si() > 0)) c.err(b + ".v0", "F45", "v0 must be positive");
+        if (!L.k.present && !L.fit_k) c.err(b + ".k", "F45", "state k (0 for a constant velocity) or fit_k: true");
+      }
+      for (auto& h : d.horizons)
+        if (h.surface_z_is.rfind("twt", 0) == 0 && V.present && std::none_of(V.layers.begin(), V.layers.end(), [&](const Description::VelocityLayer& L) { return L.base == h.name; }))
+          c.err("stratigraphy.horizons." + h.name, "F45", "a horizon in two-way time is the base of a velocity_model layer");
+      for (auto& [w, r] : V.exclude)
+        if (std::none_of(d.wells.begin(), d.wells.end(), [&](const WellDesc& x) { return x.name == w; }))
+          c.err("velocity_model.calibration.exclude", "F45", "unknown well '" + w + "'");
+        else if (r.empty())
+          c.err("velocity_model.calibration.exclude", "F45", "a well is excluded with its reason");
+      for (std::size_t k = 0; k < d.wells.size(); ++k)
+        for (auto& [h, p] : d.wells[k].tops_twt)
+          if (d.horizon_index(h) < 0) c.err("wells[" + std::to_string(k) + "].tops_twt." + h, "F45", "unknown horizon '" + h + "'");
+      if (d.seismic.present) {
+        if (!has_input(d.seismic.input)) c.err("seismic.input", "I1", "input '" + d.seismic.input + "' is not listed under inputs");
+        if (d.seismic.domain == "time" && !V.present) c.err("seismic.domain", "F45", "a time volume is drawn in depth through a velocity_model");
+      }
+      // F46: an input in another CRS is transformed (PROJ); a local frame is never mixed with a CRS
+      for (auto& in : d.inputs)
+        if (in.has_crs) {
+          if (in.crs.epsg <= 0 && in.crs.wkt.empty()) c.err("inputs." + in.id + ".crs", "F46", "an input's crs gives an EPSG code or WKT");
+          else if (d.crs.is_local()) c.err("inputs." + in.id + ".crs", "F46", "the model is in a local frame (epsg 0): an input in a coordinate reference system cannot be placed in it");
+        }
+      const auto& G = d.geological_map;
+      if (G.present) {
+        if (!d.implicit.present) c.err("geological_map", "F47", "a model from a map is built by the implicit builder: add an implicit block");
+        for (auto* s : {&G.units, &G.faults, &G.measurements})
+          if (!s->input.empty() && !has_input(s->input)) c.err("geological_map", "I1", "input '" + s->input + "' is not listed under inputs");
+        if (!G.dem_input.empty() && !has_input(G.dem_input)) c.err("geological_map.elevation_model", "I1", "input '" + G.dem_input + "' is not listed under inputs");
+        if (G.units.field.empty()) c.err("geological_map.units.field", "F47", "name the attribute field that carries the unit");
+        if (G.units.format == "geopackage" && G.units.layer.empty()) c.err("geological_map.units.layer", "F47", "a GeoPackage map names its layer");
+        for (std::size_t k = 0; k < G.unit_order.size(); ++k) {
+          const auto& [mu, base] = G.unit_order[k];
+          if (base.empty()) {  // the oldest units: below the model's last horizon
+            for (std::size_t q = k + 1; q < G.unit_order.size(); ++q)
+              if (!G.unit_order[q].second.empty()) c.err("geological_map.unit_order", "F47", "units without a base are the oldest: list them last");
+            continue;
+          }
+          if (d.horizon_index(base) < 0) c.err("geological_map.unit_order", "F47", "unknown horizon '" + base + "' (base of " + mu + ")");
+        }
+        if (!G.measurements.input.empty() && (G.dip_field.empty() || G.direction_field.empty()))
+          c.err("geological_map.measurements", "F47", "measurements name their dip and direction fields and convention");
+      }
+    }
     // implicit (data-conditioned) builder
+    if (d.implicit.present && d.implicit.data.empty())
+      c.err("implicit.data", "I1", "the implicit builder needs data (implicit.data or a geological_map)");
     if (d.implicit.present) {
       for (std::size_t k = 0; k < d.implicit.data.size(); ++k) {
         auto& x = d.implicit.data[k];
         std::string b = "implicit.data[" + std::to_string(k) + "]";
-        if (std::none_of(d.inputs.begin(), d.inputs.end(), [&](const InputDesc& i) { return i.id == x.input; }))
+        if (x.input.rfind("geological_map:", 0) != 0 &&
+            std::none_of(d.inputs.begin(), d.inputs.end(), [&](const InputDesc& i) { return i.id == x.input; }))
           c.err(b + ".input", "I1", "input '" + x.input + "' is not listed under inputs");
         if (!x.horizon.empty() && d.horizon_index(x.horizon) < 0) c.err(b + ".horizon", "I2", "unknown horizon '" + x.horizon + "'");
       }

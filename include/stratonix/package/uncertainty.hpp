@@ -79,6 +79,10 @@ struct EnsembleSpec {
   std::vector<ProbabilityMapSpec> maps;
   std::vector<std::string> key_numbers;  ///< extra key numbers (besides the summary table's)
   bool posterior = false;  ///< stage 4A: members drawn from the posterior of conditioning.method: bayesian
+  /// stage 4C (STX-TN-16 section 3): pick and velocity uncertainty; each member gets its own
+  /// realisation (a seeded correlated field) of every source
+  struct InterpretationSource { std::string kind, target; std::size_t index = 0; };  ///< kind "picks" or "velocity"
+  std::vector<InterpretationSource> interpretation;
 };
 /// The ensemble specification of a description's uncertainty block (rule F33 already applied).
 EnsembleSpec ensemble_spec(const desc::Description& d);
@@ -138,6 +142,10 @@ struct EnsembleResult {
   std::vector<SobolRow> sobol;
   std::vector<ProbabilityMap> maps;
   std::size_t topology_differs = 0;  ///< stage 4A: members whose contact graph differs from the base case's
+  /// stage 4C: per velocity-model horizon, the depth variance from the depth conversion (picks and
+  /// velocity) and from the structural parameters, averaged over a lattice of the base surface
+  struct VarianceSplit { std::string horizon; std::size_t nodes = 0, members = 0; double conversion = 0, structural = 0, covariance = 0, total = 0; };
+  std::vector<VarianceSplit> variance_split;
   std::size_t ok() const;
 };
 

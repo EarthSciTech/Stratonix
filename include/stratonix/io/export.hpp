@@ -204,4 +204,8 @@ std::string export_readme(const ExportContext& c, const std::vector<ExportedFile
 void register_exporters();
 void register_importers();
 
+/// Stage 4C (STX-TN-16 section 4): the optional readers and exporters this build includes, one
+/// line each ("RESQML 2.0.1 export (FESAPI): included" ...), for `stratonix version` and packages.
+std::vector<std::string> optional_components();
+
 }  // namespace stratonix::io

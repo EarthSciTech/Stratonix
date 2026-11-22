@@ -92,9 +92,14 @@ def main(folder):
                 if not schemas[path].validate(doc):
                     bad.append("%s: %s" % (name, schemas[path].error_log.last_error))
                 nparts += 1
-        print("schema validation: %d XML parts against the RESQML 2.0.1 schemas in %s" % (nparts, xsd))
+        status = "validated: %d XML parts of %s against the RESQML 2.0.1 schemas%s" % (nparts, epcs[0].name, "" if not bad else " - FAILED")
     else:
-        print("schema validation not run: set STX_RESQML_XSD_DIR to the RESQML 2.0.1 schemas (Energistics download package)")
+        status = "not validated: schemas not supplied (STX_RESQML_XSD_DIR; the Energistics schemas are never committed)"
+        if os.environ.get("STX_RESQML_XSD_REQUIRED") == "1":
+            bad.append("the RESQML schemas were required (STX_RESQML_XSD_REQUIRED=1) but %s is not a folder" % xsd)
+    # stage 4C (STX-TN-16 section 4, I-034): the validation status is reported, never assumed
+    print("schema " + status)
+    (folder / "xsd_status.txt").write_text(status + "\n")
     if bad:
         print("\n".join(bad))
         return 1

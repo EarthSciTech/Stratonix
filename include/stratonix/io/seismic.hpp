@@ -4,6 +4,7 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,10 @@ struct SegyVolume {
   std::vector<std::string> report;
   /// Amplitude at a point by bilinear interpolation between traces and linear in time; NaN outside.
   double sample(double x, double y, double t) const;
+
+ private:
+  mutable std::vector<double> affine_;                   ///< x = a0 + a1 il + a2 xl, y = a3 + a4 il + a5 xl (fitted once)
+  mutable std::map<std::pair<int, int>, std::size_t> at_;
 };
 SegyVolume read_segy(const std::filesystem::path& file, const SegyLayout& layout = {});
 

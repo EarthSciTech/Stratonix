@@ -21,6 +21,7 @@
 #include "stratonix/figures/figures.hpp"
 #include "stratonix/io/export.hpp"
 #include "stratonix/io/io.hpp"
+#include "stratonix/io/velocity.hpp"
 #include "stratonix/package/pipeline.hpp"
 #include "stratonix/repr/repr.hpp"
 
@@ -190,6 +191,8 @@ EnsembleSpec ensemble_spec(const desc::Description& d) {
     return -1;
   };
   for (auto& c : u.correlations) s.correlations.push_back({{index_of(c.a), index_of(c.b)}, c.rho.si()});
+  for (std::size_t k = 0; k < u.picks.size(); ++k) s.interpretation.push_back({"picks", u.picks[k].horizon, k});
+  for (std::size_t k = 0; k < u.velocity.size(); ++k) s.interpretation.push_back({"velocity", u.velocity[k].layer, k});
   for (auto& sc : u.scenarios) {
     Scenario x;
     x.name = sc.name;
@@ -382,6 +385,30 @@ desc::Node member_document(const desc::Node& base, const EnsembleSpec& s, const 
                     "sampled: " + d + " " + p.unit + " (" + p.evidence + (p.source.empty() ? "" : ", " + p.source) + "; base " + fmt_shortest(p.base) +
                         " " + p.unit + ")" + (m.index > 0 ? "; member " + std::to_string(m.index) + ", seed " + std::to_string(m.seed) : std::string("; one-at-a-time run")));
     }
+  // stage 4C: one realisation of each pick and velocity uncertainty per member (not for the base
+  // case or one-at-a-time runs); the source's own statement is copied with the member's seed
+  if (m.index > 0 && !s.interpretation.empty()) {
+    const desc::Node* in = nullptr;
+    if (const desc::Node* un = base.get("uncertainty")) in = un->get("interpretation");
+    for (std::size_t k = 0; k < s.interpretation.size(); ++k) {
+      const auto& src = s.interpretation[k];
+      const desc::Node* list = in ? in->get(src.kind) : nullptr;
+      if (!list || src.index >= list->seq.size()) continue;
+      const desc::Node& st = list->seq[src.index];
+      desc::Node pert = desc::Node::make_map();
+      for (const char* key : {"sigma", "v0_sigma", "k_sigma", "correlation_length"})
+        if (const desc::Node* x = st.get(key)) pert.set(key, *x);
+      std::uint64_t x = m.seed ^ (0x9E3779B97F4A7C15ull * (k + 1));
+      Rng r(x);
+      desc::Node sd = desc::Node::make_number(static_cast<double>(r.next() & 0xFFFFFFFFull));
+      sd.integer = true;
+      pert.set("seed", sd);
+      const std::string path = src.kind == "picks" ? "stratigraphy.horizons." + src.target + ".surface" : "velocity_model.layers." + src.target;
+      desc::Node* n = find_node(doc, path);
+      if (!n) throw Error(ErrorCode::Validation, "uncertainty.interpretation: no node at '" + path + "'", "uncertainty");
+      n->set("perturbation", pert);
+    }
+  }
   for (std::size_t k = 0; k < s.scenarios.size(); ++k) {
     const auto& o = s.scenarios[k].options[static_cast<std::size_t>(m.options[k])];
     for (auto& [path, node] : o.set) {
@@ -506,6 +533,9 @@ struct MemberRun {
   MemberResult r;
   std::unique_ptr<ContactGraph> graph;  ///< stage 4A: for the topology comparison
   std::vector<std::vector<std::uint8_t>> map_hits;  ///< per probability map, per node (1 hit)
+  /// stage 4C: per velocity-model layer base, the converted depth and the model's depth (m, positive
+  /// down) on a lattice of the base's time surface (at most 30 by 30 nodes)
+  std::vector<std::vector<double>> conv_depth, model_depth;
 };
 
 bool reported_key(const std::string& k) { return k != "Evidence basis" && k != "Horizons / faults" && k != "Checks"; }
@@ -559,6 +589,43 @@ MemberRun run_member(const desc::Node& base, const fs::path& base_dir, const Ens
     out.r.status = "build_failed";
     out.r.reason = std::string("checks: ") + e.what();
     return out;
+  }
+  // stage 4C: converted and built depths of the velocity model's horizons (variance split)
+  if (d.velocity.present) {
+    try {
+      const auto vb = io::velocity_build(d);
+      for (auto& L : d.velocity.layers) {
+        const auto& h = d.horizons[static_cast<std::size_t>(d.horizon_index(L.base))];
+        const auto it = vb.depth_grids.find(h.surface_input);
+        std::vector<double> zc, zm;
+        if (it != vb.depth_grids.end()) {
+          const Grid2D& g = it->second;
+          const std::size_t si = std::max<std::size_t>(1, (g.spec.nx + 29) / 30), sj = std::max<std::size_t>(1, (g.spec.ny + 29) / 30);
+          GridSpec sub;
+          sub.x0 = g.spec.x0;
+          sub.y0 = g.spec.y0;
+          sub.dx = g.spec.dx * static_cast<double>(si);
+          sub.dy = g.spec.dy * static_cast<double>(sj);
+          sub.nx = (g.spec.nx - 1) / si + 1;
+          sub.ny = (g.spec.ny - 1) / sj + 1;
+          int hi = -1;
+          for (std::size_t q = 0; q < model->info().horizons.size(); ++q)
+            if (model->info().horizons[q].name == L.base) hi = static_cast<int>(q);
+          const auto fs = hi >= 0 ? repr::horizon_grid_faulted(*model, hi, sub) : repr::FaultedSurface{};
+          for (std::size_t j = 0; j < sub.ny; ++j)
+            for (std::size_t i = 0; i < sub.nx; ++i) {
+              zc.push_back(g.v[g.spec.index(i * si, j * sj)]);
+              const double z = hi >= 0 && fs.z.v.size() == sub.size() ? fs.z.v[sub.index(i, j)] : kNaN;
+              zm.push_back(std::isfinite(z) ? -z : kNaN);
+            }
+        }
+        out.conv_depth.push_back(std::move(zc));
+        out.model_depth.push_back(std::move(zm));
+      }
+    } catch (const std::exception&) {
+      out.conv_depth.clear();
+      out.model_depth.clear();
+    }
   }
   // probability maps
   for (std::size_t k = 0; k < s.maps.size(); ++k) {
@@ -744,6 +811,63 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
       }
     }
 
+  // stage 4C (STX-TN-16 section 3): variance of each velocity horizon's depth from the conversion
+  // (picks and velocity: the converted surface) and from the structure (the built surface less the
+  // converted one), with their covariance; node variances averaged over the lattice
+  if (dbase.velocity.present && (!s.interpretation.empty() || !s.parameters.empty())) {
+    for (std::size_t L = 0; L < dbase.velocity.layers.size(); ++L) {
+      EnsembleResult::VarianceSplit vs;
+      vs.horizon = dbase.velocity.layers[L].base;
+      std::vector<std::size_t> mem;
+      const std::size_t nn = runs[0].conv_depth.size() > L ? runs[0].conv_depth[L].size() : 0;
+      for (std::size_t k = 1; k < samples.size(); ++k)
+        if (nn && res.members[k].status == "ok" && runs[k].conv_depth.size() > L && runs[k].conv_depth[L].size() == nn &&
+            runs[k].model_depth[L].size() == nn)
+          mem.push_back(k);
+      vs.members = mem.size();
+      if (mem.size() >= 2) {
+        double sc = 0, ss = 0, sv = 0, st = 0;
+        for (std::size_t n = 0; n < nn; ++n) {
+          std::vector<double> c, r;
+          bool ok = true;
+          for (auto k : mem) {
+            const double zc = runs[k].conv_depth[L][n], zm = runs[k].model_depth[L][n];
+            if (!std::isfinite(zc) || !std::isfinite(zm)) { ok = false; break; }
+            c.push_back(zc);
+            r.push_back(zm - zc);
+          }
+          if (!ok) continue;
+          const double N = static_cast<double>(c.size());
+          double mc = 0, mr = 0;
+          for (std::size_t q = 0; q < c.size(); ++q) { mc += c[q]; mr += r[q]; }
+          mc /= N;
+          mr /= N;
+          double vc = 0, vr = 0, cv = 0;
+          for (std::size_t q = 0; q < c.size(); ++q) {
+            vc += (c[q] - mc) * (c[q] - mc);
+            vr += (r[q] - mr) * (r[q] - mr);
+            cv += (c[q] - mc) * (r[q] - mr);
+          }
+          vc /= N - 1;
+          vr /= N - 1;
+          cv /= N - 1;
+          sc += vc;
+          ss += vr;
+          sv += cv;
+          st += vc + vr + 2 * cv;
+          ++vs.nodes;
+        }
+        if (vs.nodes) {
+          const double nd = static_cast<double>(vs.nodes);
+          vs.conversion = sc / nd;
+          vs.structural = ss / nd;
+          vs.covariance = sv / nd;
+          vs.total = st / nd;
+        }
+      }
+      res.variance_split.push_back(vs);
+    }
+  }
   // key names in the order of first appearance (base case first)
   std::vector<std::string> keys;
   for (auto& m : res.members)
@@ -854,6 +978,14 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
       t += r.parameter + "," + csv_text(r.key) + "," + fmt_fixed(r.index, 6) + "," + (r.distinguishable ? "yes" : "no") + "," + std::to_string(nok) + "," + seed + "\n";
     write_file(e / "sensitivity_sobol.csv", t);
   }
+  if (!res.variance_split.empty()) {
+    std::string t = "horizon,members,nodes,conversion_variance_m2,structural_variance_m2,covariance_m2,total_variance_m2,conversion_sd_m,structural_sd_m,total_sd_m,seed\n";
+    for (auto& v : res.variance_split)
+      t += v.horizon + "," + std::to_string(v.members) + "," + std::to_string(v.nodes) + "," + fmt_fixed(v.conversion, 4) + "," + fmt_fixed(v.structural, 4) + "," +
+           fmt_fixed(v.covariance, 4) + "," + fmt_fixed(v.total, 4) + "," + fmt_fixed(std::sqrt(std::max(0.0, v.conversion)), 3) + "," +
+           fmt_fixed(std::sqrt(std::max(0.0, v.structural)), 3) + "," + fmt_fixed(std::sqrt(std::max(0.0, v.total)), 3) + "," + seed + "\n";
+    write_file(e / "depth_variance_split.csv", t);
+  }
   if (s.one_at_a_time) {
     std::string t = "parameter,key,value_at_p10,value_at_p90,base,swing\n";
     for (auto& r : res.oat)
@@ -876,6 +1008,11 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
                        (bayes ? std::string("posterior_*.csv      posterior of the Bayesian conditioning: retained samples, priors, diagnostics (members = these samples; base = least-squares fit)\n") : std::string()) +
                        "statistics.csv       per key number over the ok members: n, mean, sd, P10, P50, P90, min, max (with N and seed)\n" +
                        "sensitivity_sobol.csv first-order variance-based indices from the ensemble (given data, sqrt(N) bins)\n" +
+                       (res.variance_split.empty() ? std::string()
+                                                   : std::string("depth_variance_split.csv per velocity-model horizon: depth variance from the conversion (picks and velocity) and from the structure, reported separately (STX-TN-16 section 3)\n")) +
+                       (s.interpretation.empty() ? std::string()
+                                                 : "Pick and velocity uncertainty: " + std::to_string(s.interpretation.size()) +
+                                                       " sources, one seeded realisation of each per member (velocity_model / horizon surface 'perturbation' in each member's description)\n") +
                        (s.one_at_a_time ? std::string("sensitivity_oat.csv  one at a time: each parameter at its P10 and P90, others at base\n") : std::string()) +
                        "maps/*.irap          probability maps (fraction of the ok members)\n" +
                        (o.figures ? std::string("figures/             histograms, first-order indices, tornado charts and probability maps (PNG, SVG, TIFF, PPTX)\n") : std::string()) +

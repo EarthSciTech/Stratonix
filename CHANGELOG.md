@@ -43,6 +43,24 @@ has its own version (`stratonix_schema`).
     properties `P32` and `P32_DFN` (realised network intensity per cell), and temperature and
     overpressure are drawn over the burial curves at each well.
 
+- Interpretation uncertainty and interchange (stage 4C, Prompt 57): pick and velocity errors carried
+  into depth as seeded correlated fields in every ensemble member (`uncertainty.interpretation`,
+  F48), v0 errors conditioned to the calibration wells; velocity parameters as uncertain or
+  posterior parameters; `depth_variance_split.csv` separates the depth variance from the
+  conversion and from the structure; the ensemble spread of a known velocity error matches the
+  analytical value (test D17b, 0.4 % at 2000 members). RESQML exports validated against the
+  Energistics schemas in CI when the owner supplies them (`STX_RESQML_XSD_URL`; reported as not
+  validated otherwise); the Windows and Linux release packages include the RESQML exporter, PROJ
+  and SQLite, and list their optional components (`COMPONENTS.txt`, `stratonix version`);
+  `stratonix read-seismic`; SEG-Y cross-checked against segyio in CI.
+- Interpretation in time and real coordinates (stage 4C, Prompt 56): horizons in two-way time
+  converted by a layer-cake velocity model v0 + k z calibrated to wells (`velocity_model`, C36,
+  blind wells, leave-one-out residuals); SEG-Y revisions 0 to 2.1 and seismic sections in depth
+  with the model over them; horizon picks and fault sticks (Charisma, CSV, IESX, Petrel ASCII);
+  PROJ transformations of inputs with their stated accuracy; geological maps (shapefile, GeoJSON,
+  GeoPackage) with bedding measurements and elevation models (GeoTIFF, ESRI ASCII) as data for the
+  implicit builder (`geological_map`); rules F45 to F47; units m/s, 1/s, ms; example
+  `time_depth_conversion`. C1 no longer counts a unit held at the domain's top or base.
 - Wells with logs, surveys and ages (stage 4C, Prompt 55): LAS 2.0 and 3.0 and DLIS (RP66 V1)
   read as delivered with units and nulls from the files; deviation surveys from CSV by a stated
   method and azimuth reference (rule F44); ages in wells and correlation by age; logs upscaled to

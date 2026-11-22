@@ -2556,3 +2556,79 @@ Figure correlation_figure(const FigureContext& c, const CorrelationPanel& p) {
 }
 
 }  // namespace stratonix::fig
+
+namespace stratonix::fig {
+
+Figure seismic_section_figure(const FigureContext& c, const repr::Section& s, const std::vector<float>& amp, const std::string& how) {
+  Figure f(842, 540);
+  const auto& inf = c.model->info();
+  const double z0 = s.z_top, z1 = s.z_base;
+  const double x0 = 70, x1 = 842 - 232, y0 = 58;
+  const double h_ve = (x1 - x0) * (z0 - z1) / s.length * c.vertical_exaggeration;
+  const double y1 = y0 + std::clamp(h_ve, 120.0, 540.0 - 58 - 92);
+  const Frame2 fr{x0, y0, x1, y1, 0, s.length, z0, z1};
+  title(f, (c.title.empty() ? c.model_name : c.title) + " - seismic along " + s.name,
+        "Amplitude sampled from the SEG-Y volume " + how + "; the model's horizons and faults drawn over it");
+  // amplitude image, symmetric colour scale at the 98th percentile of |amplitude|
+  std::vector<float> mags;
+  for (float a : amp) if (std::isfinite(a)) mags.push_back(std::fabs(a));
+  float clip = 1;
+  if (!mags.empty()) {
+    std::nth_element(mags.begin(), mags.begin() + static_cast<long>(0.98 * static_cast<double>(mags.size() - 1)), mags.end());
+    clip = std::max(1e-12f, mags[static_cast<std::size_t>(0.98 * static_cast<double>(mags.size() - 1))]);
+  }
+  Image im;
+  im.w = static_cast<int>(s.ns);
+  im.h = static_cast<int>(s.nz);
+  im.rgba.assign(static_cast<std::size_t>(im.w) * static_cast<std::size_t>(im.h) * 4, 0);
+  for (std::size_t r = 0; r < s.nz; ++r)
+    for (std::size_t q = 0; q < s.ns; ++q) {
+      const float a = r * s.ns + q < amp.size() ? amp[r * s.ns + q] : NAN;
+      std::uint8_t* px = &im.rgba[4 * (r * s.ns + q)];
+      if (!std::isfinite(a)) { px[0] = px[1] = px[2] = 235; px[3] = 255; continue; }
+      const double t = std::clamp(static_cast<double>(a / clip), -1.0, 1.0);
+      // blue (negative) - white - red (positive)
+      px[0] = static_cast<std::uint8_t>(t < 0 ? 255 * (1 + t) : 255);
+      px[1] = static_cast<std::uint8_t>(255 * (1 - std::fabs(t)));
+      px[2] = static_cast<std::uint8_t>(t > 0 ? 255 * (1 - t) : 255);
+      px[3] = 255;
+    }
+  f.image(x0, y0, x1 - x0, y1 - y0, f.own(std::move(im)));
+  f.clip(fr.x0, fr.y0, fr.x1 - fr.x0, fr.y1 - fr.y0);
+  std::vector<LegendEntry> es;
+  for (std::size_t h = 0; h < s.horizon_z.size() && h < inf.horizons.size(); ++h) {
+    Color col = unit_color(c, h + 1);
+    Color dark = rgb(static_cast<std::uint8_t>(col.r * 0.45), static_cast<std::uint8_t>(col.g * 0.45), static_cast<std::uint8_t>(col.b * 0.45));
+    std::vector<Pt> seg;
+    for (std::size_t q = 0; q < s.ns; ++q) {
+      const double z = s.horizon_z[h][q];
+      if (!std::isfinite(z)) { if (seg.size() >= 2) f.path(seg, false, none(), dark, 1.2); seg.clear(); continue; }
+      seg.push_back(fr.p(s.station[q], z));
+    }
+    if (seg.size() >= 2) f.path(seg, false, none(), dark, 1.2);
+    es.push_back({"Model horizons", inf.horizons[h].name, none(), true, dark, 1.2});
+  }
+  for (std::size_t k = 0; k < s.fault_z.size(); ++k) {
+    std::vector<Pt> seg;
+    for (std::size_t q = 0; q < s.ns; ++q) {
+      const double z = s.fault_z[k][q];
+      if (!std::isfinite(z)) { if (seg.size() >= 2) f.path(seg, false, none(), kInk, 1.4, {5, 2}); seg.clear(); continue; }
+      seg.push_back(fr.p(s.station[q], z));
+    }
+    if (seg.size() >= 2) f.path(seg, false, none(), kInk, 1.4, {5, 2});
+  }
+  if (!s.fault_z.empty()) es.push_back({"Model faults", "Fault (dashed)", none(), true, kInk, 1.4});
+  f.unclip();
+  f.rect(x0, y0, x1 - x0, y1 - y0, none(), kInk, 0.6);
+  for (double t : nice_ticks(0, s.length, 7)) f.text({fr.p(t, z1).x, y1 + 11}, km_or_m(t), 6.5, Anchor::Middle, false, kInk);
+  for (double t : nice_ticks(z1, z0, 6)) f.text({x0 - 4, fr.p(0, t).y + 2.5}, fmt_fixed(-t, 0), 6.5, Anchor::End, false, kInk);
+  f.text({(x0 + x1) / 2, y1 + 24}, "Distance along the section (m)", 7.5, Anchor::Middle, false, kInk);
+  f.text({x0 - 42, (y0 + y1) / 2}, "Depth below the model datum (m)", 7.5, Anchor::Middle, false, kInk, -90);
+  es.push_back({"Amplitude", "Red positive, blue negative (98 % clip)", none(), false, rgb(230, 80, 80)});
+  double ly = legend(f, 842 - 200, y0, 190, es, 540.0 - 30 - key_box_height(c) - 8) + 8;
+  key_box(f, c, 842 - 200, ly, 190);
+  footer(f, c);
+  return f;
+}
+
+}  // namespace stratonix::fig

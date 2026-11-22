@@ -1,6 +1,9 @@
 // Pipeline shared by the command line and the C API.
 #include "stratonix/package/pipeline.hpp"
 #include "stratonix/package/welldata.hpp"
+#include "stratonix/io/maps.hpp"
+#include "stratonix/io/seismic.hpp"
+#include "stratonix/io/velocity.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -1327,6 +1330,44 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     write_file(out_dir / "well_data_report.txt", wdb.report);
     for (auto& [name, text] : wdb.csv) write_file(out_dir / name, text);
   }
+  // stage 4C (STX-TN-16 section 2.5): what the geological map gave the builder
+  if (d.geological_map.present) {
+    const io::ModelData md = io::geological_map_data(d);
+    std::map<std::string, std::size_t> per;
+    for (auto& [h, p] : md.contact_points) ++per[h];
+    std::string t = "Stratonix geological map (stage 4C, STX-TN-16 section 2.5)\n";
+    for (auto& line : md.report) t += line + "\n";
+    t += "contact points per horizon (base of the younger unit):\n";
+    for (auto& [h, n] : per) t += "  " + h + ": " + std::to_string(n) + "\n";
+    std::string pts = "horizon,x,y,z\n";
+    for (auto& [h, p] : md.contact_points) pts += h + "," + fmt_fixed(p.x, 1) + "," + fmt_fixed(p.y, 1) + "," + fmt_fixed(p.z, 1) + "\n";
+    std::string ori = "horizon,x,y,z,dip_deg,dip_direction_deg,source\n";
+    for (auto& m : md.orientations)
+      ori += m.horizon + "," + fmt_fixed(m.p.x, 1) + "," + fmt_fixed(m.p.y, 1) + "," + fmt_fixed(m.p.z, 1) + "," + fmt_fixed(rad2deg(m.dip), 1) + "," +
+             fmt_fixed(rad2deg(m.azimuth), 1) + "," + m.source + "\n";
+    std::string ft = "fault,x,y,z\n";
+    for (auto& [n, tr] : md.fault_traces)
+      for (auto& q : tr) ft += n + "," + fmt_fixed(q.x, 1) + "," + fmt_fixed(q.y, 1) + "," + fmt_fixed(q.z, 1) + "\n";
+    write_file(out_dir / "geological_map_report.txt", t);
+    write_file(out_dir / "map_contact_points.csv", pts);
+    write_file(out_dir / "map_orientations.csv", ori);
+    write_file(out_dir / "map_fault_traces.csv", ft);
+  }
+  // stage 4C (STX-TN-16 section 2.3): the velocity model and its ties (C36)
+  CheckContext::TimeDepthResults tdr;
+  io::VelocityBuild vb = io::velocity_build(d);
+  if (vb.present) {
+    for (auto& t : vb.ties) tdr.ties.push_back({t.well, t.layer, t.residual, t.loo, t.excluded});
+    if (d.velocity.tolerance.present) {
+      tdr.tolerance = d.velocity.tolerance.si();
+      tdr.tolerance_source = std::string("velocity_model.tolerance (") + desc::evidence_name(d.velocity.tolerance.evidence) + ")";
+    } else {
+      tdr.tolerance_source = "Stratonix default: 5 m";
+    }
+    ctx.time_depth = &tdr;
+    write_file(out_dir / "velocity_report.txt", vb.report);
+    write_file(out_dir / "velocity_calibration.csv", vb.csv);
+  }
   CheckReport rep = run_checks(ctx);
   o.checks_passed = rep.passed();
   write_file(out_dir / "topology.json", ctx.contact_graph().json());  // stage 4A (STX-TN-14 section 6)
@@ -1359,6 +1400,34 @@ BuildOutcome run_build(const std::filesystem::path& description, const std::file
     log(LogLevel::Error, "checks failed: exports and figures are not written (see checks_report.txt)");
   } else {
     if (opt.figures) write_figures(d, *o.model, keys, out_dir / "figures", ctx.surfaces(), &burial_fields);
+    if (opt.figures && d.seismic.present) {
+      // stage 4C (STX-TN-16 section 2.2): the SEG-Y volume along each section, in depth
+      const desc::InputDesc* in = nullptr;
+      for (auto& x : d.inputs)
+        if (x.id == d.seismic.input) in = &x;
+      io::SegyLayout lay{d.seismic.il, d.seismic.xl, d.seismic.x, d.seismic.y};
+      const io::SegyVolume vol = io::read_segy(in->resolved, lay);
+      std::string rep = "Stratonix seismic volume (stage 4C, STX-TN-16 section 2.2)\n" + in->resolved.generic_string() + "\n";
+      for (auto& line : vol.report) rep += line + "\n";
+      write_file(out_dir / "seismic_report.txt", rep);
+      auto c = figure_context(d, *o.model, keys);
+      const std::string how = d.seismic.domain == "time" ? "in time, drawn in depth through the velocity model (velocity_report.txt)" : "in depth";
+      for (auto& sd : d.sections) {
+        Polyline pl;
+        for (std::size_t r = 0; r < sd.polyline.rows(); ++r) pl.push_back({sd.polyline.si(2 * r), sd.polyline.si(2 * r + 1), 0});
+        auto s = repr::make_section(*o.model, sd.name, pl, std::max(10.0, c.grid_spacing / 2), 4.0);
+        std::vector<float> amp(s.nz * s.ns, NAN);
+        for (std::size_t q = 0; q < s.ns; ++q)
+          for (std::size_t r = 0; r < s.nz; ++r) {
+            const double z = s.z_top - (static_cast<double>(r) + 0.5) * s.dz, depth = -z;
+            const double t = d.seismic.domain == "time" ? (vb.present ? io::depth_to_time_safe(vb.model, s.xy[q].x, s.xy[q].y, depth) : NAN) : depth;
+            amp[r * s.ns + q] = static_cast<float>(vol.sample(s.xy[q].x, s.xy[q].y, t));
+          }
+        fig::write_figure(fig::seismic_section_figure(c, s, amp, how), out_dir / "figures", fig::figure_basename(c, "seismic_section", sd.name),
+                          c.model_name + " - seismic along " + sd.name, "Seismic amplitude along " + sd.name + " with the model drawn over it.",
+                          "Amplitude from the SEG-Y volume; see seismic_report.txt and velocity_report.txt.");
+      }
+    }
     if (opt.figures && wdb.present) {
       // stage 4C: well log panels and the correlation panel
       auto c = figure_context(d, *o.model, keys);

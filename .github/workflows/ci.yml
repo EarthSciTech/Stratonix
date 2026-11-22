@@ -24,10 +24,42 @@ jobs:
       - uses: lukka/get-cmake@latest   # CMake >= 3.24 (Ubuntu 22.04 ships 3.22)
       - name: Install dependencies
         if: ${{ !(startsWith(github.ref, 'refs/tags/v') && (matrix.preset == 'linux-gcc-debug' || matrix.preset == 'linux-asan')) }}
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libyaml-dev libcairo2-dev zlib1g-dev clang python3-numpy python3-yaml python3-jsonschema python3-pil
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libyaml-dev libcairo2-dev zlib1g-dev clang python3-numpy python3-yaml python3-jsonschema python3-pil libsqlite3-dev libproj-dev
+      # Stage 4C (STX-TN-16 section 4): the release build (packaged) carries the RESQML exporter
+      # (FESAPI, built from source and cached), PROJ and SQLite; the Clang build carries PROJ, so the
+      # coordinate transformations run against PROJ's own test values (D14) in two builds
+      - name: FESAPI dependencies
+        if: matrix.preset == 'linux-gcc-release'
+        run: sudo apt-get install -y libhdf5-dev libminizip-dev libboost-dev uuid-dev
+      - name: FESAPI revision
+        if: matrix.preset == 'linux-gcc-release'
+        id: fesapi
+        run: echo "sha=$(git ls-remote https://github.com/F2I-Consulting/fesapi.git HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        if: matrix.preset == 'linux-gcc-release'
+        id: fesapi-cache
+        with:
+          path: fesapi-install
+          key: fesapi-${{ steps.fesapi.outputs.sha }}-ubuntu-22.04
+      - name: Build FESAPI
+        if: matrix.preset == 'linux-gcc-release' && steps.fesapi-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/F2I-Consulting/fesapi.git fesapi-src
+          cmake -S fesapi-src -B fesapi-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/fesapi-install \
+                -DMINIZIP_INCLUDE_DIR=/usr/include/minizip -DMINIZIP_LIBRARY_RELEASE=/usr/lib/x86_64-linux-gnu/libminizip.so \
+                -DWITH_EXAMPLE=OFF -DWITH_JAVA_WRAPPING=OFF -DWITH_PYTHON_WRAPPING=OFF -DWITH_DOTNET_WRAPPING=OFF
+          cmake --build fesapi-build --parallel
+          cmake --install fesapi-build
+          cp fesapi-src/LICENSE fesapi-install/LICENSE
+      - name: FESAPI licence text (shipped with its library)
+        if: matrix.preset == 'linux-gcc-release'
+        run: test -f fesapi-install/LICENSE || curl -fsSL https://raw.githubusercontent.com/F2I-Consulting/fesapi/${{ steps.fesapi.outputs.sha }}/LICENSE -o fesapi-install/LICENSE
       - name: Configure
         if: ${{ !(startsWith(github.ref, 'refs/tags/v') && (matrix.preset == 'linux-gcc-debug' || matrix.preset == 'linux-asan')) }}
-        run: cmake --preset ${{ matrix.preset }}
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          ${{ matrix.preset == 'linux-clang-release' && '-DSTRATONIX_WITH_PROJ=ON' || '' }}
+          ${{ matrix.preset == 'linux-gcc-release' && format('-DSTRATONIX_WITH_PROJ=ON -DSTRATONIX_WITH_FESAPI=ON -DFESAPI_ROOT={0}/fesapi-install', github.workspace) || '' }}
       - name: Build
         if: ${{ !(startsWith(github.ref, 'refs/tags/v') && (matrix.preset == 'linux-gcc-debug' || matrix.preset == 'linux-asan')) }}
         run: cmake --build --preset ${{ matrix.preset }} || cmake --build build/${{ matrix.preset }}
@@ -36,7 +68,14 @@ jobs:
         run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure -j 4
       - name: Package
         if: matrix.preset == 'linux-gcc-release'
-        run: cd build/${{ matrix.preset }} && cpack
+        run: |
+          cd build/${{ matrix.preset }} && cpack
+          ./apps/stratonix/stratonix version
+          # the packaged executable finds the shipped FESAPI library (RPATH $ORIGIN/../lib)
+          mkdir -p /tmp/pkg && tar -xzf stratonix-*.tar.gz -C /tmp/pkg
+          exe=$(find /tmp/pkg -name stratonix -type f | head -1)
+          "$exe" version | tee /tmp/pkg/version.txt
+          grep -q "RESQML 2.0.1 export (FESAPI): included" /tmp/pkg/version.txt
       - uses: actions/upload-artifact@v4
         if: matrix.preset == 'linux-gcc-release'
         with:
@@ -74,6 +113,11 @@ jobs:
           python3 -m pip install lasio dlisio dliswriter
           git clone --depth 1 https://github.com/kinverarity1/lasio.git lasio-src
           python3 tests/tools/welldata_crosscheck.py build/linux-gcc-release/apps/stratonix/stratonix lasio-src/tests/examples crosscheck_report/welldata
+      # Stage 4C: the SEG-Y reader against segyio on files segyio writes and on the example volume
+      - name: SEG-Y against segyio
+        run: |
+          python3 -m pip install segyio
+          python3 tests/tools/segy_crosscheck.py build/linux-gcc-release/apps/stratonix/stratonix examples/data/time_depth/volume_twt.sgy crosscheck_report/segy
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -125,10 +169,31 @@ jobs:
           export LD_LIBRARY_PATH=$PWD/fesapi-install/lib:$PWD/fesapi-install/lib64:$LD_LIBRARY_PATH
           build/linux-gcc-release/apps/stratonix/stratonix export examples/fault_system_relay_splay.yaml -o resqml_out --formats grdecl,resqml
           build/linux-gcc-release/tests/test_v3_grids G12
-      - name: Read back with resqpy
+      # Stage 4C (STX-TN-16 section 4, I-034): the RESQML 2.0.1 schemas belong to Energistics and are
+      # never committed; the owner supplies them to CI as a zip URL in the secret STX_RESQML_XSD_URL.
+      # Without it every export reports "not validated: schemas not supplied", never a pass.
+      - name: RESQML schemas (owner-supplied)
+        env:
+          XSD_URL: ${{ secrets.STX_RESQML_XSD_URL }}
+        run: |
+          if [ -n "$XSD_URL" ]; then
+            mkdir -p "$RUNNER_TEMP/resqml_xsd" && curl -fsSL "$XSD_URL" -o "$RUNNER_TEMP/resqml_xsd.zip"
+            unzip -q "$RUNNER_TEMP/resqml_xsd.zip" -d "$RUNNER_TEMP/resqml_xsd"
+            echo "STX_RESQML_XSD_DIR=$RUNNER_TEMP/resqml_xsd" >> "$GITHUB_ENV"
+            echo "STX_RESQML_XSD_REQUIRED=1" >> "$GITHUB_ENV"
+          fi
+      - name: Read back with resqpy and validate against the schemas
         run: |
           python3 -m pip install --upgrade pip && python3 -m pip install resqpy lxml
+          export LD_LIBRARY_PATH=$PWD/fesapi-install/lib:$PWD/fesapi-install/lib64:$LD_LIBRARY_PATH
           python3 tests/tools/resqml_roundtrip.py resqml_out/exports
+          echo "### RESQML exports of the synthetic examples" >> "$GITHUB_STEP_SUMMARY"
+          echo "- fault_system_relay_splay: $(cat resqml_out/exports/xsd_status.txt)" >> "$GITHUB_STEP_SUMMARY"
+          for ex in rift_inversion_history salt_sheet_drape polygonal_faults injectite_complex; do
+            build/linux-gcc-release/apps/stratonix/stratonix export examples/$ex.yaml -o resqml_$ex --formats grdecl,resqml
+            python3 tests/tools/resqml_roundtrip.py resqml_$ex/exports
+            echo "- $ex: $(cat resqml_$ex/exports/xsd_status.txt)" >> "$GITHUB_STEP_SUMMARY"
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -148,9 +213,62 @@ jobs:
         with: {fetch-depth: 0}
       # The vcpkg baseline is pinned in vcpkg.json once a networked run has produced it:
       #   vcpkg x-update-baseline --add-initial-baseline   (commit the result)
+      # Stage 4C (STX-TN-16 section 4): the Release build (packaged) carries the RESQML exporter
+      # (FESAPI built from source against vcpkg's HDF5, minizip and Boost, cached), PROJ and SQLite
+      - name: FESAPI revision
+        if: matrix.config == 'Release'
+        id: fesapi
+        shell: bash
+        run: |
+          echo "sha=$(git ls-remote https://github.com/F2I-Consulting/fesapi.git HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "vcpkg=$(git -C C:/vcpkg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        if: matrix.config == 'Release'
+        id: fesapi-cache
+        with:
+          path: |
+            fesapi-install
+            C:/vcpkg/installed
+          key: fesapi-${{ steps.fesapi.outputs.sha }}-vcpkg-${{ steps.fesapi.outputs.vcpkg }}-windows-2022
+      - name: Build FESAPI
+        if: matrix.config == 'Release' && steps.fesapi-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          C:/vcpkg/vcpkg.exe install --classic --triplet x64-windows hdf5 minizip boost-uuid zlib
+          git clone --depth 1 https://github.com/F2I-Consulting/fesapi.git fesapi-src
+          cmake -S fesapi-src -B fesapi-build -G "Visual Studio 17 2022" -A x64 \
+                -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-windows \
+                -DMINIZIP_ROOT=C:/vcpkg/installed/x64-windows -DCMAKE_INSTALL_PREFIX=$PWD/fesapi-install \
+                -DWITH_EXAMPLE=OFF -DWITH_JAVA_WRAPPING=OFF -DWITH_PYTHON_WRAPPING=OFF -DWITH_DOTNET_WRAPPING=OFF
+          cmake --build fesapi-build --config Release --parallel
+          cmake --install fesapi-build --config Release
+          cp fesapi-src/LICENSE fesapi-install/LICENSE
+          find fesapi-install -name "*.dll" -o -name "*.lib" | head
+      - uses: actions/cache/save@v4
+        if: matrix.config == 'Release' && steps.fesapi-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            fesapi-install
+            C:/vcpkg/installed
+          key: fesapi-${{ steps.fesapi.outputs.sha }}-vcpkg-${{ steps.fesapi.outputs.vcpkg }}-windows-2022
+      - name: FESAPI licence text (shipped with its library)
+        if: matrix.config == 'Release'
+        shell: bash
+        run: test -f fesapi-install/LICENSE || curl -fsSL https://raw.githubusercontent.com/F2I-Consulting/fesapi/${{ steps.fesapi.outputs.sha }}/LICENSE -o fesapi-install/LICENSE
+      - name: FESAPI and its dependencies on the PATH (tests in the build tree)
+        if: matrix.config == 'Release'
+        shell: bash
+        run: |
+          echo "$GITHUB_WORKSPACE/fesapi-install/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/fesapi-install/lib" >> "$GITHUB_PATH"
+          echo "C:/vcpkg/installed/x64-windows/bin" >> "$GITHUB_PATH"
       - name: Configure (MSVC + vcpkg)
         if: ${{ !(startsWith(github.ref, 'refs/tags/v') && matrix.config == 'Debug') }}
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -DX_VCPKG_APPLOCAL_DEPS_INSTALL=ON
+        shell: bash
+        run: >-
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+          -DVCPKG_TARGET_TRIPLET=x64-windows -DX_VCPKG_APPLOCAL_DEPS_INSTALL=ON
+          ${{ matrix.config == 'Release' && format('"-DVCPKG_MANIFEST_FEATURES=proj;sqlite" -DSTRATONIX_WITH_PROJ=ON -DSTRATONIX_WITH_FESAPI=ON -DFESAPI_ROOT={0}/fesapi-install -DSTRATONIX_RUNTIME_DIRS=C:/vcpkg/installed/x64-windows/bin', github.workspace) || '' }}
       - name: Build
         if: ${{ !(startsWith(github.ref, 'refs/tags/v') && matrix.config == 'Debug') }}
         run: cmake --build build --config ${{ matrix.config }} --parallel
@@ -170,6 +288,11 @@ jobs:
           $env:PATH = "C:/Windows/System32;C:/Windows"
           & $exe.FullName version
           & $exe.FullName validate examples/synthetic_fold_two_faults.yaml
+          # the package carries the RESQML exporter and writes a grid with it
+          $v = & $exe.FullName version | Out-String
+          if ($v -notmatch "RESQML 2.0.1 export \(FESAPI\): included") { throw "the package does not include the RESQML exporter" }
+          & $exe.FullName export examples/fault_system_relay_splay.yaml -o C:/stx_resqml --formats resqml
+          if (-not (Get-ChildItem C:/stx_resqml -Recurse -Filter *.epc)) { throw "no RESQML file written" }
       - uses: actions/upload-artifact@v4
         if: matrix.config == 'Release'
         with:

@@ -24,7 +24,9 @@
 #include "stratonix/engines/timedepth.hpp"
 #include "stratonix/io/maps.hpp"
 #include "stratonix/io/seismic.hpp"
+#include "stratonix/io/velocity.hpp"
 #include "stratonix/io/welldata.hpp"
+#include "stratonix/package/uncertainty.hpp"
 #include "stratonix/repr/upscale.hpp"
 
 using namespace stratonix;
@@ -672,6 +674,91 @@ TEST_CASE("D18 velocity and pick uncertainty reported separately") {
   CHECK(std::fabs(s.pick_sd - pick) / pick < 0.05);
   CHECK(std::fabs(s.total_sd * s.total_sd - (s.velocity_sd * s.velocity_sd + s.pick_sd * s.pick_sd)) /
             (s.total_sd * s.total_sd) < 0.05);
+}
+
+TEST_CASE("D17b ensemble: depth spread from a known velocity error against the analytical value") {
+  // one layer, v0 stated (no well ties) with sd 60 m/s over the whole model, base at 800 ms two-way
+  const fs::path dir = tmp("d17b");
+  fs::create_directories(dir);
+  std::string irap = "-996 21 100 100\n0 2000 0 2000\n21 0 0 0\n0 0 0 0 0 0 0\n";
+  for (int k = 0; k < 21 * 21; ++k) irap += "800" + std::string((k % 6 == 5) ? "\n" : " ");
+  write_text(dir / "h1.irap", irap + "\n");
+  const std::string yaml = std::string("stratonix_schema: 1\nmodel: {name: t, version: \"1.0.0\", status: DESIGN}\n") +
+      "crs: {name: local, epsg: 0, vertical_datum: datum, length_unit: m}\n"
+      "domain: {origin: \"[0, 0] m | user_instruction | t\", size: \"[2000, 2000] m | user_instruction | t\", "
+      "depth_range: \"[0, 2500] m | user_instruction | t\", grid_spacing: \"100 m | user_instruction | t\"}\n"
+      "inputs: [{id: H1_T, path: h1.irap, role: horizon in time, sharing: shareable, source: t, evidence: interpreted}]\n"
+      "stratigraphy: {reference: {point: \"[1000, 1000] m | user_instruction | t\"}, horizons: [{name: H1, surface: {input: H1_T, format: irap_ascii, z_is: twt_ms}}, "
+      "{name: H2, thickness_above: \"200 m | user_instruction | t\"}], units: [{name: U, top: H1, base: H2}]}\n"
+      "structure: {regional: {type: flat}}\n"
+      "velocity_model: {layers: [{name: L1, base: H1, v0: \"2000 m/s | assumed | t\", k: \"0.5 1/s | assumed | t\"}]}\n"
+      "uncertainty: {members: \"2000 ordinal | user_instruction | t\", seed: \"17 ordinal | user_instruction | t\", interpretation: {velocity: [{layer: L1, v0_sigma: \"60 m/s | assumed | t\"}]}}\n";
+  desc::Description d;
+  auto rep = desc::validate_description_text(yaml, dir, &d);
+  for (auto& i : rep.issues) std::printf("  %s %s %s\n", i.rule.c_str(), i.path.c_str(), i.message.c_str());
+  REQUIRE(rep.ok());
+  const auto spec = unc::ensemble_spec(d);
+  CHECK(spec.interpretation.size() == 1);
+  const auto members = unc::sample_members(spec);
+  const desc::Node base = desc::parse_document(yaml);
+  std::vector<double> z;
+  for (auto& m : members) {
+    if (m.index == 0) continue;
+    desc::Description dm;
+    auto r = desc::validate_description_text(desc::to_json(unc::member_document(base, spec, m)), dir, &dm);
+    REQUIRE(r.ok());
+    auto vb = io::velocity_build(dm);
+    z.push_back(vb.depth_grids.at("H1_T").sample(1000, 1000));
+  }
+  double mu = 0, sd = 0;
+  for (double x : z) mu += x;
+  mu /= static_cast<double>(z.size());
+  for (double x : z) sd += (x - mu) * (x - mu);
+  sd = std::sqrt(sd / static_cast<double>(z.size() - 1));
+  const double t = 0.4, expect = 60.0 * std::expm1(0.5 * t) / 0.5;  // one-way 0.4 s
+  std::printf("  %zu members: sd %.3f m, analytical %.3f m, mean %.2f m (base %.2f m)\n", z.size(), sd, expect, mu, 2000.0 * std::expm1(0.5 * t) / 0.5);
+  CHECK(z.size() == 2000);
+  CHECK(std::fabs(sd - expect) / expect < 0.03);  // STX-TN-16 section 3: 3 % at 2000 members
+}
+
+TEST_CASE("D17c correlated error: unit variance, correlation at L, zero at conditioning wells") {
+  // covariance exp(-(r/L)^2): at r = L the correlation is 1/e
+  const std::size_t n = 120;
+  const double h = 50, L = 1000;
+  double v0 = 0, cL = 0;
+  std::size_t cnt = 0;
+  for (std::uint64_t s = 1; s <= 40; ++s) {
+    auto f = correlated_field(n, n, h, h, 2.0, L, s);
+    for (std::size_t j = 10; j < n - 30; j += 7)
+      for (std::size_t i = 10; i < n - 30; i += 7) {
+        const double a = f[j * n + i], b = f[j * n + i + 20];  // 20 nodes = 1000 m
+        v0 += a * a;
+        cL += a * b;
+        ++cnt;
+      }
+  }
+  v0 /= static_cast<double>(cnt);
+  cL /= static_cast<double>(cnt);
+  std::printf("  variance %.3f (expect 4), correlation at L %.3f (expect %.3f)\n", v0, cL / v0, std::exp(-1.0));
+  CHECK(std::fabs(v0 - 4.0) / 4.0 < 0.1);
+  CHECK(std::fabs(cL / v0 - std::exp(-1.0)) < 0.06);
+  // conditioning: zero at the wells, unchanged far from them
+  auto f = correlated_field(n, n, h, h, 2.0, L, 99), g = f;
+  const std::vector<std::pair<double, double>> pts = {{30, 30}, {60.5, 45.25}, {90, 90}};
+  condition_field(g, n, n, h, h, L, pts);
+  for (auto& [u, v] : pts) {
+    const std::size_t i = static_cast<std::size_t>(u), j = static_cast<std::size_t>(v);
+    CHECK(std::fabs(g[j * n + i]) < 0.3);  // the node beside the well
+  }
+  CHECK(std::fabs(g[30 * n + 30]) < 1e-2);  // a well on a node
+  CHECK(std::fabs(g[110 * n + 5] - f[110 * n + 5]) < 1e-3);  // 5 L away
+  // whole-model error: conditioning by any well removes it
+  auto c = correlated_field(n, n, h, h, 2.0, 0.0, 5);
+  CHECK(std::fabs(c[0] - c[n * n - 1]) < 1e-12);
+  condition_field(c, n, n, h, h, 0.0, {{40, 40}});
+  CHECK(std::fabs(c[7]) < 1e-4);
+  // the stream is the same on every platform for a seed
+  CHECK(std::fabs(seeded_normal(1, 0) - seeded_normal(1, 0)) == 0);
 }
 
 STX_TEST_MAIN()

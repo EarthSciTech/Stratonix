@@ -11,6 +11,7 @@ namespace stratonix {
 enum class Dimension { Length, Angle, Dimensionless, Ordinal, Flag, Area, InverseLength, Time, Pressure, PressureGradient, Permeability,
                        Density, Acceleration, MagneticField,  ///< stage 4A: kg/m3, mGal, nT
                        Temperature, ThermalConductivity, HeatFlow, HeatProduction, Viscosity,  ///< stage 4B: degC, W/m/K, mW/m2, uW/m3, mPa.s
+                       Velocity, VelocityGradient, TravelTime,  ///< stage 4C: m/s, 1/s, ms (seismic travel time, not geological age)
                        Any };
 
 struct UnitDef {

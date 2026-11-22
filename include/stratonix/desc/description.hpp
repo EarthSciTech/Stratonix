@@ -1,6 +1,7 @@
 /// @file description.hpp
 /// @brief Typed, validated model description (schema version 1) with evidence on every parameter.
 #pragma once
+#include <cstdint>
 #include <array>
 #include <filesystem>
 #include <string>
@@ -43,7 +44,12 @@ struct Param {
 };
 
 struct ModelMeta { std::string name, version, status, title, description, contact; };
-struct InputDesc { std::string id, path, role, sharing, source, evidence; std::filesystem::path resolved; };
+struct InputDesc {
+  std::string id, path, role, sharing, source, evidence;
+  std::filesystem::path resolved;
+  CrsInfo crs;            ///< stage 4C (F46): the input's CRS when it states one
+  bool has_crs = false;
+};
 struct CompletionDesc { std::string name; Param top, base; };  ///< depths positive down
 /// Stage 4C (STX-TN-16 section 1): log files of a well, read as delivered.
 struct WellLogDesc { std::string file, frame, index; std::vector<std::string> curves; std::filesystem::path resolved; };
@@ -59,6 +65,7 @@ struct WellDesc {
   std::vector<std::array<double, 3>> survey;  ///< md (m), inclination and azimuth (rad), from stations or the file
   std::vector<WellLogDesc> logs;
   std::vector<WellAgeDesc> ages;
+  std::vector<std::pair<std::string, Param>> tops_twt;  ///< stage 4C: two-way times of the tops (calibration)
   std::vector<std::pair<std::string, Param>> tops;  ///< horizon name -> depth (positive down)
   Param top_uncertainty;           ///< stage 3A: uncertainty of the tops (m)
   std::vector<CompletionDesc> completions;
@@ -67,6 +74,8 @@ struct HorizonDesc {
   std::string name;
   Param depth, thickness_above;
   std::string surface_input, surface_format, surface_z_is = "depth";
+  /// stage 4C (STX-TN-16 section 3): one realisation of the pick uncertainty of a surface in time
+  struct PickPerturbation { bool present = false; Param sigma, correlation_length; std::uint64_t seed = 0; } surface_perturbation;
   std::string iso_from, iso_input, iso_format;
   Param iso_thickness;
   Param age;                       ///< stage 2D: optional age (Ma) for burial-history axes
@@ -357,8 +366,13 @@ struct ScenarioOptionDesc { std::string name; Param weight; std::vector<std::pai
 struct ScenarioDesc { std::string name; std::vector<ScenarioOptionDesc> options; };
 struct ProbabilityMapDesc { std::string kind, unit, horizon; Param depth, spacing; };
 struct CorrelationDesc { std::string a, b; Param rho; };
+/// stage 4C (STX-TN-16 section 3): pick and velocity uncertainty carried into depth
+struct PickUncertaintyDesc { std::string horizon; Param sigma, correlation_length; };
+struct VelocityUncertaintyDesc { std::string layer; Param v0_sigma, k_sigma, correlation_length; };
 struct UncertaintyDesc {
   bool present = false;
+  std::vector<PickUncertaintyDesc> picks;
+  std::vector<VelocityUncertaintyDesc> velocity;
   Param members, seed;
   std::vector<UncertainParamDesc> parameters;
   std::vector<CorrelationDesc> correlations;
@@ -381,6 +395,29 @@ struct Description {
   std::vector<InputDesc> inputs;
   std::vector<WellDesc> wells;
   std::string correlation_rule;  ///< stage 4C: well_correlation.rule ("" when not given)
+  /// stage 4C (STX-TN-16 section 2.3, decision 23): layer-cake velocity model
+  /// one realisation of a layer's velocity uncertainty (STX-TN-16 section 3; written by the ensemble)
+  struct VelocityPerturbation { bool present = false; Param v0_sigma, k_sigma, correlation_length; std::uint64_t seed = 0; };
+  struct VelocityLayer { std::string name, base; Param v0, k; bool fit_k = false; VelocityPerturbation perturbation; };
+  struct VelocityModelDesc {
+    bool present = false;
+    std::vector<VelocityLayer> layers;
+    std::string interpolation = "inverse_distance";
+    std::vector<std::pair<std::string, std::string>> exclude;  ///< well, reason
+    Param tolerance;
+  } velocity;
+  /// stage 4C: a SEG-Y volume for sampling and display
+  struct SeismicDesc { bool present = false; std::string input, domain; int il = 0, xl = 0, x = 0, y = 0; } seismic;
+  /// stage 4C (section 2.5): a model from a geological map
+  struct MapSource { std::string input, format, layer, field; };
+  struct GeologicalMapDesc {
+    bool present = false;
+    MapSource units, faults, measurements;
+    std::vector<std::pair<std::string, std::string>> unit_order;  ///< map unit -> base horizon, youngest first
+    std::string dip_field, direction_field, convention, filter_field, filter_value, source, date;
+    std::string dem_input, dem_format;
+    Param sample_spacing;
+  } geological_map;
   std::string ref_well;
   Param ref_point;
   std::vector<HorizonDesc> horizons;

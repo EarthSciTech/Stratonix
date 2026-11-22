@@ -8,6 +8,8 @@
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/util.hpp"
 #include "stratonix/io/io.hpp"
+#include "stratonix/io/maps.hpp"
+#include "stratonix/io/velocity.hpp"
 
 // Plugin anchors called below (C linkage, defined by STRATONIX_REGISTER in each plugin file).
 STRATONIX_DECLARE_PLUGIN_ANCHOR(imp_irap_ascii);
@@ -206,6 +208,11 @@ void load_build_inputs(const desc::Description& d, BuildInputs& in) {
     if (!data.grid) throw Error(ErrorCode::Build, "input '" + id + "' did not contain a grid");
     in.grids[id] = std::move(*data.grid);
   };
+  // stage 4C: horizons in two-way time, converted to depth by the velocity model
+  if (d.velocity.present) {
+    auto vb = velocity_build(d);
+    for (auto& [id, g] : vb.depth_grids) in.grids[id] = g;
+  }
   for (auto& h : d.horizons) {
     load(h.surface_input, h.surface_format);
     load(h.iso_input, h.iso_format);
@@ -223,7 +230,24 @@ void load_build_inputs(const desc::Description& d, BuildInputs& in) {
   for (auto* g : {&d.geophysics.gravity, &d.geophysics.magnetics})
     if (!g->input.empty() && std::none_of(all_data.begin(), all_data.end(), [&](const desc::ImplicitData& y) { return y.input == g->input; }))
       all_data.push_back({g->input, "stations", g->format.empty() ? std::string("csv_stations") : g->format, "", desc::Param{}});
+  // stage 4C: a geological map's contacts and measurements
+  if (d.geological_map.present) {
+    const ModelData md = geological_map_data(d);
+    auto& c = in.data["geological_map:contacts"];
+    for (auto& [h, p] : md.contact_points) { DataPoint dp; dp.p = p; dp.label = h; c.push_back(dp); }
+    auto& o = in.data["geological_map:orientations"];
+    for (auto& m : md.orientations) {
+      DataPoint dp;
+      dp.p = m.p;
+      dp.n = {std::sin(m.dip) * std::sin(m.azimuth), std::sin(m.dip) * std::cos(m.azimuth), std::cos(m.dip)};
+      dp.oriented = true;
+      dp.label = m.horizon;
+      o.push_back(dp);
+    }
+    if (c.empty()) throw Error(ErrorCode::Build, "the geological map gives no contact points (check unit_order against the map's unit field)");
+  }
   for (auto& x : all_data) {
+    if (x.format == "geological_map") continue;
     auto data = reg.create<Importer>(registry::Kind::Importer, x.format)->read(input_of(x.input)->resolved);
     if (data.z_is == "depth")
       for (auto& p : data.points) p.z = -p.z;

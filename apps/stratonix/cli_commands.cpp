@@ -11,8 +11,10 @@
 #include "stratonix/core/util.hpp"
 #include "stratonix/desc/description.hpp"
 #include "stratonix/engines/foldframe.hpp"
+#include "stratonix/io/export.hpp"
 #include "stratonix/io/io.hpp"
 #include "stratonix/io/welldata.hpp"
+#include "stratonix/io/seismic.hpp"
 #include "stratonix/model/model_suite.hpp"
 #include "stratonix/package/bench.hpp"
 #include "stratonix/package/delivery.hpp"
@@ -219,6 +221,29 @@ int cmd_read_log(Args& a) {
   }
   return 0;
 }
+int cmd_read_seismic(Args& a) {
+  if (a.positional().empty() || !a.has("o")) throw Error(ErrorCode::InvalidArgument, "usage: stratonix read-seismic <file.sgy> -o <traces.csv>");
+  const std::filesystem::path in = a.positional()[0], out = a.get("o");
+  const auto v = io::read_segy(in);
+  // one row per trace: inline, crossline, x, y, then the samples as read
+  std::string t = "inline,crossline,x,y";
+  for (std::size_t i = 0; i < v.samples; ++i) t += ",s" + std::to_string(i);
+  t += "\n";
+  for (auto& tr : v.traces) {
+    t += std::to_string(tr.il) + "," + std::to_string(tr.xl) + "," + fmt_shortest(tr.x) + "," + fmt_shortest(tr.y);
+    for (float s : tr.s) t += "," + fmt_shortest(static_cast<double>(s));
+    t += "\n";
+  }
+  std::ofstream(out, std::ios::binary) << t;
+  std::string r = v.source + "\nrevision " + std::to_string(v.revision) + ", format " + std::to_string(v.format) + (v.little_endian ? ", little-endian" : ", big-endian") +
+                  ", " + std::to_string(v.traces.size()) + " traces, " + std::to_string(v.samples) + " samples, interval " + fmt_shortest(v.dt) + "\n";
+  for (auto& line : v.report) r += line + "\n";
+  std::filesystem::path rf = out;
+  rf.replace_extension(".report.txt");
+  std::ofstream(rf, std::ios::binary) << r;
+  std::cout << "SEG-Y revision " << v.revision << " format " << v.format << ": " << v.traces.size() << " traces of " << v.samples << " samples -> " << out.string() << "\n";
+  return 0;
+}
 int cmd_plugins(Args&) {
   for (auto* e : registry::Registry::global().all())
     std::cout << registry::kind_name(e->kind) << "  " << e->name << "  " << e->version << "  " << e->description << "\n";
@@ -251,6 +276,8 @@ int cmd_version(Args&) {
   std::cout << "stratonix " << b.version << "\ncommit " << b.git_commit << "\ncompiler " << b.compiler
             << "\nplatform " << b.platform << "\nbuild " << b.build_type << "\nschema " << desc::kSchemaVersion
             << "\nreprojection " << (crs_reprojection_available() ? "PROJ" : "not available (built without PROJ)") << "\n";
+  std::cout << "optional components:\n";
+  for (auto& c : io::optional_components()) std::cout << "  " << c << "\n";
   return 0;
 }
 

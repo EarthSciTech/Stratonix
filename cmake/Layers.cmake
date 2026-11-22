@@ -57,8 +57,19 @@ add_library(stratonix_io STATIC
   src/io/welldata.cpp
   src/io/seismic.cpp
   src/io/maps.cpp
+  src/io/velocity.cpp
   src/io/register.cpp)
 target_link_libraries(stratonix_io PUBLIC stratonix_engines stratonix_repr)
+if(STRATONIX_WITH_SQLITE)
+  find_package(SQLite3)
+  if(SQLite3_FOUND)
+    target_link_libraries(stratonix_io PRIVATE SQLite::SQLite3)
+    target_compile_definitions(stratonix_io PRIVATE STRATONIX_HAVE_SQLITE=1)
+    message(STATUS "GeoPackage maps: SQLite ${SQLite3_VERSION}")
+  else()
+    message(STATUS "GeoPackage maps: SQLite not found (shapefiles and GeoJSON are read)")
+  endif()
+endif()
 if(STRATONIX_WITH_FESAPI)
   target_sources(stratonix_io PRIVATE src/io/resqml_fesapi.cpp)
   target_link_libraries(stratonix_io PRIVATE stx::fesapi)

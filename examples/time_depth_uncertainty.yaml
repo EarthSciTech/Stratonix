@@ -1,0 +1,92 @@
+# Stage 4C example (STX-TN-16 section 3): the time_depth_conversion model with its interpretation
+# uncertainty carried into depth by an ensemble - pick errors on the horizons in time and v0 errors
+# between the wells (each member draws a correlated field, conditioned to vanish at the calibration
+# wells). depth_variance_split.csv reports the depth variance from the conversion and from the
+# structure separately. The base description follows.
+#
+# Stage 4C example (STX-TN-16 section 2.3, decision 23): a model built from interpretation in time.
+# - Three horizons picked in two-way time (IRAP grids in ms) and converted to depth by a layer-cake
+#   velocity model v(z) = v0 + k z, with k stated per layer and v0 calibrated at four wells from their
+#   tops in depth and time; v0 is interpolated between the wells by inverse distance squared.
+# - W5 is excluded from the calibration and kept as a blind check (C36 reports its residual).
+# - A SEG-Y revision 2.0 volume in time is drawn in depth along the section with the model over it.
+# DESIGN model: the inputs are synthetic (tools/make_time_depth_example.py): a dome over 4 km with
+# a laterally varying velocity in the middle layer, so the calibration has something to recover.
+stratonix_schema: 1
+model: {name: time_depth_uncertainty, version: "1.0.0", status: DESIGN,
+        title: "A model from horizons in time, depth-converted against wells"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0; seismic time zero at the datum", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[4000, 4000] m | user_instruction | worked example"
+  depth_range: "[0, 2200] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+inputs:
+  - {id: H1_T, path: data/time_depth/H1_twt_ms.irap, role: horizon in time, sharing: shareable, source: "synthetic interpretation, tools/make_time_depth_example.py", evidence: interpreted}
+  - {id: H2_T, path: data/time_depth/H2_twt_ms.irap, role: horizon in time, sharing: shareable, source: "synthetic interpretation", evidence: interpreted}
+  - {id: H3_T, path: data/time_depth/H3_twt_ms.irap, role: horizon in time, sharing: shareable, source: "synthetic interpretation", evidence: interpreted}
+  - {id: SEIS, path: data/time_depth/volume_twt.sgy, role: seismic volume, sharing: shareable, source: "synthetic SEG-Y, tools/make_time_depth_example.py", evidence: interpreted}
+wells:
+  - name: W1
+    role: check
+    head: "[2000, 2000] m | user_instruction | worked example: crest of the dome"
+    tops: {H1: "750.00 m | measured | worked example (synthetic)", H2: "1125.00 m | measured | worked example (synthetic)", H3: "1575.00 m | measured | worked example (synthetic)"}
+    tops_twt: {H1: "762.81 ms | interpreted | worked example: well tie", H2: "1035.60 ms | interpreted | worked example", H3: "1313.62 ms | interpreted | worked example"}
+  - name: W2
+    role: check
+    head: "[800, 900] m | user_instruction | worked example"
+    tops: {H1: "853.81 m | measured | worked example (synthetic)", H2: "1213.81 m | measured | worked example (synthetic)", H3: "1663.81 m | measured | worked example (synthetic)"}
+    tops_twt: {H1: "855.86 ms | interpreted | worked example", H2: "1118.36 ms | interpreted | worked example", H3: "1394.49 ms | interpreted | worked example"}
+  - name: W3
+    role: check
+    head: "[3300, 1000] m | user_instruction | worked example"
+    tops: {H1: "854.62 m | measured | worked example (synthetic)", H2: "1245.87 m | measured | worked example (synthetic)", H3: "1695.87 m | measured | worked example (synthetic)"}
+    tops_twt: {H1: "856.58 ms | interpreted | worked example", H2: "1131.81 ms | interpreted | worked example", H3: "1407.26 ms | interpreted | worked example"}
+  - name: W4
+    role: check
+    head: "[1200, 3400] m | user_instruction | worked example"
+    tops: {H1: "852.77 m | measured | worked example (synthetic)", H2: "1217.77 m | measured | worked example (synthetic)", H3: "1667.77 m | measured | worked example (synthetic)"}
+    tops_twt: {H1: "854.95 ms | interpreted | worked example", H2: "1119.59 ms | interpreted | worked example", H3: "1395.63 ms | interpreted | worked example"}
+  - name: W5
+    role: check
+    head: "[3000, 3100] m | user_instruction | worked example: blind well"
+    tops: {H1: "843.83 m | measured | worked example (synthetic)", H2: "1231.33 m | measured | worked example (synthetic)", H3: "1681.33 m | measured | worked example (synthetic)"}
+    tops_twt: {H1: "847.03 ms | interpreted | worked example", H2: "1121.19 ms | interpreted | worked example", H3: "1396.95 ms | interpreted | worked example"}
+stratigraphy:
+  reference: {point: "[2000, 2000] m | user_instruction | worked example: the surfaces carry the depths"}
+  horizons:
+    - {name: H1, surface: {input: H1_T, format: irap_ascii, z_is: twt_ms}}
+    - {name: H2, surface: {input: H2_T, format: irap_ascii, z_is: twt_ms}}
+    - {name: H3, surface: {input: H3_T, format: irap_ascii, z_is: twt_ms}}
+  units:
+    - {name: Unit_A, top: H1, base: H2}
+    - {name: Unit_B, top: H2, base: H3}
+structure:
+  regional: {type: flat}
+velocity_model:
+  layers:
+    - {name: overburden, base: H1, v0: "1800 m/s | assumed | worked example: used only where no well ties", k: "0.6 1/s | literature_derived | worked example: compaction gradient of a shale-dominated overburden"}
+    - {name: middle, base: H2, v0: "2300 m/s | assumed | worked example", k: "0.4 1/s | assumed | worked example"}
+    - {name: lower, base: H3, v0: "2900 m/s | assumed | worked example", k: "0.25 1/s | assumed | worked example"}
+  calibration:
+    interpolation: inverse_distance
+    exclude: [{well: W5, reason: "kept out of the calibration as a blind check"}]
+  tolerance: "10 m | user_instruction | worked example: the blind well W5 misses by about 6 m because inverse distance does not reproduce the lateral velocity trend of the middle layer"
+seismic:
+  input: SEIS
+  domain: time
+outputs:
+  sections:
+    - name: XS_W2_W5
+      polyline: "[[800, 900], [2000, 2000], [3000, 3100]] m | user_instruction | worked example: through the dome and the blind well"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [csv]
+uncertainty:
+  members: "40 ordinal | user_instruction | worked example: ensemble size (the analytical test uses 2000)"
+  seed: "20261122 ordinal | user_instruction | worked example: recorded in the manifest"
+  interpretation:
+    picks:
+      - {horizon: H1, sigma: "6 ms | assumed | worked example: picking error of a continuous reflector", correlation_length: "1500 m | assumed | worked example"}
+      - {horizon: H3, sigma: "10 ms | assumed | worked example: a weaker reflector", correlation_length: "1000 m | assumed | worked example"}
+    velocity:
+      - {layer: middle, v0_sigma: "80 m/s | assumed | worked example: lateral velocity trend not captured by inverse distance", correlation_length: "2000 m | assumed | worked example"}

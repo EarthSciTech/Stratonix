@@ -103,6 +103,10 @@ struct CorrelationPanel {
   std::string note;                                 ///< the correlation rule, shown under the title
 };
 Figure correlation_figure(const FigureContext& c, const CorrelationPanel& p);
+/// Stage 4C (STX-TN-16 section 2.2): seismic amplitude along a section, in depth through the stated
+/// velocity model, with the model's horizons and faults drawn over it. `amp` is s.nz x s.ns, rows
+/// from the section's top (NaN outside the volume).
+Figure seismic_section_figure(const FigureContext& c, const repr::Section& s, const std::vector<float>& amp, const std::string& how);
 /// The burial curves coloured by a field between consecutive horizons and steps (stage 4B).
 Figure burial_field_figure(const FigureContext& c, const FigureContext::Burial& b, const FigureContext::Burial::Field& fd);
 /// Isopach map of a unit (stage 2C): vertical thickness per fault block, with its termination lines.

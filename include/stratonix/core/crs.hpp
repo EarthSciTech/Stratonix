@@ -41,6 +41,7 @@ class CrsTransform {
  private:
   CrsOperation op_;
   void* pj_ = nullptr;
+  void* ctx_ = nullptr;
 };
 
 }  // namespace stratonix

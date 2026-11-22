@@ -141,6 +141,21 @@
           },
           "evidence": {
             "$ref": "#/$defs/evidence"
+          },
+          "crs": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "epsg": {
+                "type": "integer"
+              },
+              "wkt": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
           }
         }
       }
@@ -313,6 +328,12 @@
                 }
               }
             }
+          },
+          "tops_twt": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/param"
+            }
           }
         }
       }
@@ -379,8 +400,31 @@
                   "z_is": {
                     "enum": [
                       "depth",
-                      "elevation"
+                      "elevation",
+                      "twt_ms",
+                      "twt_s"
                     ]
+                  },
+                  "perturbation": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "sigma",
+                      "seed"
+                    ],
+                    "description": "one realisation of the pick uncertainty of a surface in time (written by the ensemble for each member, STX-TN-16 section 3)",
+                    "properties": {
+                      "sigma": {
+                        "$ref": "#/$defs/param"
+                      },
+                      "correlation_length": {
+                        "$ref": "#/$defs/param"
+                      },
+                      "seed": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
                   }
                 }
               },
@@ -1427,9 +1471,7 @@
     "implicit": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "data"
-      ],
+      "required": [],
       "properties": {
         "data": {
           "type": "array",
@@ -2416,6 +2458,59 @@
           "items": {
             "type": "string"
           }
+        },
+        "interpretation": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "stage 4C: pick and velocity uncertainty carried into depth (STX-TN-16 section 3)",
+          "properties": {
+            "picks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "horizon",
+                  "sigma"
+                ],
+                "properties": {
+                  "horizon": {
+                    "type": "string"
+                  },
+                  "sigma": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "correlation_length": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              }
+            },
+            "velocity": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "layer"
+                ],
+                "properties": {
+                  "layer": {
+                    "type": "string"
+                  },
+                  "v0_sigma": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "k_sigma": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "correlation_length": {
+                    "$ref": "#/$defs/param"
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -3321,6 +3416,292 @@
             "linear_in_depth",
             "constant_rate_per_unit"
           ]
+        }
+      }
+    },
+    "velocity_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layers"
+      ],
+      "properties": {
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "base",
+              "v0"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              },
+              "v0": {
+                "$ref": "#/$defs/param"
+              },
+              "k": {
+                "$ref": "#/$defs/param"
+              },
+              "fit_k": {
+                "type": "boolean"
+              },
+              "perturbation": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "seed"
+                ],
+                "description": "one realisation of the layer's velocity uncertainty (written by the ensemble for each member, STX-TN-16 section 3)",
+                "properties": {
+                  "v0_sigma": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "k_sigma": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "correlation_length": {
+                    "$ref": "#/$defs/param"
+                  },
+                  "seed": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "calibration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "interpolation": {
+              "enum": [
+                "inverse_distance",
+                "constant"
+              ]
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "well",
+                  "reason"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "well": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tolerance": {
+          "$ref": "#/$defs/param"
+        }
+      }
+    },
+    "seismic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "domain"
+      ],
+      "properties": {
+        "input": {
+          "type": "string"
+        },
+        "domain": {
+          "enum": [
+            "time",
+            "depth"
+          ]
+        },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "inline_byte": {
+              "type": "integer"
+            },
+            "crossline_byte": {
+              "type": "integer"
+            },
+            "x_byte": {
+              "type": "integer"
+            },
+            "y_byte": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "geological_map": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "units",
+        "unit_order",
+        "elevation_model"
+      ],
+      "properties": {
+        "units": {
+          "type": "object",
+          "required": [
+            "input",
+            "format"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "shapefile",
+                "geojson",
+                "geopackage"
+              ]
+            },
+            "layer": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            }
+          }
+        },
+        "faults": {
+          "type": "object",
+          "required": [
+            "input",
+            "format"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "shapefile",
+                "geojson",
+                "geopackage"
+              ]
+            },
+            "layer": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            }
+          }
+        },
+        "unit_order": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "map_unit",
+              "base"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "map_unit": {
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "measurements": {
+          "type": "object",
+          "required": [
+            "input",
+            "format",
+            "dip_field",
+            "direction_field",
+            "convention"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "shapefile",
+                "geojson",
+                "geopackage"
+              ]
+            },
+            "layer": {
+              "type": "string"
+            },
+            "dip_field": {
+              "type": "string"
+            },
+            "direction_field": {
+              "type": "string"
+            },
+            "convention": {
+              "enum": [
+                "dip_direction",
+                "strike_rhr"
+              ]
+            },
+            "filter_field": {
+              "type": "string"
+            },
+            "filter_value": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "date": {
+              "type": "string"
+            }
+          }
+        },
+        "elevation_model": {
+          "type": "object",
+          "required": [
+            "input",
+            "format"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "geotiff",
+                "esri_ascii"
+              ]
+            }
+          }
+        },
+        "sample_spacing": {
+          "$ref": "#/$defs/param"
         }
       }
     }

@@ -15,7 +15,15 @@
   "features": {
     "proj": {
       "description": "Coordinate reprojection with PROJ",
-      "dependencies": ["proj"]
+      "dependencies": [
+        "proj"
+      ]
+    },
+    "sqlite": {
+      "description": "GeoPackage maps through SQLite",
+      "dependencies": [
+        "sqlite3"
+      ]
     }
   }
 }

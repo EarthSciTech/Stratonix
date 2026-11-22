@@ -507,7 +507,13 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
   for (auto& e : d.implicit.data) {
     auto it = in.data.find(e.input);
     if (it == in.data.end()) throw Error(ErrorCode::Build, "implicit data input '" + e.input + "' was not loaded");
-    const auto* inp = inputs.at(e.input);
+    // stage 4C: a geological map's data carry the evidence of the map input
+    const std::string src_id = e.input.rfind("geological_map:", 0) == 0 ? (e.input == "geological_map:orientations" ? d.geological_map.measurements.input
+                                                                                                                       : d.geological_map.units.input)
+                                                                       : e.input;
+    auto inp_it = inputs.find(src_id);
+    if (inp_it == inputs.end()) throw Error(ErrorCode::Build, "input '" + src_id + "' is not listed under inputs");
+    const auto* inp = inp_it->second;
     std::size_t used = 0, with_sigma = 0;
     const bool orient = e.kind == "orientations";
     // input-level uncertainty (m; orientations in degrees)
@@ -647,6 +653,11 @@ ModelPtr build_implicit_model(const desc::Description& d, const BuildInputs& in,
   };
   for (std::size_t h = 0; h < nh; ++h) {
     if (!std::isnan(vals[h])) continue;
+    // stage 4C: a stated stratigraphic column (thickness_above) below a horizon with a value
+    if (h > 0 && d.horizons[h].thickness_above.present && !std::isnan(vals[h - 1])) {
+      vals[h] = vals[h - 1] - d.horizons[h].thickness_above.si();
+      continue;
+    }
     int sr = d.series.empty() ? -1 : d.series_of(static_cast<int>(h));
     for (int a = static_cast<int>(h) - 1; a >= 0 && std::isnan(vals[h]); --a) {
       if ((d.series.empty() ? -1 : d.series_of(a)) != sr || std::isnan(vals[static_cast<std::size_t>(a)])) continue;

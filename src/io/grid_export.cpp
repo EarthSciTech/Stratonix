@@ -5,6 +5,7 @@
 #include <map>
 #include <tuple>
 
+#include "stratonix/core/crs.hpp"
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/util.hpp"
 #include "stratonix/io/export.hpp"
@@ -252,4 +253,24 @@ void register_grid_exporters() {
   STRATONIX_PLUGIN_ANCHOR(exp_resqml);
 }
 
+}  // namespace stratonix::io
+
+namespace stratonix::io {
+std::vector<std::string> optional_components() {
+  std::vector<std::string> c;
+#ifdef STRATONIX_HAVE_FESAPI
+  c.push_back("RESQML 2.0.1 export (FESAPI): included");
+#else
+  c.push_back("RESQML 2.0.1 export (FESAPI): not included");
+#endif
+  c.push_back(std::string("coordinate transformations (PROJ): ") + (crs_reprojection_available() ? "included" : "not included"));
+#ifdef STRATONIX_HAVE_SQLITE
+  c.push_back("GeoPackage maps (SQLite): included");
+#else
+  c.push_back("GeoPackage maps (SQLite): not included");
+#endif
+  c.push_back("LAS 2.0/3.0 and DLIS (RP66 V1) well data: included");
+  c.push_back("SEG-Y revisions 0 to 2.1: included");
+  return c;
+}
 }  // namespace stratonix::io
