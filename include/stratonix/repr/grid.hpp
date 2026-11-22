@@ -33,6 +33,9 @@ struct GridOptions {
   double min_thickness = 0.01;    ///< m; thinner cells are inactive
   std::vector<ZoneSpec> zones;    ///< consecutive model units, top to base
   bool snap_to_faults = true;     ///< fault-conforming pillars
+  /// stage 4D (STX-TN-17 section 2, I-035): lattice nodes moved onto the fault traces, pillars
+  /// along the faults; stair steps only where reported
+  bool follow_fault_traces = false;
 };
 
 /// Corner-point grid in the Eclipse convention: i fastest, then j, then k (k = 0 at the top).
@@ -169,6 +172,7 @@ struct GridDefects {
   std::size_t nonpositive_volume = 0, inverted = 0, fault_face_off = 0, fault_faces = 0;
   double worst_volume = 0, worst_fault_distance = 0;
   std::string first_nonpositive, first_inverted, first_fault_off;
+  std::size_t fallback_faces = 0;  ///< stage 4D: fault faces left as stair steps by a fault-following grid
 };
 /// Defects of C23 (volume), C24 (inversion) and C25 (fault faces within `fault_tol` m).
 GridDefects grid_defects(const Model& m, const CornerPointGrid& g, double fault_tol);

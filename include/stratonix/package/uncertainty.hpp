@@ -156,6 +156,24 @@ struct EnsembleOptions {
   bool figures = true;
   bool base_build = false;  ///< also write the base case's full build into out_dir/base
 };
+// ---- total-effect sensitivity (stage 4D, STX-TN-17 section 3) ---------------------------------
+/// Saltelli (2010) design on k parameters: N base rows of matrices A and B (uniforms in (0, 1)),
+/// run order A, B, then A_B^(i) for i = 1..k: N (k + 2) rows of k uniforms.
+struct SensitivityDesign {
+  std::size_t base = 0, k = 0;
+  std::vector<std::vector<double>> rows;
+};
+SensitivityDesign saltelli_design(std::size_t k, std::size_t base, std::uint64_t seed);
+/// First-order (Saltelli 2010) and total-effect (Jansen 1999) indices with bootstrap percentile
+/// intervals at `level`; y holds one value per design row.
+struct TotalEffectRow {
+  std::string parameter, key;
+  double s1 = 0, st = 0, s1_lo = 0, s1_hi = 0, st_lo = 0, st_hi = 0;
+  std::size_t runs = 0, base = 0, bootstrap = 0;
+  double level = 0;
+};
+std::vector<TotalEffectRow> total_effect_indices(const SensitivityDesign& d, const std::vector<double>& y, const std::vector<std::string>& names,
+                                                 const std::string& key, std::size_t bootstrap, double level, std::uint64_t seed);
 /// Run the ensemble of a description; writes into out_dir when it is not empty.
 EnsembleResult run_ensemble(const std::filesystem::path& description, const std::filesystem::path& out_dir, const EnsembleOptions& o);
 

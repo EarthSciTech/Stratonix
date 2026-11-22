@@ -1071,3 +1071,14 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
 }
 
 }  // namespace stratonix::unc
+
+// ---- total-effect sensitivity (stage 4D, STX-TN-17 section 3): built in Prompt 60 --------------
+namespace stratonix::unc {
+SensitivityDesign saltelli_design(std::size_t, std::size_t, std::uint64_t) {
+  throw Error(ErrorCode::NotImplemented, "saltelli_design: not implemented (stage 4D, Prompt 60)");
+}
+std::vector<TotalEffectRow> total_effect_indices(const SensitivityDesign&, const std::vector<double>&, const std::vector<std::string>&, const std::string&,
+                                                 std::size_t, double, std::uint64_t) {
+  throw Error(ErrorCode::NotImplemented, "total_effect_indices: not implemented (stage 4D, Prompt 60)");
+}
+}  // namespace stratonix::unc

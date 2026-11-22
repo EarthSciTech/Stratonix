@@ -2,6 +2,7 @@
 // horizons (Prompt 38); properties, fault transmissibility, the upscaling interface and
 // tetrahedral grids (Prompt 39).
 #include "stratonix/repr/grid.hpp"
+#include "stratonix/core/error.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -209,6 +210,8 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
   const Domain& d = info.domain;
   if (!(o.dx > 0) || !(o.dy > 0)) throw std::invalid_argument("grid: spacing must be positive");
   if (o.zones.empty()) throw std::invalid_argument("grid: no zones");
+  if (o.follow_fault_traces)
+    throw Error(ErrorCode::NotImplemented, "grid: pillars along fault traces are not implemented (stage 4D, Prompt 60)");
   const int nunits = static_cast<int>(info.units.size());
   for (std::size_t z = 0; z < o.zones.size(); ++z) {
     const auto& zs = o.zones[z];

@@ -1599,3 +1599,20 @@ BuildOutcome run_state(const std::filesystem::path& description, const std::file
 
 // Stage 2F (STX-TN-10): implemented in Prompts 32 and 33.
 }  // namespace stratonix
+
+// ---- speed and scale (stage 4D, STX-TN-17 section 4): built in Prompt 61 ----------------------
+namespace stratonix {
+struct BuildCache {};
+std::shared_ptr<BuildCache> make_build_cache() {
+  throw Error(ErrorCode::NotImplemented, "make_build_cache: not implemented (stage 4D, Prompt 61)");
+}
+BuildOutcome run_build_cached(const std::filesystem::path&, const std::filesystem::path&, const BuildOptions&, BuildCache&) {
+  throw Error(ErrorCode::NotImplemented, "run_build_cached: not implemented (stage 4D, Prompt 61)");
+}
+std::size_t stream_grid(const std::filesystem::path&, const std::filesystem::path&, const GridStreamOptions&) {
+  throw Error(ErrorCode::NotImplemented, "stream_grid: not implemented (stage 4D, Prompt 61)");
+}
+std::vector<std::pair<std::string, std::string>> parallel_build_digest(const std::filesystem::path&, unsigned) {
+  throw Error(ErrorCode::NotImplemented, "parallel_build_digest: not implemented (stage 4D, Prompt 61)");
+}
+}  // namespace stratonix

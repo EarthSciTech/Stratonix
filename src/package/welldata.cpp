@@ -44,7 +44,6 @@ repr::UpscaleMethod upscale_method(const std::string& m) {
 
 WellDataBuild well_data(const desc::Description& d, const Model& m, const repr::CornerPointGrid* grid) {
   WellDataBuild out;
-  const auto& inf = m.info();
   bool any = !d.correlation_rule.empty();
   for (auto& w : d.wells) any = any || !w.logs.empty() || !w.ages.empty() || !w.survey_method.empty();
   if (!any) return out;

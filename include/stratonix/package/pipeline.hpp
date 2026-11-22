@@ -2,6 +2,7 @@
 /// @brief High-level operations shared by the command line and the C API.
 #pragma once
 #include <filesystem>
+#include <memory>
 #include <map>
 #include <string>
 #include <vector>
@@ -31,6 +32,23 @@ struct BuildOutcome {
   bool checks_passed = true;
   std::vector<std::string> written;  ///< files written, relative to the output folder
 };
+
+// ---- speed and scale (stage 4D, STX-TN-17 section 4) -----------------------------------------
+/// Cache shared by builds of descriptions that differ only in some parameters (ensemble members):
+/// per-fault surfaces, the checks' lattices and imported or converted inputs, each keyed by the
+/// hash of what it reads. Cached and uncached builds give the same bytes.
+struct BuildCache;
+std::shared_ptr<BuildCache> make_build_cache();
+/// Build a description into out_dir through a cache (run_build otherwise unchanged).
+BuildOutcome run_build_cached(const std::filesystem::path& description, const std::filesystem::path& out_dir, const BuildOptions& opt,
+                              BuildCache& cache);
+/// Corner-point grid written by layers (k slabs) within a memory limit; returns the peak resident
+/// memory in bytes. The written files equal those of the grid built in memory.
+struct GridStreamOptions { std::size_t memory_limit = 0; std::size_t slab_layers = 0; std::vector<std::string> formats; };
+std::size_t stream_grid(const std::filesystem::path& description, const std::filesystem::path& out_dir, const GridStreamOptions& o);
+/// Parallel interpolation, grid corners and evaluation over fixed partitions written in order:
+/// the bytes of every output file of a build at `threads` threads, by relative path.
+std::vector<std::pair<std::string, std::string>> parallel_build_digest(const std::filesystem::path& description, unsigned threads);
 
 /// Validate, build and check a model, write summary, check report, exports and figures into
 /// `out_dir`, and finish with manifest.json. An existing non-empty output folder is refused, so

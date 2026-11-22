@@ -21,6 +21,7 @@ add_library(stratonix_engines STATIC
   src/engines/thermal.cpp
   src/engines/surveys.cpp
   src/engines/timedepth.cpp
+  src/engines/geostat.cpp
   src/engines/wells.cpp
   src/engines/register.cpp)
 target_link_libraries(stratonix_engines PUBLIC stratonix_model stratonix_desc stratonix_registry)

@@ -43,6 +43,9 @@ has its own version (`stratonix_schema`).
     properties `P32` and `P32_DFN` (realised network intensity per cell), and temperature and
     overpressure are drawn over the burial curves at each well.
 
+- Stage 4D opened (Prompt 58): interfaces for geostatistics (variograms, sequential Gaussian and
+  indicator simulation, object facies), fault-following grids, total-effect sensitivity, build
+  caching, streamed grids and parallel builds; tests S1 to S13 written first (expected to fail).
 - Interpretation uncertainty and interchange (stage 4C, Prompt 57): pick and velocity errors carried
   into depth as seeded correlated fields in every ensemble member (`uncertainty.interpretation`,
   F48), v0 errors conditioned to the calibration wells; velocity parameters as uncertain or
