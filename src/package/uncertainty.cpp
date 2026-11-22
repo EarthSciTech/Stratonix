@@ -821,6 +821,8 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
   const unsigned saved_threads = thread_count();
   const unsigned nt = std::max(1u, std::min<unsigned>(o.threads ? o.threads : saved_threads, static_cast<unsigned>(all.size())));
   set_thread_count(1);  // members in parallel, each single-threaded inside
+  // stage 4D: every member reads the same input files - read once (STX-TN-17 section 4.1)
+  const bool saved_cache = io::set_input_cache(true);
   const LogLevel saved_level = log_level();
   set_log_level(LogLevel::Error);
   std::atomic<std::size_t> next{0};
@@ -839,6 +841,7 @@ EnsembleResult run_ensemble(const fs::path& description, const fs::path& out_dir
   }
   set_log_level(saved_level);
   set_thread_count(saved_threads);
+  io::set_input_cache(saved_cache);
   for (std::size_t k = 0; k < samples.size(); ++k) res.members.push_back(runs[k].r);
   // stage 4A (STX-TN-14 section 6): each member's contact graph against the base case's
   if (runs[0].graph)

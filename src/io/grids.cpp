@@ -7,6 +7,8 @@
 
 #include "stratonix/core/error.hpp"
 #include "stratonix/core/util.hpp"
+#include <mutex>
+#include <memory>
 #include "stratonix/io/io.hpp"
 #include "stratonix/io/maps.hpp"
 #include "stratonix/io/velocity.hpp"
@@ -196,15 +198,13 @@ STRATONIX_REGISTER(imp_xyz, registry::Kind::Importer, "xyz", "1.0.0", "XYZ point
                    [] { return std::make_unique<GridImporter<read_xyz_grid>>(); })
 
 void load_build_inputs(const desc::Description& d, BuildInputs& in) {
-  auto& reg = registry::Registry::global();
   auto load = [&](const std::string& id, const std::string& fmt) {
     if (id.empty() || in.grids.count(id)) return;
     const desc::InputDesc* inp = nullptr;
     for (auto& x : d.inputs)
       if (x.id == id) inp = &x;
     if (!inp) throw Error(ErrorCode::Build, "input '" + id + "' is not listed under inputs");
-    auto imp = reg.create<Importer>(registry::Kind::Importer, fmt);
-    auto data = imp->read(inp->resolved);
+    auto data = read_input(fmt, inp->resolved);
     if (!data.grid) throw Error(ErrorCode::Build, "input '" + id + "' did not contain a grid");
     in.grids[id] = std::move(*data.grid);
   };
@@ -248,7 +248,7 @@ void load_build_inputs(const desc::Description& d, BuildInputs& in) {
   }
   for (auto& x : all_data) {
     if (x.format == "geological_map") continue;
-    auto data = reg.create<Importer>(registry::Kind::Importer, x.format)->read(input_of(x.input)->resolved);
+    auto data = read_input(x.format, input_of(x.input)->resolved);
     if (data.z_is == "depth")
       for (auto& p : data.points) p.z = -p.z;
     auto& out = in.data[x.input];
@@ -266,7 +266,7 @@ void load_build_inputs(const desc::Description& d, BuildInputs& in) {
   // Fault sticks for faults given by sticks.
   for (auto& f : d.faults) {
     if (f.geom_type != "sticks" || in.lines.count(f.geom_input)) continue;
-    auto data = reg.create<Importer>(registry::Kind::Importer, f.geom_input_format)->read(input_of(f.geom_input)->resolved);
+    auto data = read_input(f.geom_input_format, input_of(f.geom_input)->resolved);
     std::vector<Polyline> ls;
     for (auto& l : data.lines)
       if (l.name == f.name || data.lines.size() == 1 || f.geom_input_format == "irap_lines") ls.push_back(l.pts);
@@ -281,4 +281,51 @@ void register_grid_importers() {
   STRATONIX_PLUGIN_ANCHOR(imp_xyz);
 }
 
+}  // namespace stratonix::io
+
+// ---- stage 4D: the input cache (STX-TN-17 section 4.1) ----------------------------------------
+namespace stratonix::io {
+namespace {
+std::mutex g_cache_mutex;
+bool g_cache_on = false;
+std::size_t g_hits = 0;
+std::map<std::string, std::shared_ptr<const ImportedData>> g_cache;
+}  // namespace
+
+ImportedData read_input(const std::string& format, const std::filesystem::path& file) {
+  auto& reg = registry::Registry::global();
+  std::string key;
+  {
+    std::lock_guard<std::mutex> lk(g_cache_mutex);
+    if (g_cache_on) {
+      std::error_code ec;
+      const auto size = std::filesystem::file_size(file, ec);
+      const auto time = std::filesystem::last_write_time(file, ec).time_since_epoch().count();
+      key = format + "|" + file.lexically_normal().generic_string() + "|" + std::to_string(size) + "|" + std::to_string(time);
+      auto it = g_cache.find(key);
+      if (it != g_cache.end()) {
+        ++g_hits;
+        return *it->second;
+      }
+    }
+  }
+  auto data = std::make_shared<const ImportedData>(reg.create<Importer>(registry::Kind::Importer, format)->read(file));
+  std::lock_guard<std::mutex> lk(g_cache_mutex);
+  if (g_cache_on && !key.empty()) g_cache.emplace(key, data);
+  return *data;
+}
+bool set_input_cache(bool on) {
+  std::lock_guard<std::mutex> lk(g_cache_mutex);
+  const bool was = g_cache_on;
+  g_cache_on = on;
+  if (!on) {
+    g_cache.clear();
+    g_hits = 0;
+  }
+  return was;
+}
+std::size_t input_cache_hits() {
+  std::lock_guard<std::mutex> lk(g_cache_mutex);
+  return g_hits;
+}
 }  // namespace stratonix::io

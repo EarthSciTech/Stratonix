@@ -860,6 +860,26 @@ number of base samples and runs; the sensitivity figure shows both together. A k
 computed when a run fails (the design needs every run), and says so. Parameters must be
 independent (no `correlations`). Example: `sensitivity_one_fault`.
 
+## 2.26 Python, caching and large grids (2026.4)
+
+**Python.** `pip install stratonix` (from 2026.4) installs bindings over the stable C API
+(`ctypes`; one wheel per platform carries the library, for every Python 3 version):
+`stratonix.validate`, `build`, `export`, `package`, `ensemble`, `build_model` (a model with
+`counts`, `horizons`, `faults`, `evaluate`, `horizon_grid`) and `Description` (`get`, `set`,
+`build`). A build from Python writes the same files as `stratonix build`. Errors raise
+`stratonix.StratonixError` with the C API status. `STRATONIX_LIB` points the bindings at another
+library.
+
+**Caching.** Ensembles read each input file once (the importer's own result is reused; key:
+format, path, size and modification time). In the library, `make_build_cache` and
+`run_build_cached` also reuse a whole build of an identical description. Cached and uncached
+builds give the same bytes (test S11).
+
+**Large grids.** GRDECL files are written as they are made, never held whole in memory. A grid
+needs about 420 bytes of memory per cell (measured: 2.5 million cells in 1.0 GB); `stream_grid`
+refuses a grid whose arrays would exceed a stated memory limit. Builds at 1, 2 or 8 threads write
+the same bytes (test S12).
+
 # 3. Running
 
 | Command | What it does |

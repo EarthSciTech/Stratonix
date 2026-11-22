@@ -19,7 +19,6 @@ VelocityBuild velocity_build(const desc::Description& d) {
   if (!d.velocity.present) return out;
   out.present = true;
   const auto& V = d.velocity;
-  auto& reg = registry::Registry::global();
   std::vector<Grid2D> base(V.layers.size());
   std::vector<std::string> ids(V.layers.size());
   for (std::size_t L = 0; L < V.layers.size(); ++L) {
@@ -29,7 +28,7 @@ VelocityBuild velocity_build(const desc::Description& d) {
     for (auto& x : d.inputs)
       if (x.id == h.surface_input) in = &x;
     if (!in) throw Error(ErrorCode::Build, "input '" + h.surface_input + "' is not listed under inputs");
-    auto data = reg.create<Importer>(registry::Kind::Importer, h.surface_format)->read(in->resolved);
+    auto data = read_input(h.surface_format, in->resolved);
     if (!data.grid) throw Error(ErrorCode::Build, "input '" + h.surface_input + "' did not contain a grid");
     Grid2D g = *data.grid;
     const double sc = h.surface_z_is == "twt_s" ? 1.0 : 1e-3;  // two-way time in seconds

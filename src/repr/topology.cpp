@@ -324,7 +324,9 @@ WatertightReport watertightness(const Model& m, const GridSpec& g, const std::fu
       if (ina != inc) {
         // the block boundary between the samples: keep the part inside block b
         double zin = ina ? za : zc, zout = ina ? zc : za;
-        for (int it = 0; it < 30; ++it) {
+        // bisection to 1 mm (STX-TN-17 section 4: the gaps C27 reports are metres; the 30
+        // halvings of v4.0 reached 1e-8 m at twice the cost)
+        for (int it = 0; it < 30 && std::fabs(zout - zin) > 1e-3; ++it) {
           const double zm = 0.5 * (zin + zout);
           BlockCode bm;
           eval1(zm, &bm);
@@ -335,7 +337,7 @@ WatertightReport watertightness(const Model& m, const GridSpec& g, const std::fu
       }
       if (!(std::isfinite(sa) && std::isfinite(sc)) || (sa > 0) == (sc > 0)) continue;
       double lo = za, hi = zc, flo = sa;
-      for (int it = 0; it < 24; ++it) {
+      for (int it = 0; it < 24 && hi - lo > 1e-3; ++it) {
         const Vec3 q{x, y, 0.5 * (lo + hi)};
         EvalResult e1;
         m.evaluate(std::span<const Vec3>(&q, 1), kEvalScalars, e1);

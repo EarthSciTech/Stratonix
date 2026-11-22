@@ -292,7 +292,7 @@ TEST_CASE("S12 parallel builds at 1, 2 and 8 threads give the same bytes") {
   CHECK(d1 == d8);
 }
 
-TEST_CASE("S13 a grid streamed by slabs equals the grid built in memory") {
+TEST_CASE("S13 a grid written as it is made equals the grid written from memory") {
   BuildOptions o;
   o.figures = false;
   o.exports = {"grdecl"};

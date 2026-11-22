@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stratonix"
+dynamic = ["version"]
+description = "Stratonix geomodelling toolkit from Python, over its stable C API (ctypes)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+]
+
+[project.optional-dependencies]
+numpy = ["numpy"]
+test = ["pytest", "numpy"]
+
+[project.urls]
+Homepage = "https://github.com/EarthSciTech/Stratonix"
+
+[tool.setuptools]
+packages = ["stratonix"]
+
+[tool.setuptools.package-data]
+stratonix = ["_lib/*"]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}

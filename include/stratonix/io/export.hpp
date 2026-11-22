@@ -1,4 +1,5 @@
 #pragma once
+#include <ostream>
 // Exporters: file formats (writers and readers) and the exporter plugins that write a built model.
 //
 // Conventions for every file written here:
@@ -78,6 +79,9 @@ struct GrdeclInfo {
 constexpr double kGrdeclMissing = -999.25;
 std::string write_grdecl(const repr::CornerPointGrid& g, const repr::PropertySet* props,
                          const repr::TransmissibilityResult* trans, const GrdeclInfo& info, int decimals = 3);
+/// The same file written to a stream as it is made (stage 4D: never held whole in memory).
+void write_grdecl(std::ostream& os, const repr::CornerPointGrid& g, const repr::PropertySet* props, const repr::TransmissibilityResult* trans,
+                  const GrdeclInfo& info, int dec = 3);
 
 // ---- Neutral formats -------------------------------------------------------------------------
 /// VTK XML unstructured grid (ASCII) of triangles or polylines with optional point and cell arrays.

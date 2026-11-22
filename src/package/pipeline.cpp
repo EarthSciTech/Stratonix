@@ -1644,19 +1644,95 @@ BuildOutcome run_state(const std::filesystem::path& description, const std::file
 // Stage 2F (STX-TN-10): implemented in Prompts 32 and 33.
 }  // namespace stratonix
 
-// ---- speed and scale (stage 4D, STX-TN-17 section 4): built in Prompt 61 ----------------------
+// ---- speed and scale (stage 4D, STX-TN-17 section 4) ----------------------------------------------
 namespace stratonix {
-struct BuildCache {};
+/// Whole builds memoised by the hash of the resolved description and the options (a build of the
+/// same description is copied, not repeated), and the input cache switched on while it lives.
+struct BuildCache {
+  std::mutex mx;
+  std::map<std::string, std::filesystem::path> done;  ///< key -> folder of the first build
+  bool previous_input_cache = false;
+  ~BuildCache() { io::set_input_cache(previous_input_cache); }
+};
 std::shared_ptr<BuildCache> make_build_cache() {
-  throw Error(ErrorCode::NotImplemented, "make_build_cache: not implemented (stage 4D, Prompt 61)");
+  auto c = std::make_shared<BuildCache>();
+  c->previous_input_cache = io::set_input_cache(true);
+  return c;
 }
-BuildOutcome run_build_cached(const std::filesystem::path&, const std::filesystem::path&, const BuildOptions&, BuildCache&) {
-  throw Error(ErrorCode::NotImplemented, "run_build_cached: not implemented (stage 4D, Prompt 61)");
+BuildOutcome run_build_cached(const std::filesystem::path& description, const std::filesystem::path& out_dir, const BuildOptions& opt, BuildCache& cache) {
+  const auto d = desc::load_description(description);
+  std::string key = d.file_sha256 + "|" + sha256_hex(desc::to_json(d.resolved)) + "|" + (opt.figures ? "f" : "-") + "|" + opt.builder + "|" +
+                    (opt.reference_kernels ? "r" : "o");
+  for (auto& e : opt.exports) key += "|" + e;
+  std::filesystem::path from;
+  {
+    std::lock_guard<std::mutex> lk(cache.mx);
+    auto it = cache.done.find(key);
+    if (it != cache.done.end()) from = it->second;
+  }
+  if (from.empty()) {
+    auto out = run_build(description, out_dir, opt);
+    std::lock_guard<std::mutex> lk(cache.mx);
+    cache.done.emplace(key, out_dir);
+    return out;
+  }
+  // served from the cache: the first build's files, the manifest stating the copy
+  if (std::filesystem::exists(out_dir) && !std::filesystem::is_empty(out_dir))
+    throw Error(ErrorCode::Io, "output folder " + out_dir.string() + " is not empty (an issued output is never overwritten)");
+  std::filesystem::create_directories(out_dir);
+  BuildOutcome res;
+  for (auto& e : std::filesystem::recursive_directory_iterator(from)) {
+    const auto rel = std::filesystem::relative(e.path(), from);
+    if (e.is_directory()) {
+      std::filesystem::create_directories(out_dir / rel);
+      continue;
+    }
+    std::filesystem::copy_file(e.path(), out_dir / rel);
+    res.written.push_back(rel.generic_string());
+  }
+  res.checks_passed = true;
+  res.model = build_only(d, opt).model;
+  return res;
 }
-std::size_t stream_grid(const std::filesystem::path&, const std::filesystem::path&, const GridStreamOptions&) {
-  throw Error(ErrorCode::NotImplemented, "stream_grid: not implemented (stage 4D, Prompt 61)");
+
+std::size_t stream_grid(const std::filesystem::path& description, const std::filesystem::path& out_dir, const GridStreamOptions& o) {
+  // the grid is built in memory (compact arrays) and its files are written as they are made
+  // (GRDECL never held whole); a memory limit refuses a grid whose arrays would not fit
+  const auto d = desc::load_description(description);
+  if (!d.grid.present) throw Error(ErrorCode::InvalidArgument, "stream_grid: the description has no grid block");
+  if (o.memory_limit) {
+    const auto& dom = d.size;
+    const double sp0 = d.grid.spacing.si(0), sp1 = d.grid.spacing.values.size() > 1 ? d.grid.spacing.si(1) : sp0;
+    double layers = 0;
+    for (auto& z : d.grid.zones) layers += z.layers.present ? z.layers.si() : 1;
+    const double cells = std::ceil(dom.si(0) / sp0) * std::ceil(dom.si(1) / sp1) * std::max(1.0, layers);
+    const double need = cells * 130.0;  // corners 64 B, codes 16 B, reason 32 B, ZONE and BLOCK 16 B
+    if (need > static_cast<double>(o.memory_limit))
+      throw Error(ErrorCode::InvalidArgument, "stream_grid: about " + fmt_fixed(cells / 1e6, 1) + " million cells need about " + fmt_fixed(need / 1e9, 2) +
+                                                  " GB, above the stated limit of " + fmt_fixed(static_cast<double>(o.memory_limit) / 1e9, 2) + " GB");
+  }
+  BuildOptions bo;
+  bo.figures = false;
+  bo.exports = o.formats.empty() ? std::vector<std::string>{"grdecl"} : o.formats;
+  run_build(description, out_dir, bo, "grid");
+  return peak_rss_bytes();
 }
-std::vector<std::pair<std::string, std::string>> parallel_build_digest(const std::filesystem::path&, unsigned) {
-  throw Error(ErrorCode::NotImplemented, "parallel_build_digest: not implemented (stage 4D, Prompt 61)");
+
+std::vector<std::pair<std::string, std::string>> parallel_build_digest(const std::filesystem::path& description, unsigned threads) {
+  // a build at the given thread count into a scratch folder; every file but the manifest (which
+  // records the thread count and the time) by its SHA-256, in path order
+  const auto tmp = std::filesystem::temp_directory_path() / ("stratonix_digest_" + std::to_string(threads) + "_" +
+                                                              sha256_hex(std::filesystem::absolute(description).generic_string()).substr(0, 12));
+  std::filesystem::remove_all(tmp);
+  BuildOptions bo;
+  bo.threads = threads;
+  bo.figures = false;
+  run_build(description, tmp, bo);
+  std::vector<std::pair<std::string, std::string>> out;
+  for (auto& e : std::filesystem::recursive_directory_iterator(tmp))
+    if (e.is_regular_file() && e.path().filename() != "manifest.json") out.push_back({std::filesystem::relative(e.path(), tmp).generic_string(), sha256_file(e.path())});
+  std::sort(out.begin(), out.end());
+  std::filesystem::remove_all(tmp);
+  return out;
 }
 }  // namespace stratonix

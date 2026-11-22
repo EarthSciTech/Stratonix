@@ -42,6 +42,15 @@ class Importer : public registry::PluginBase {
   virtual ImportedData read(const std::filesystem::path& file) const = 0;
 };
 
+/// Stage 4D (STX-TN-17 section 4.1): read an input through its importer, from a process-wide
+/// cache when one is switched on (key: format, path, size and modification time; the cached data
+/// are the importer's own result, so cached and uncached builds read the same values).
+ImportedData read_input(const std::string& format, const std::filesystem::path& file);
+/// Switch the input cache on or off (off clears it). Returns the previous state.
+bool set_input_cache(bool on);
+/// Reads served from the cache since it was switched on.
+std::size_t input_cache_hits();
+
 // ---- grid formats --------------------------------------------------------------------------
 constexpr double kIrapUndef = 9999900.0;
 constexpr double kZmapNull = -99999.0;

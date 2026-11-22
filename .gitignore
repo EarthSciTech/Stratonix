@@ -3,3 +3,8 @@ out/
 *.user
 .vs/
 __pycache__/
+python/stratonix/_lib/
+python/VERSION
+python/build/
+python/*.egg-info/
+__pycache__/

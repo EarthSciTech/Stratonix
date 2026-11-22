@@ -48,9 +48,9 @@ set_tests_properties(test_v4_geology PROPERTIES TIMEOUT 3600)
 # Stage 4C (STX-TN-16): written first; expected to fail until Prompts 55 to 57 build the features
 stx_test(test_v4_data stratonix_package)
 set_tests_properties(test_v4_data PROPERTIES TIMEOUT 1800)
-# Stage 4D (STX-TN-17 section 9): written first (Prompt 58), expected to fail until Prompts 59 to 61
+# Stage 4D (STX-TN-17 section 9): written first (Prompt 58), built by Prompts 59 to 61
 stx_test(test_v4_scale stratonix_package)
-set_tests_properties(test_v4_scale PROPERTIES WILL_FAIL TRUE TIMEOUT 1800)
+set_tests_properties(test_v4_scale PROPERTIES TIMEOUT 1800)
 # Stage 4A: the fold-frame command on a sine fold (axis 000, wavelength 4 km)
 add_test(NAME cli_fold_frame COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_fold_frame.json
          "-DARGS=fold-frame;${CMAKE_CURRENT_SOURCE_DIR}/data/fold_bedding.csv" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)

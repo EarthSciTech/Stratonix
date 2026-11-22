@@ -2,7 +2,9 @@
 // and of the tetrahedra, and RESQML 2.0.1 through FESAPI where this build has it.
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <map>
+#include <ostream>
 #include <tuple>
 
 #include "stratonix/core/crs.hpp"
@@ -24,58 +26,71 @@ std::vector<ExportedFile> write_resqml_grid(ExportContext& c, const fs::path& fo
 
 namespace {
 
-void put_values(std::string& o, const std::vector<double>& v, int dec, std::size_t per_line) {
-  for (std::size_t n = 0; n < v.size(); ++n) {
-    o += fmt_fixed(v[n], dec);
-    o += (n + 1) % per_line == 0 || n + 1 == v.size() ? "\n" : " ";
+/// Output buffered in memory and flushed to a stream every megabyte (stage 4D, STX-TN-17
+/// section 4.2: a grid's text is never held whole).
+struct Out {
+  std::ostream* os = nullptr;
+  std::string buf;
+  Out& operator+=(const std::string& t) {
+    buf += t;
+    if (os && buf.size() > (1u << 20)) flush();
+    return *this;
+  }
+  Out& operator+=(const char* t) { return *this += std::string(t); }
+  void flush() {
+    if (os) { os->write(buf.data(), static_cast<std::streamsize>(buf.size())); buf.clear(); }
+  }
+};
+template <class F>
+void put_values(Out& o, std::size_t count, F value, int dec, std::size_t per_line) {
+  for (std::size_t n = 0; n < count; ++n) {
+    o += fmt_fixed(value(n), dec);
+    o += (n + 1) % per_line == 0 || n + 1 == count ? "\n" : " ";
   }
 }
 /// Integers with run-length repeats (n*v), as Eclipse reads them.
-void put_ints(std::string& o, const std::vector<long long>& v) {
+template <class F>
+void put_ints(Out& o, std::size_t count, F value) {
   std::size_t n = 0, on_line = 0;
-  while (n < v.size()) {
+  while (n < count) {
+    const long long vn = value(n);
     std::size_t r = n;
-    while (r < v.size() && v[r] == v[n]) ++r;
+    while (r < count && value(r) == vn) ++r;
     std::size_t len = r - n;
-    o += len > 1 ? std::to_string(len) + "*" + std::to_string(v[n]) : std::to_string(v[n]);
+    o += len > 1 ? std::to_string(len) + "*" + std::to_string(vn) : std::to_string(vn);
     n = r;
-    o += ++on_line % 12 == 0 || n == v.size() ? "\n" : " ";
+    o += ++on_line % 12 == 0 || n == count ? "\n" : " ";
   }
 }
 
+void grdecl_to(Out& o, const repr::CornerPointGrid& g, const repr::PropertySet* props, const repr::TransmissibilityResult* trans, const GrdeclInfo& info,
+               int dec);
+
 }  // namespace
 
-std::string write_grdecl(const repr::CornerPointGrid& g, const repr::PropertySet* props, const repr::TransmissibilityResult* trans,
-                         const GrdeclInfo& info, int dec) {
-  std::string o;
+namespace {
+void grdecl_to(Out& o, const repr::CornerPointGrid& g, const repr::PropertySet* props, const repr::TransmissibilityResult* trans, const GrdeclInfo& info,
+               int dec) {
   for (auto& h : info.header) o += "-- " + h + "\n";
   o += "-- Stratonix corner-point grid: depth positive down (m) = -elevation; i fastest, then j, then k (k = 1 at the top).\n";
   o += "-- Real properties hold " + fmt_fixed(kGrdeclMissing, 2) + " where a value could not be computed (never defaulted); see the reasons below.\n\n";
   o += "MAPUNITS\n  METRES /\n\nGRIDUNIT\n  METRES  /\n\n";
   o += "SPECGRID\n  " + std::to_string(g.nx) + " " + std::to_string(g.ny) + " " + std::to_string(g.nz) + " 1 F /\n\n";
   o += "COORD\n";
-  std::vector<double> cd(g.coord.size());
-  for (std::size_t n = 0; n < cd.size(); ++n) cd[n] = n % 3 == 2 ? -g.coord[n] : g.coord[n];
-  put_values(o, cd, dec, 6);
+  put_values(o, g.coord.size(), [&](std::size_t n) { return n % 3 == 2 ? -g.coord[n] : g.coord[n]; }, dec, 6);
   o += "/\n\nZCORN\n";
-  std::vector<double> zc(g.zcorn.size());
-  for (std::size_t n = 0; n < zc.size(); ++n) zc[n] = -g.zcorn[n];
-  put_values(o, zc, dec, 8);
+  put_values(o, g.zcorn.size(), [&](std::size_t n) { return -g.zcorn[n]; }, dec, 8);
   o += "/\n\nACTNUM\n";
-  put_ints(o, std::vector<long long>(g.actnum.begin(), g.actnum.end()));
+  put_ints(o, g.actnum.size(), [&](std::size_t n) { return static_cast<long long>(g.actnum[n]); });
   o += "/\n";
   auto write_prop = [&](const repr::CellProperty& p, const std::string& kw) {
     o += "\n-- " + kw + ": " + p.unit + "; evidence " + p.evidence + "; source " + p.source + "\n";
     if (p.missing) o += "-- " + std::to_string(p.missing) + " cells missing: " + p.missing_reason + "\n";
     o += kw + "\n";
     if (p.integer) {
-      std::vector<long long> v(p.v.size());
-      for (std::size_t n = 0; n < v.size(); ++n) v[n] = std::isnan(p.v[n]) ? 0 : static_cast<long long>(std::llround(p.v[n]));
-      put_ints(o, v);
+      put_ints(o, p.v.size(), [&](std::size_t n) { return std::isnan(p.v[n]) ? 0LL : static_cast<long long>(std::llround(p.v[n])); });
     } else {
-      std::vector<double> v(p.v.size());
-      for (std::size_t n = 0; n < v.size(); ++n) v[n] = std::isnan(p.v[n]) ? kGrdeclMissing : p.v[n];
-      put_values(o, v, 6, 8);
+      put_values(o, p.v.size(), [&](std::size_t n) { return std::isnan(p.v[n]) ? kGrdeclMissing : p.v[n]; }, 6, 8);
     }
     o += "/\n";
   };
@@ -105,7 +120,21 @@ std::string write_grdecl(const repr::CornerPointGrid& g, const repr::PropertySet
     }
     o += "/\n";
   }
-  return o;
+}
+}  // namespace
+
+std::string write_grdecl(const repr::CornerPointGrid& g, const repr::PropertySet* props, const repr::TransmissibilityResult* trans,
+                         const GrdeclInfo& info, int dec) {
+  Out o;
+  grdecl_to(o, g, props, trans, info, dec);
+  return std::move(o.buf);
+}
+void write_grdecl(std::ostream& os, const repr::CornerPointGrid& g, const repr::PropertySet* props, const repr::TransmissibilityResult* trans,
+                  const GrdeclInfo& info, int dec) {
+  Out o;
+  o.os = &os;
+  grdecl_to(o, g, props, trans, info, dec);
+  o.flush();
 }
 
 namespace {
@@ -195,7 +224,12 @@ class GrdeclExporter final : public Exporter {
     for (auto& f : c.info().faults) info.fault_names.push_back(f.name);
     info.faces = c.cells.faces;
     std::string name = petrel_name(c.info().name) + "_grid.grdecl";
-    put(folder, fs::path("grid") / name, write_grdecl(g, c.cells.props, c.cells.trans, info, std::max(2, c.decimals - 1)));
+    {  // written as it is made (STX-TN-17 section 4.2)
+      fs::create_directories(folder / "grid");
+      std::ofstream os(folder / "grid" / name, std::ios::binary);
+      if (!os) throw Error(ErrorCode::Io, "cannot write " + (folder / "grid" / name).string());
+      write_grdecl(os, g, c.cells.props, c.cells.trans, info, std::max(2, c.decimals - 1));
+    }
     std::size_t act = 0;
     for (auto a : g.actnum) act += a;
     return {{"grid/" + name, "Eclipse GRDECL (corner-point grid)", "Eclipse grid (*.GRDECL)",

@@ -43,6 +43,15 @@ has its own version (`stratonix_schema`).
     properties `P32` and `P32_DFN` (realised network intensity per cell), and temperature and
     overpressure are drawn over the burial curves at each well.
 
+- Speed, scale and Python (stage 4D, Prompt 61): Python bindings over the C API (ctypes, decision
+  25) built as wheels for Windows and Linux and tested against the command line's outputs, published
+  to PyPI on a release tag with the owner's token; an input cache for ensembles and build caching
+  in the library (same bytes cached or not); GRDECL written as it is made; parallel builds checked
+  byte for byte at 1, 2 and 8 threads; C27 bisects to 1 mm (its reported gap changes in the last
+  decimals; golden hashes of the synthetic package updated for that reason alone). Not met:
+  ensembles are not yet 5 times faster per member than v3 (2.28 s against 1.88 s on the
+  fault-system example: v4's topology and watertightness checks cost more than the savings), and a
+  50-million-cell grid needs about 21 GB (420 bytes a cell), not the 8 GB stated.
 - Fault-following grids and total-effect sensitivity (stage 4D, Prompt 60): `grid.pillars:
   fault_following` puts one pillar column per fault on its trace in every row (I-035; stair-step
   fall-backs reported by C25); Saltelli designs with first-order and total-effect indices and
