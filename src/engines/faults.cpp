@@ -552,6 +552,11 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
       for (std::size_t h = 0; h < st.horizons(); ++h)
         log.value(f.name + "." + d.horizons[h].name + ".growth_fraction", fmt_fixed(f.growth_f[h], 4));
     }
+    // Stage 4B (STX-TN-15 section 2.6, I-027/I-030): a planar fault whose displacement varies by
+    // level (growth strata, phases) goes level by level on any distance-scaled hanging wall: each
+    // layer moves by its own throw times the hanging wall's distance factor.
+    if (!f.growth_f.empty() && !f.curved && (f.hw_name == "rigid" || f.hw_name == "decay" || f.hw_name == "linear_between_faults"))
+      f.layered = true;
     if (fd.fold_type == "trishear") {
       auto t = std::make_shared<TrishearFold>();
       t->tanphi = std::tan(0.5 * fd.fold_apical_angle.si());
@@ -592,7 +597,8 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
     std::size_t nl = 0;
     for (auto& f : faults_) nl += f.layered ? 1 : 0;
     if (nl != 0 && nl != faults_.size())
-      throw Error(ErrorCode::Build, "hanging wall 'layer_rigid' must be used by all faults of a model or by none", "faults");
+      throw Error(ErrorCode::Build, "faults that move level by level (layer_rigid hanging walls, growth strata or phases) must be all the "
+                                    "faults of a model or none", "faults");
     layered_ = nl != 0 && nl == faults_.size();
     vertical_ = true;
     for (auto& f : faults_) vertical_ = vertical_ && std::fabs(f.slip.x) < 1e-15 && std::fabs(f.slip.y) < 1e-15;
@@ -622,7 +628,12 @@ FaultNetwork::FaultNetwork(const desc::Description& d, const Structure& st, Buil
   fixed_block_ = 0;
   for (int f : order_) {
     Vec3 q = fixed_;  // the fixed point never moves
-    if (faults_[static_cast<std::size_t>(f)].sigma(q) > 0) fixed_block_ |= (BlockCode(1) << f);
+    const Fault& F = faults_[static_cast<std::size_t>(f)];
+    // A fault that abuts another acts on one side of it only. When the fixed point lies on the other
+    // side, the side of its own plane says nothing about which block stays: its footwall, which
+    // continues the abutted fault's block across the branch line, is held (stage 4B: flower splays).
+    if (F.abuts >= 0 && (faults_[static_cast<std::size_t>(F.abuts)].sigma(q) > 0) != F.abut_hw_side) continue;
+    if (F.sigma(q) > 0) fixed_block_ |= (BlockCode(1) << f);
   }
   // Linked splays (abutting with transfer): the block beyond the branch line slides on both faults,
   // so as a rigid block it can only move parallel to the branch line; the splay's slip vector is
@@ -1388,7 +1399,14 @@ double FaultNetwork::layer_throw(int fi, double s, const Vec3& q) const {
   const Fault& f = faults_[static_cast<std::size_t>(fi)];
   double a = dot(q - f.p0, f.s);
   if (std::fabs(a) >= 0.5 * f.length) return 0.0;
-  return f.throw_at(a, f.layer_b(s, a)) * f.growth_at(s);
+  double t = f.throw_at(a, f.layer_b(s, a)) * f.growth_at(s);
+  if (f.hw_name != "layer_rigid" && f.hw_name != "rigid" && t != 0.0) {
+    // stage 4B: the hanging wall's distance factor (slip lies in the plane, so sigma is invariant)
+    const double sig = f.sigma(q);
+    const double next = f.hw->needs_next_fault() ? next_fault_distance(fi, q, sig) : kInf;
+    t *= f.hw->scale(sig, next, f.influence);
+  }
+  return t;
 }
 
 Vec3 FaultNetwork::chain(const Vec3& q0, std::size_t r0, std::size_t r1, double s, BlockCode* code, const BlockCode* forced,

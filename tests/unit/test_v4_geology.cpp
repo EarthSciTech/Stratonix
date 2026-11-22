@@ -165,8 +165,8 @@ TEST_CASE("G5 duplex shortening equals the summed slip of its horses") {
 
 TEST_CASE("G6 breached relay: summed throw continuous along strike") {
   RelaySpec s{8000, 8000, 2000, 500, 120, 100};
-  auto p = breached_relay_throw(s, 400);
-  REQUIRE(p.size() == 400);
+  auto p = breached_relay_throw(s, 2000);  // 7 m apart: a smooth profile changes by less than 1 % per sample
+  REQUIRE(p.size() == 2000);
   double tmax = 0, step = 0;
   for (std::size_t i = 0; i < p.size(); ++i) {
     tmax = std::max(tmax, p[i].second);
@@ -192,8 +192,12 @@ TEST_CASE("G7 trishear on a listric fault against an incremental reference const
   // far hanging-wall points move by the slip parallel to the fault at depth (rigid translation)
   double far = norm(moved.front() - pts.front());
   CHECK(far <= p.slip * 1.01);
-  // footwall points beyond the trishear zone do not move
-  CHECK(norm(moved.back() - pts.back()) < 1e-6);
+  // footwall points below the tip's whole path never enter the trishear zone and do not move
+  // (points ahead of the tip at shallower levels are swept by the zone as the tip propagates)
+  std::vector<Vec3> fw;
+  for (double x = 3000; x <= 5000; x += 500) fw.push_back({x, 0, -2500});
+  auto fwm = trishear_curved(fault, p, fw);
+  for (std::size_t i = 0; i < fw.size(); ++i) CHECK(norm(fwm[i] - fw[i]) < 1e-9);
 }
 
 TEST_CASE("G8 growth strata on a rigid hanging wall: thickness = slip increment x sin(dip)") {

@@ -1,0 +1,58 @@
+# Stage 4B example (STX-TN-15 section 2.1): a polygonal fault system confined to a shale unit. The
+# system is written once, with its spacing, dips, throw-to-length ratio and seed; it expands into
+# ordinary planar faults whose tips sit on the shale's top and base horizons, with alternating
+# (conjugate) dip directions; the intra-shale marker H2m shows their throws. DESIGN model; every
+# parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: polygonal_faults, version: "1.0.0", status: DESIGN,
+        title: "Polygonal faults confined to a shale"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[4000, 4000] m | user_instruction | worked example"
+  depth_range: "[0, 2000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[100, 100] m | user_instruction | worked example: outside the network"
+    tops: {H1: "500 m | user_instruction | worked example", H2: "800 m | user_instruction | worked example", H2m: "1050 m | user_instruction | worked example: intra-shale marker", H3: "1300 m | user_instruction | worked example", H4: "1700 m | user_instruction | worked example"}
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1}, {name: H2}, {name: H2m}, {name: H3}, {name: H4}]
+  units:
+    - {name: Sand_1, top: H1, base: H2}
+    - {name: Shale_upper, top: H2, base: H2m}
+    - {name: Shale_lower, top: H2m, base: H3}
+    - {name: Sand_2, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+fault_systems:
+  - name: PF
+    type: polygonal
+    age: "1 ordinal | user_instruction | worked example: the system, after deposition of the shale"
+    unit_top: H2
+    unit_base: H3
+    area: "[[500, 500], [3500, 3500]] m | user_instruction | worked example"
+    reference_depth: "1050 m | user_instruction | worked example: mid-shale, at the marker"
+    spacing: "600 m | interpreted | worked example: mean spacing of mapped polygonal faults"
+    dip_mean: "50 deg | literature_derived | Cartwright and Lonergan (1996): dips of 40 to 60 degrees"
+    dip_sd: "5 deg | assumed | worked example"
+    throw_ratio: "0.02 ratio | literature_derived | displacement-length scaling, Kim and Sanderson (2005)"
+    seed: "2026 ordinal | user_instruction | worked example: reproducible network"
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[0, 2000], [4000, 2000]] m | user_instruction | worked example: across the network"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv, grdecl, grid_vtk]
+grid:
+  pillars: vertical  # 40 intersecting faults: stair-stepped across cells, not fault-conforming pillars
+  spacing: "[100, 100] m | user_instruction | worked example: areal cell size"
+  margin: "50 m | user_instruction | worked example: pillars above the top and below the base horizon"
+  zones:
+    - {unit: Sand_1, layers: "3 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Shale_upper, layers: "3 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Shale_lower, layers: "3 ordinal | user_instruction | worked example", layering: proportional}
+    - {unit: Sand_2, layers: "3 ordinal | user_instruction | worked example", layering: proportional}

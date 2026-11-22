@@ -256,20 +256,49 @@ class C3 final : public Check {
         if (!in_dom || fs.extent[k] <= 1.02) continue;  // only just outside the tip line
         at.push_back(q);
       }
+      // Stage 4B: a sample whose probes straddle another fault's plane (fault networks meeting at
+      // junctions, polygonal systems) measures that fault, not this one: it is set aside.
+      std::size_t straddled = 0;
+      if (inf.faults.size() > 1 && !at.empty()) {
+        const double eps = 0.25;  // the probe offsets of scalar_jumps (default eps)
+        const std::size_t n = at.size();
+        std::vector<Vec3> q(4 * n);
+        for (std::size_t i = 0; i < n; ++i) {
+          q[i] = at[i] + inf.faults[f].normal * eps;
+          q[n + i] = at[i] + inf.faults[f].normal * (2 * eps);
+          q[2 * n + i] = at[i] - inf.faults[f].normal * eps;
+          q[3 * n + i] = at[i] - inf.faults[f].normal * (2 * eps);
+        }
+        EvalResult er;
+        c.model().evaluate(q, kEvalBlock, er);
+        const BlockCode other = ~(BlockCode(1) << f);
+        std::vector<Vec3> kept;
+        for (std::size_t i = 0; i < n; ++i) {
+          const BlockCode b0 = er.block[i] & other;
+          if ((er.block[n + i] & other) != b0 || (er.block[2 * n + i] & other) != b0 || (er.block[3 * n + i] & other) != b0) { ++straddled; continue; }
+          kept.push_back(at[i]);
+        }
+        at.swap(kept);
+      }
+
       double worst = 0;
       std::string hn;
       if (!at.empty()) {
         auto j = repr::scalar_jumps(c.model(), at, inf.faults[f].normal);
         for (std::size_t h = 0; h < inf.horizons.size(); ++h)
           for (std::size_t k = 0; k < at.size(); ++k)
-            if (std::fabs(j[h * at.size() + k]) > worst) { worst = std::fabs(j[h * at.size() + k]); hn = inf.horizons[h].name; }
+            if (std::fabs(j[h * at.size() + k]) > worst) {
+              worst = std::fabs(j[h * at.size() + k]);
+              hn = inf.horizons[h].name;
+            }
       }
       auto r = base(c, "C3", "no offset outside the fault's tips", inf.faults[f].name);
       r.value = worst;
       r.tolerance = tol;
       r.tolerance_source = src;
       r.passed = worst <= tol;
-      r.detail = std::to_string(at.size()) + " samples just outside the tip line" + (hn.empty() ? "" : "; largest at " + hn);
+      r.detail = std::to_string(at.size()) + " samples just outside the tip line" + (hn.empty() ? "" : "; largest at " + hn) +
+                 (straddled ? "; " + std::to_string(straddled) + " set aside on another fault's plane" : "");
       out.push_back(r);
     }
     return out;
@@ -296,6 +325,7 @@ class C4 final : public Check {
       const Fault& F = net->faults()[f];
       const int fi = static_cast<int>(f);
       if (F.tri || (F.curved && F.curved->fpf)) continue;  // fold kinematics: no throw profile; area is checked by C12
+      if (f < c.description().faults.size() && c.description().faults[f].linking) continue;  // offset is the linked faults' throw
       bool fixed_hw = ((net->fixed_block() >> f) & 1u) != 0;
       double bmin = 1e300, bmax = -1e300;
       for (std::size_t i = 0; i < F.a_tab.size(); ++i) {
@@ -344,12 +374,27 @@ class C4 final : public Check {
       const int NA = 60;
       for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
         double worst = 0, tmax = 0;
-        std::size_t n = 0;
+        std::size_t n = 0, set_aside = 0;
         for (int k = 1; k < NA; ++k) {
           double a = -0.5 * F.length + F.length * k / NA;
           double bhw, bfw;
           if (!cutoff(h, a, true, bhw) || !cutoff(h, a, false, bfw)) continue;
           Vec3 chw = F.at(a, bhw), cfw = F.at(a, bfw);
+          {
+            // stage 4B: another fault's plane between the two cut-offs (networks, polygonal systems)
+            // adds its own offset to the separation; such a position measures two faults: set aside
+            bool crossed = false;
+            const Vec3 mid = (chw + cfw) * 0.5;
+            for (std::size_t g = 0; g < net->size() && !crossed; ++g) {
+              if (g == f) continue;
+              const Fault& G = net->faults()[g];
+              if (G.curved || std::fabs(dot(mid - G.p0, G.s)) >= 0.5 * G.length) continue;
+              // between the cut-offs, or close enough to one that its offset reaches the cut-off search
+              const double near = std::max(5.0, 2 * std::fabs(G.tmax)), s1 = G.sigma(chw), s2 = G.sigma(cfw);
+              crossed = (s1 > 0) != (s2 > 0) || std::fabs(s1) < near || std::fabs(s2) < near;
+            }
+            if (crossed) { ++set_aside; continue; }
+          }
           Vec3 cm = fixed_hw ? cfw : chw;
           double expect = 0;
           if (F.drag) {
@@ -389,7 +434,8 @@ class C4 final : public Check {
         r.tolerance = tol;
         r.tolerance_source = src;
         r.passed = worst <= tol;
-        r.detail = std::to_string(n) + " strike positions (fault frame); profile maximum " + fmt_fixed(tmax, 2) + " m";
+        r.detail = std::to_string(n) + " strike positions (fault frame); profile maximum " + fmt_fixed(tmax, 2) + " m" +
+                   (set_aside ? "; " + std::to_string(set_aside) + " set aside where another fault crosses between or near the cut-offs" : "");
         out.push_back(r);
       }
       (void)bmin;
@@ -415,6 +461,7 @@ class C10 final : public Check {
     const double diag = std::hypot(inf.domain.sx, inf.domain.sy);
     for (std::size_t f = 0; f < inf.faults.size() && f < d.faults.size(); ++f) {
       const auto& fd = d.faults[f];
+      if (fd.linking) continue;  // stage 4B: a connecting fault has no slip of its own
       double L = fd.length.present ? fd.length.si() : 0.0;
       double D = net && f < net->size() ? std::fabs(net->faults()[f].tmax) : (fd.throw_max.present ? std::fabs(fd.throw_max.si()) : 0.0);
       if (!(L > 0)) continue;
@@ -1508,6 +1555,7 @@ repr::GridOptions grid_options(const desc::Description& d, const Model& m) {
   o.dy = sp.size() > 1 ? sp[1] : o.dx;
   if (g.margin.present) o.margin = g.margin.si();
   if (g.min_thickness.present) o.min_thickness = g.min_thickness.si();
+  o.snap_to_faults = g.pillars != "vertical";
   if (g.zones.empty()) {
     const auto& mu = m.info().units;
     for (std::size_t k = 0; k < mu.size(); ++k)

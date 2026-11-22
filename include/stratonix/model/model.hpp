@@ -45,7 +45,7 @@ struct UnitInfo {
 struct FaultInfo {
   std::string name;
   int index = 0;
-  int age = 0;              ///< larger = younger
+  double age = 0;           ///< larger = younger (ordinal; generated faults take fractional ages)
   Vec3 ref_point;           ///< a point on the fault
   Vec3 strike_dir;          ///< unit vector along strike (horizontal)
   Vec3 dip_dir;             ///< unit vector down dip, in the plane

@@ -80,6 +80,10 @@ std::vector<std::pair<std::string, std::string>> key_numbers(const desc::Descrip
   k.push_back({"Horizons / faults", std::to_string(inf.horizons.size()) + " / " + std::to_string(inf.faults.size())});
   for (auto& r : rep.results)
     if (r.id == "C9" && r.info) k.push_back({std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(r.name[0])))) + r.name.substr(1) + " (" + r.subject + ")", fmt_fixed(r.value, r.unit == "km2" ? 2 : 1) + " " + r.unit});
+  // per fault; a network of many faults (stage 4B fault systems) lists its six largest throws and
+  // sums up the rest in one line, so the panel stays on the page
+  struct Row { std::string name, value; double best; };
+  std::vector<Row> rows;
   for (std::size_t f = 0; f < inf.faults.size(); ++f) {
     double best = 0;
     std::string hn;
@@ -87,8 +91,18 @@ std::vector<std::pair<std::string, std::string>> key_numbers(const desc::Descrip
       double t = std::fabs(ctx.throw_row(static_cast<int>(f), static_cast<int>(h)).throw_max);
       if (t > best) { best = t; hn = inf.horizons[h].name; }
     }
-    k.push_back({"Max throw " + inf.faults[f].name, hn.empty() ? "0 m" : fmt_fixed(best, 1) + " m at " + hn});
+    rows.push_back({inf.faults[f].name, hn.empty() ? "0 m" : fmt_fixed(best, 1) + " m at " + hn, best});
   }
+  constexpr std::size_t kListed = 6;
+  if (rows.size() > kListed + 2) {
+    std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.best > b.best; });
+    double rest = 0;
+    for (std::size_t i = kListed; i < rows.size(); ++i) rest = std::max(rest, rows[i].best);
+    const std::size_t n_rest = rows.size() - kListed;
+    rows.resize(kListed);
+    rows.push_back({"other " + std::to_string(n_rest) + " faults", "at most " + fmt_fixed(rest, 1) + " m", rest});
+  }
+  for (auto& r : rows) k.push_back({"Max throw " + r.name, r.value});
   k.push_back({"Checks", std::to_string(rep.results.size()) + " run, " + std::to_string(rep.failures()) + " failed"});
   (void)d;
   return k;

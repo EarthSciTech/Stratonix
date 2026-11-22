@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "stratonix/core/error.hpp"
+#include "stratonix/core/faultsystems.hpp"
 #include "stratonix/core/util.hpp"
 
 namespace stratonix::desc {
@@ -685,6 +686,7 @@ struct Typer {
           fd.drag_fraction = P(dg, "fraction", b + ".drag", Dimension::Dimensionless, true, 1);
           fd.drag_width = P(dg, "width", b + ".drag", Dimension::Length, true, 1);
         }
+        if (const Node* lk = f.get("linking")) fd.linking = lk->type == Node::Type::Bool && lk->boolean;
         if (const Node* rl = f.get("relay")) {
           fd.relay_fault = S(rl, "fault");
           if (const Node* t = rl->get("breached")) fd.relay_breached = t->type == Node::Type::Bool && t->boolean;
@@ -1072,6 +1074,7 @@ struct Typer {
         }
       if (const Node* ft = gn->get("fault_transmissibility")) g.transmissibility = S(ft, "calibration");
       if (const Node* tt = gn->get("tetrahedral")) g.tetrahedral = tt->boolean || tt->str == "true";
+      g.pillars = S(gn, "pillars", "fault_conforming");
     }
     if (const Node* fr = root.get("fault_rock")) {
       d.fault_rock.present = true;
@@ -1148,6 +1151,11 @@ struct Typer {
     return z;
   }
 
+  /// Stage 4B: hanging walls that move level by level (growth strata and phases).
+  static bool level_hw(const FaultDesc& fd) {
+    if (fd.curved() || !fd.fold_type.empty()) return false;
+    return fd.hw_type == "layer_rigid" || fd.hw_type == "rigid" || fd.hw_type == "decay" || fd.hw_type == "linear_between_faults";
+  }
   /// STX-TN-07: series (F20), trends (F21), growth (F22), clinoforms (F23).
   void series_rules() {
     const std::size_t nh = d.horizons.size();
@@ -1608,9 +1616,10 @@ struct Typer {
         bool varies = ev.size() > 1;
         for (auto* e : ev)
           for (auto& hd : d.horizons) varies = varies || (hd.age.present && hd.age.si() < e->start());
-        if (varies && fd.hw_type != "layer_rigid")
+        if (varies && !level_hw(fd))
           c.err(b + ".hanging_wall.type", "F26", "fault '" + fd.name + "' displaces horizons by different amounts (phases, or deposition during or after "
-                                                 "its events): it takes hanging_wall: layer_rigid");
+                                                 "its events): it takes a planar geometry with hanging_wall layer_rigid, rigid, decay or "
+                                                 "linear_between_faults");
       }
     }
     for (std::size_t k = 0; k < d.faults.size(); ++k) {
@@ -1618,8 +1627,10 @@ struct Typer {
       const std::string b = "faults[" + std::to_string(k) + "]";
       growth(fd.growth, b);
       if (fd.growth.present()) {
-        if (fd.hw_type != "layer_rigid")
-          c.err(b + ".hanging_wall.type", "F22", "growth faults take hanging_wall: layer_rigid (each layer moves by its own throw)");
+        if (!level_hw(fd))
+          c.err(b + ".hanging_wall.type", "F22", "growth faults are planar with hanging_wall layer_rigid, rigid, decay or linear_between_faults "
+                                                 "(each layer moves by its own throw); curved and fold-kinematic hanging walls are not "
+                                                 "combined with growth strata yet");
         int en = d.horizon_index(fd.growth.end);
         if (fd.upper.rule == "horizon" && en >= 0 && d.horizon_index(fd.upper.horizon) > en)
           c.err(b + ".extent.upper_tip", "F22", "the upper tip of a growth fault must be free or above the end horizon");
@@ -2053,8 +2064,8 @@ struct Typer {
             if (ds > kPi / 6) c.err(b + ".relay", "F15", "relay faults must strike within 30 degrees of each other");
           }
           if (f.relay_breached)
-            c.err(b + ".relay.breached", "F15", "breached relays are not implemented yet: declare the connecting fault "
-                                                "explicitly, abutting both faults (open item in STX-TN-05)");
+            c.err(b + ".relay.breached", "F15", "the connecting fault of this breached relay could not be placed: declare it "
+                                                "explicitly, abutting both faults");
         }
       }
       if (!f.abuts_fault.empty()) {
@@ -2182,6 +2193,319 @@ void migrate(Node& doc) {
   // Version 1 is the first version; there is nothing to migrate yet.
 }
 
+// ---- Stage 4B (STX-TN-15 sections 2.1 to 2.4): fault systems and breached relays --------------
+// A fault system (polygonal network, flower structure, duplex) and a breached relay expand, before
+// typing, into ordinary faults appended to `faults`: every rule and check then applies to each
+// generated fault exactly as to a fault written by hand, and the resolved description lists them.
+namespace {
+std::string num(double v, int dec = 3) { return fmt_fixed(v, dec); }
+struct SysParam {
+  Param p;
+  bool ok = false;
+};
+/// A scalar or tuple parameter of a fault system, in SI.
+SysParam sys_param(const Node& sys, const char* key, const std::string& b, std::vector<Issue>& out, bool required = true) {
+  SysParam r;
+  const Node* n = sys.get(key);
+  if (!n) {
+    if (required) out.push_back({b + "." + key, "F43", std::string("a fault system needs ") + key, true, sys.line});
+    return r;
+  }
+  std::string why;
+  if (!parse_param(*n, b + "." + key, r.p, why)) {
+    out.push_back({b + "." + key, "E1", why, true, n->line});
+    return r;
+  }
+  r.ok = true;
+  return r;
+}
+std::string sys_str(const Node& sys, const char* key) {
+  const Node* n = sys.get(key);
+  return n && n->is_string() ? n->str : std::string();
+}
+/// Evidence and source of a generated value: the evidence of the parameter it derives from.
+std::string prov(const Param& from, const std::string& note) { return std::string(" | ") + evidence_name(from.evidence) + " | " + note; }
+const Node* find_fault(const Node& doc, const std::string& name) {
+  if (const Node* fs = doc.get("faults"))
+    for (auto& f : fs->seq)
+      if (const Node* n = f.get("name"); n && n->str == name) return &f;
+  return nullptr;
+}
+double param_si(const Node* n, std::size_t i = 0) {
+  if (!n) return kNaN;
+  Param p;
+  std::string why;
+  if (!parse_param(*n, "", p, why) || p.values.size() <= i) return kNaN;
+  return p.si(i);
+}
+/// One planar dip-slip fault as YAML (flow style), parsed into a node.
+Node planar_fault(const std::string& name, double age, const std::string& pv, double x, double y, double depth, double strike_deg,
+                  double dip_deg, double length, double throw_m, const std::string& sense, const std::string& upper,
+                  const std::string& lower, const std::string& extra, double dip_taper = 0.25) {
+  std::ostringstream o;
+  o << "{name: " << name << ", age: \"" << num(age, 4) << " ordinal" << pv << "\",\n"
+    << " geometry: {type: planar, reference_point: \"[" << num(x, 2) << ", " << num(y, 2) << "] m" << pv << "\", reference_depth: \""
+    << num(depth, 2) << " m" << pv << "\", strike: \"" << num(std::fmod(strike_deg + 720.0, 360.0), 4) << " deg" << pv << "\", dip: \""
+    << num(dip_deg, 4) << " deg" << pv << "\"},\n"
+    << " extent: {upper_tip: " << upper << ", lower_tip: " << lower << ", length: \"" << num(length, 2) << " m" << pv << "\"},\n"
+    << " throw: {max: \"" << num(throw_m, 3) << " m" << pv << "\", sense: " << sense
+    << ", profile_dip: {type: flat_topped, taper: \"" << num(dip_taper, 2) << " fraction" << pv << "\"}, profile_strike: {type: flat_topped, taper: \"0.25 fraction"
+    << pv << "\"}},\n slip_mode: dip_slip, hanging_wall: {type: rigid}" << extra << "}";
+  return parse_document(o.str(), "fault system");
+}
+std::string tip_at(const std::string& horizon, const std::string& pv) {
+  return "{rule: horizon, horizon: " + horizon + ", offset: \"0 m" + pv + "\"}";
+}
+}  // namespace
+
+static void expand_fault_systems(Node& doc, std::vector<Issue>& out) {
+  Node* faults = doc.get("faults");
+  auto append = [&](Node f) {
+    if (!faults) { doc.set("faults", Node::make_seq()); faults = doc.get("faults"); }
+    faults->seq.push_back(std::move(f));
+  };
+  if (const Node* systems = doc.get("fault_systems")) {
+    const Node sys_copy = *systems;  // appending to faults must not invalidate the systems being read
+    std::set<std::string> names;
+    for (std::size_t k = 0; k < sys_copy.seq.size(); ++k) {
+      const Node& sy = sys_copy.seq[k];
+      const std::string b = "fault_systems[" + std::to_string(k) + "]", name = sys_str(sy, "name"), type = sys_str(sy, "type");
+      if (name.empty() || !names.insert(name).second) { out.push_back({b + ".name", "F43", "every fault system needs a unique name", true, sy.line}); continue; }
+      auto age = sys_param(sy, "age", b, out);
+      if (!age.ok) continue;
+      if (type == "polygonal") {
+        auto area = sys_param(sy, "area", b, out), dep = sys_param(sy, "reference_depth", b, out), sp = sys_param(sy, "spacing", b, out),
+             dm = sys_param(sy, "dip_mean", b, out), ds = sys_param(sy, "dip_sd", b, out), tr = sys_param(sy, "throw_ratio", b, out),
+             seed = sys_param(sy, "seed", b, out);
+        const std::string top = sys_str(sy, "unit_top"), base = sys_str(sy, "unit_base");
+        if (top.empty() || base.empty()) out.push_back({b, "F43", "a polygonal system needs unit_top and unit_base (the horizons that confine it)", true, sy.line});
+        if (!(area.ok && dep.ok && sp.ok && dm.ok && ds.ok && tr.ok && seed.ok) || top.empty() || base.empty()) continue;
+        if (area.p.values.size() != 4) { out.push_back({b + ".area", "F43", "area is [[x0, y0], [x1, y1]]", true, sy.line}); continue; }
+        PolygonalSpec ps;
+        ps.x0 = area.p.si(0); ps.y0 = area.p.si(1); ps.x1 = area.p.si(2); ps.y1 = area.p.si(3);
+        ps.unit_top = 0; ps.unit_base = -1;  // the tips follow the horizons; the planner needs only the order
+        ps.spacing = sp.p.si(); ps.dip_mean = rad2deg(dm.p.si()); ps.dip_sd = rad2deg(ds.p.si()); ps.throw_ratio = tr.p.si();
+        if (ps.spacing < 100 || ps.spacing > 2000) { out.push_back({b + ".spacing", "F43", "polygonal fault spacing from 100 to 2000 m", true, sy.line}); continue; }
+        if (ps.dip_mean < 30 || ps.dip_mean > 70) { out.push_back({b + ".dip_mean", "F43", "polygonal fault dips from 30 to 70 degrees", true, sy.line}); continue; }
+        if (ps.throw_ratio <= 0 || ps.throw_ratio > 0.1) { out.push_back({b + ".throw_ratio", "F43", "throw ratio above 0 and at most 0.1 (C10 scaling)", true, sy.line}); continue; }
+        PolygonalNetwork net;
+        try {
+          net = polygonal_network(ps, static_cast<std::uint64_t>(seed.p.values[0]));
+        } catch (const Error& e) {
+          out.push_back({b, "F43", e.what(), true, sy.line});
+          continue;
+        }
+        if (net.faults.size() > 48) {
+          out.push_back({b, "F43", "the network has " + std::to_string(net.faults.size()) + " faults; a model takes at most 48 from one system "
+                                   "(reduce the area or widen the spacing)", true, sy.line});
+          continue;
+        }
+        const std::string pv = prov(sp.p, "fault system " + name + " (seed " + num(seed.p.values[0], 0) + ")");
+        for (std::size_t i = 0; i < net.faults.size(); ++i) {
+          const auto& f = net.faults[i];
+          if (f.throw_m > 100) { out.push_back({b, "F43", "polygonal fault throws are at most 100 m", true, sy.line}); break; }
+          const Vec3 m = (f.a + f.b) * 0.5, d = f.b - f.a;
+          // conjugate dips: alternate dip directions across the network
+          const double strike = rad2deg(std::atan2(d.x, d.y)) + (i % 2 ? 180.0 : 0.0);
+          char nm[16];
+          std::snprintf(nm, sizeof nm, "_%02zu", i + 1);
+          append(planar_fault(name + nm, age.p.si() + 0.001 * static_cast<double>(i), pv, m.x, m.y, dep.p.si(), strike, f.dip_deg, f.length,
+                              f.throw_m, "normal", tip_at(top, pv), tip_at(base, pv), ""));
+        }
+      } else if (type == "flower") {
+        auto hs = sys_param(sy, "vertical_component", b, out), spread = sys_param(sy, "spread", b, out), ns = sys_param(sy, "splays", b, out),
+             bd = sys_param(sy, "branch_depth", b, out);
+        const std::string master = sys_str(sy, "master"), sense = sys_str(sy, "sense");
+        if (!(hs.ok && spread.ok && ns.ok && bd.ok)) continue;
+        if (sense != "positive" && sense != "negative") { out.push_back({b + ".sense", "F43", "a flower is positive (transpression) or negative (transtension)", true, sy.line}); continue; }
+        const Node* mf = find_fault(doc, master);
+        if (!mf) { out.push_back({b + ".master", "F43", "unknown master fault '" + master + "'", true, sy.line}); continue; }
+        const Node* mg = mf->get("geometry");
+        const double mx = param_si(mg ? mg->get("reference_point") : nullptr, 0), my = param_si(mg ? mg->get("reference_point") : nullptr, 1),
+                     mstr = param_si(mg ? mg->get("strike") : nullptr), mdip = param_si(mg ? mg->get("dip") : nullptr),
+                     mlen = param_si(mf->get("extent") ? mf->get("extent")->get("length") : nullptr);
+        if (!std::isfinite(mx) || !std::isfinite(mstr) || !std::isfinite(mdip) || !std::isfinite(mlen) || rad2deg(mdip) < 80) {
+          out.push_back({b + ".master", "F43", "the master of a flower is a planar fault placed by reference point and strike, dipping at least 80 degrees", true, sy.line});
+          continue;
+        }
+        FlowerSpec fs;
+        fs.splays = static_cast<int>(ns.p.values[0]);
+        fs.spread_deg = rad2deg(spread.p.si());
+        fs.vertical_component = hs.p.si();
+        fs.branch_depth = bd.p.si();
+        FlowerResult fr;
+        try {
+          fr = flower_splays(fs);
+        } catch (const Error& e) {
+          out.push_back({b, "F43", e.what(), true, sy.line});
+          continue;
+        }
+        // splays that are not vertical: the master continues the vertical ones to the surface
+        std::vector<int> gen;
+        for (int i = 0; i < fs.splays; ++i)
+          if (fr.dips_deg[static_cast<std::size_t>(i)] < 89.999) gen.push_back(i);
+        const double mage = param_si(mf->get("age"));
+        if (!(age.p.si() > mage)) { out.push_back({b + ".age", "F43", "the splays abut the master: the system must be younger than '" + master + "'", true, sy.line}); continue; }
+        const std::string pv = prov(hs.p, "fault system " + name + " (flower on " + master + ")");
+        const double share = fs.vertical_component / static_cast<double>(gen.size());
+        int j = 0;
+        for (int i : gen) {
+          const double f = static_cast<double>(i) / (fs.splays - 1) - 0.5;
+          // a splay on the master's right (its dip side) dips back towards it: strike reversed
+          const bool right = f > 0;
+          const double strike = rad2deg(mstr) + (right ? 180.0 : 0.0);
+          char nm[16];
+          std::snprintf(nm, sizeof nm, "_%02d", ++j);
+          append(planar_fault(name + nm, age.p.si() + 0.001 * j, pv, mx, my, fs.branch_depth, strike, fr.dips_deg[static_cast<std::size_t>(i)], mlen, share,
+                              sense == "positive" ? "reverse" : "normal", "{rule: free}",
+                              "{rule: depth, depth: \"" + num(fs.branch_depth + 50, 2) + " m" + pv + "\"}",
+                              ", abuts: {fault: " + master + ", side: " + (right ? "hanging_wall" : "footwall") + "}"));
+        }
+      } else if (type == "duplex") {
+        auto start = sys_param(sy, "start", b, out), az = sys_param(sy, "strike", b, out), nh = sys_param(sy, "horses", b, out),
+             hl = sys_param(sy, "horse_length", b, out), ra = sys_param(sy, "ramp_angle", b, out), sl = sys_param(sy, "slip", b, out),
+             fdp = sys_param(sy, "floor_depth", b, out), rdp = sys_param(sy, "roof_depth", b, out), len = sys_param(sy, "length", b, out);
+        if (!(start.ok && az.ok && nh.ok && hl.ok && ra.ok && sl.ok && fdp.ok && rdp.ok && len.ok)) continue;
+        const double zf = fdp.p.si(), zr = rdp.p.si();
+        if (!(zf > zr + 1)) { out.push_back({b + ".floor_depth", "F43", "the floor of a duplex lies below its roof", true, sy.line}); continue; }
+        DuplexSpec ds;
+        ds.horses = static_cast<int>(nh.p.values[0]);
+        ds.horse_length = hl.p.si();
+        ds.ramp_angle_deg = rad2deg(ra.p.si());
+        ds.slip = sl.p.si();
+        ds.thickness = zf - zr;
+        DuplexResult dr;
+        try {
+          dr = duplex(ds);
+        } catch (const Error& e) {
+          out.push_back({b, "F43", e.what(), true, sy.line});
+          continue;
+        }
+        // Each horse: a thrust with a floor flat (hinterland side), a ramp and a roof flat (foreland
+        // side), the flats in bedding so that their slip offsets no horizon, on a fault-parallel-flow
+        // hanging wall (fault-bend folding over the ramp). The ramps dip to the right of the strike
+        // (towards the hinterland); the system breaks forward, so each thrust is younger than the one
+        // behind it and carries the older horses over its ramp (Boyer and Elliott 1982).
+        const double st = az.p.si(), fx = -std::cos(st), fy = std::sin(st);
+        const double h = 0.5 * (zf - zr) / std::tan(ra.p.si()), U = 4 * len.p.si();
+        const std::string pv = prov(sl.p, "fault system " + name + " (" + dr.style + " duplex, shortening " + num(dr.shortening, 0) + " m)");
+        for (int i = 0; i < ds.horses; ++i) {
+          char nm[16];
+          std::snprintf(nm, sizeof nm, "_%02d", i + 1);
+          const double x = start.p.si(0) + fx * ds.horse_length * i, y = start.p.si(1) + fy * ds.horse_length * i;
+          std::ostringstream o;
+          o << "{name: " << name << nm << ", age: \"" << num(age.p.si() + 0.001 * i, 4) << " ordinal" << pv << "\",\n"
+            << " geometry: {type: ramp_flat, reference_point: \"[" << num(x, 2) << ", " << num(y, 2) << "] m" << pv << "\", strike: \""
+            << num(rad2deg(st), 4) << " deg" << pv << "\", profile: \"[[" << num(-U, 2) << ", " << num(zr, 2) << "], [" << num(-h, 2) << ", "
+            << num(zr, 2) << "], [" << num(h, 2) << ", " << num(zf, 2) << "], [" << num(U, 2) << ", " << num(zf, 2) << "]] m" << pv << "\"},\n"
+            << " extent: {upper_tip: {rule: free}, lower_tip: {rule: free}, length: \"" << num(len.p.si(), 2) << " m" << pv << "\"},\n"
+            << " throw: {slip: \"" << num(ds.slip, 3) << " m" << pv << "\", sense: reverse, profile_strike: {type: flat_topped, taper: \"0.01 fraction"
+            << pv << "\"}},\n slip_mode: dip_slip, hanging_wall: {type: fault_parallel_flow}}";
+          append(parse_document(o.str(), "fault system"));
+        }
+      } else {
+        out.push_back({b + ".type", "F43", "a fault system is polygonal, flower or duplex (got '" + type + "')", true, sy.line});
+      }
+    }
+  }
+  // Breached relays (STX-TN-15 section 2.4, I-023): a connecting fault across the ramp, at the middle
+  // of the overlap. Both relay faults terminate against it, each on its own side, so the throw passes
+  // from one to the other through the breach: the connecting fault is the surface where the
+  // abandoned tips stop, and its offset is the throw of the faults it links (no slip of its own;
+  // rigid hanging walls cannot carry the ramp's throw twice).
+  if (!faults) return;
+  const std::size_t n0 = faults->seq.size();
+  for (std::size_t k = 0; k < n0; ++k) {
+    Node* f = &faults->seq[k];
+    Node* rl = f->get("relay");
+    const Node* br = rl ? rl->get("breached") : nullptr;
+    if (!br || br->type != Node::Type::Bool || !br->boolean) continue;
+    const std::string b = "faults[" + std::to_string(k) + "].relay";
+    const std::string fname = f->get("name") ? f->get("name")->str : "", gname = rl->get("fault") ? rl->get("fault")->str : "";
+    const Node* g = find_fault(doc, gname);
+    if (!g) continue;  // the typed rules report the unknown fault
+    auto geo = [&](const Node* x, const char* key, std::size_t i = 0) {
+      const Node* gg = x->get("geometry");
+      return param_si(gg ? gg->get(key) : nullptr, i);
+    };
+    auto ext = [&](const Node* x) { return param_si(x->get("extent") ? x->get("extent")->get("length") : nullptr); };
+    const double fx = geo(f, "reference_point", 0), fy = geo(f, "reference_point", 1), fs = geo(f, "strike"), fd = geo(f, "dip"),
+                 fz = geo(f, "reference_depth"), fl = ext(f);
+    const double gx = geo(g, "reference_point", 0), gy = geo(g, "reference_point", 1), gl = ext(g);
+    const double fage = param_si(f->get("age")), gage = param_si(g->get("age"));
+    if (!std::isfinite(fx + fy + fs + fd + fz + fl + gx + gy + gl + fage + gage)) {
+      out.push_back({b + ".breached", "F15", "a breached relay needs two planar faults placed by reference point, strike, dip and depth, "
+                                             "with their lengths", true, rl->line});
+      continue;
+    }
+    const double sx = std::sin(fs), sy = std::cos(fs);
+    const double c2 = (gx - fx) * sx + (gy - fy) * sy, sep = (gx - fx) * sy - (gy - fy) * sx;
+    const double lo = std::max(-0.5 * fl, c2 - 0.5 * gl), hi = std::min(0.5 * fl, c2 + 0.5 * gl), mid = 0.5 * (lo + hi);
+    if (!(hi > lo) || std::fabs(sep) < 1.0) continue;  // the typed relay rules report it
+    const double ax = fx + sx * mid, ay = fy + sy * mid;     // F's trace at the middle of the overlap
+    const double bx = ax + sy * sep, by = ay - sx * sep;     // G's trace there (offset normal to F's strike)
+    const double cx = 0.5 * (ax + bx), cy = 0.5 * (ay + by);
+    // the connecting fault strikes from F to G and contains F's slip vector, so that neither relay
+    // fault carries its hanging wall across it; it reaches well past both traces at every depth (it
+    // has no slip, so its own extent changes nothing)
+    double cstrike = rad2deg(std::atan2(bx - ax, by - ay));
+    const Vec3 tv{std::sin(deg2rad(cstrike)), std::cos(deg2rad(cstrike)), 0.0};
+    const Vec3 dh{std::sin(fs + kPi / 2), std::cos(fs + kPi / 2), 0.0};
+    const Vec3 slip = dh * std::cos(fd) + Vec3{0, 0, -std::sin(fd)};
+    Vec3 nv = cross(tv, slip);
+    if (nv.z < 0) nv = nv * -1.0;  // upward normal: towards the hanging wall
+    const Vec3 right{tv.y, -tv.x, 0.0};
+    if (dot(nv, right) < 0) cstrike += 180;  // dips to the right of its strike
+    const double cdip = rad2deg(std::acos(std::clamp(nv.z / norm(nv), -1.0, 1.0)));
+    const double cs = deg2rad(cstrike);
+    auto right_of = [&](double x, double y) { return (x - cx) * std::cos(cs) - (y - cy) * std::sin(cs) > 0; };
+    // F lies on the side of the breach towards its own reference point (behind the overlap); G opposite
+    const bool f_right = right_of(fx, fy), g_right = right_of(gx, gy);
+    if (f_right == g_right) {
+      out.push_back({b + ".breached", "F15", "the relay faults do not lie on opposite sides of the breach", true, rl->line});
+      continue;
+    }
+    const std::string cname = fname + "_" + gname + "_breach";
+    Param ev;
+    ev.evidence = Evidence::Assumed;
+    if (const Node* tm = f->get("throw") ? f->get("throw")->get("max") : nullptr) {
+      std::string why;
+      parse_param(*tm, "", ev, why);
+    }
+    const std::string pv = prov(ev, "breached relay of " + fname + " and " + gname);
+    // long enough to reach both traces over the model's depth range (the planes dip, so their
+    // traces move with depth), with 250 m to spare at each end
+    const Node* dom = doc.get("domain");
+    double zmax = param_si(dom ? dom->get("depth_range") : nullptr, 1);
+    if (!std::isfinite(zmax)) zmax = 2 * fz;
+    const double clen = std::fabs(sep) + 2 * std::fabs(zmax) / std::max(std::tan(fd), 0.05) + 500;
+    // older than both: they terminate against it
+    Node cf = planar_fault(cname, std::min(fage, gage) - 0.5, pv, cx, cy, fz, cstrike, std::max(cdip, 1.0), clen, 0.0, "normal", "{rule: free}",
+                           "{rule: free}", ", linking: true");
+    append(std::move(cf));
+    faults = doc.get("faults");
+    auto set_abut = [&](const std::string& nm, bool right) {
+      for (auto& x : faults->seq)
+        if (x.get("name") && x.get("name")->str == nm) {
+          if (x.get("abuts")) {
+            out.push_back({b + ".breached", "F15", "fault '" + nm + "' of a breached relay already abuts another fault; it terminates "
+                                                   "against the connecting fault instead", true, rl->line});
+            continue;
+          }
+          Node ab = Node::make_map();
+          ab.set("fault", Node::make_string(cname));
+          ab.set("side", Node::make_string(right ? "hanging_wall" : "footwall"));
+          x.set("abuts", ab);
+          auto& mp = x.map;
+          mp.erase(std::remove_if(mp.begin(), mp.end(), [](const auto& kv) { return kv.first == "relay"; }), mp.end());
+        }
+    };
+    // the hanging wall of the connecting fault is on the right of its strike (right-hand rule)
+    set_abut(fname, f_right);
+    set_abut(gname, g_right);
+  }
+}
+
 ValidationReport validate_description_text(std::string_view text, const std::filesystem::path& base_dir,
                                            Description* out) {
   ValidationReport rep;
@@ -2206,6 +2530,8 @@ ValidationReport validate_description_text(std::string_view text, const std::fil
     return Issue{path, "E1", why + "; every parameter carries value, unit, evidence class and source", true, v.line};
   };
   rep.issues = validate_schema(doc, schema, hook);
+  if (!rep.ok()) return rep;
+  expand_fault_systems(doc, rep.issues);
   if (!rep.ok()) return rep;
   Description d;
   Typer t{Ctx{&rep.issues}, doc, d};

@@ -34,7 +34,7 @@ ParametricModel::ParametricModel(const desc::Description& d, const BuildInputs& 
     FaultInfo fi;
     fi.name = f.name;
     fi.index = f.index;
-    fi.age = static_cast<int>(f.age);
+    fi.age = f.age;
     fi.ref_point = f.p0;
     fi.strike_dir = f.s;
     fi.dip_dir = f.dd;

@@ -1,0 +1,69 @@
+# Stage 4B example (STX-TN-15 section 2.2): a negative flower structure. A vertical right-lateral
+# strike-slip fault (600 m of slip) splays upward above 1800 m into four normal splays that fan by
+# 40 degrees and together drop the central block by 120 m. The flower is written once and expands
+# into the splays, each abutting the master on its own side. DESIGN model; every parameter carries
+# value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: negative_flower, version: "1.0.0", status: DESIGN,
+        title: "Negative flower structure above a strike-slip fault"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, fixed block"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+      H4: "1600 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+faults:
+  - name: F1
+    age: "1 ordinal | user_instruction | worked example: the master"
+    geometry:
+      type: planar
+      reference_point: "[5000, 5000] m | user_instruction | worked example"
+      reference_depth: "1300 m | user_instruction | worked example"
+      strike: "0 deg | user_instruction | worked example: north-south"
+      dip: "90 deg | user_instruction | worked example: vertical"
+    extent:
+      upper_tip: {rule: free}
+      lower_tip: {rule: free}
+      length: "30000 m | user_instruction | worked example: longer than the model"
+    throw:
+      slip: "600 m | user_instruction | worked example"
+      sense: right_lateral
+      profile_dip: {type: flat_topped, taper: "0.25 fraction | user_instruction | worked example"}
+      profile_strike: {type: flat_topped, taper: "0.2 fraction | user_instruction | worked example"}
+    slip_mode: strike_slip
+    hanging_wall: {type: rigid}
+fault_systems:
+  - name: FL
+    type: flower
+    master: F1
+    sense: negative
+    age: "2 ordinal | user_instruction | worked example: the splays, after the master's slip"
+    splays: "4 ordinal | user_instruction | worked example"
+    spread: "40 deg | literature_derived | Harding (1985): splays fan by tens of degrees"
+    vertical_component: "120 m | user_instruction | worked example: subsidence of the central block"
+    branch_depth: "1800 m | user_instruction | worked example: below the deepest horizon"
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[3000, 5000], [7000, 5000]] m | user_instruction | worked example: across the flower"
+  vertical_exaggeration: "3 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv]

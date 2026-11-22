@@ -173,6 +173,7 @@ struct FaultDesc {
   Param drag_fraction, drag_width;
   std::string relay_fault;         ///< relay.fault: soft-linked relay with this fault
   bool relay_breached = false;
+  bool linking = false;            ///< stage 4B: connecting fault of a breached relay (no slip of its own)
   // Movement sense (STX-TN-05 section 5).
   std::string sense;               ///< throw.sense: normal | reverse | left_lateral | right_lateral
   Param net_slip;                  ///< throw.slip: net slip of oblique and strike-slip faults
@@ -256,6 +257,7 @@ struct GridDesc {
   std::vector<GridTransformDesc> transforms;
   std::string transmissibility;             ///< "" or "manzocchi_1999"
   bool tetrahedral = false;
+  std::string pillars = "fault_conforming";  ///< stage 4B: fault_conforming | vertical (dense intersecting networks)
 };
 
 /// Bodies (stage 4B, STX-TN-15 section 1): salt sheets, sills, saucer sills, dykes, injectites.

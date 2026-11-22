@@ -21,8 +21,20 @@ has its own version (`stratonix_schema`).
 - Stage 4B (STX-TN-15), in progress:
   - bodies: salt sheets, sills, saucer sills, dykes and sand injectites (`bodies`, check C30,
     rule F38); examples `salt_sheet_drape`, `saucer_sill_forced_fold`, `injectite_complex`.
+  - fault systems (`fault_systems`: polygonal networks, flower structures, duplexes of
+    ramp-flat thrusts; rule F43) expanded into ordinary faults before typing; breached relays
+    (`relay.breached: true`) built with a connecting fault (I-023); growth strata and phases on
+    rigid, decay and linear-between-faults hanging walls (I-027, I-030, planar faults);
+    `grid.pillars: vertical`; examples `polygonal_faults`, `negative_flower`, `thrust_duplex`,
+    `breached_relay`, `growth_fault_decay`.
 
 ### Changed
+- C3 and C4 set aside samples where another fault's plane lies between their probes or
+  cut-offs (fault networks); the detail line counts them.
+- A fault that abuts another holds its footwall fixed when the frame point lies on the far side
+  of the abutted fault.
+- The key numbers of a model with more than eight faults list the six largest throws and one
+  line for the rest.
 - Least-squares conditioning updates its Jacobian by Broyden's formula: one model build per
   iteration after the first finite-difference Jacobian.
 - Roadmap 3.1 (`docs/roadmap.md`): a new v4, geological engine and real data (stages 4A to 4D), comes

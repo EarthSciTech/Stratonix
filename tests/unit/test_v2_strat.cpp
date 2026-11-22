@@ -214,8 +214,12 @@ TEST_CASE("P23/P24 refusals (F20, F22, F23)") {
   auto r1 = validate(bad);
   CHECK(!r1.ok());
   CHECK(r1.text().find("F20") != std::string::npos);
+  // stage 4B (I-027): growth on a rigid planar fault is accepted; a shear hanging wall still is not
+  auto r2a = validate(model_yaml(planar_fault("F1", "1", "[5000, 5000] m", "1300 m", "0 deg", "60 deg", "100000 m", "max: " + q("200 m"),
+                                              "dip_slip", "{type: rigid}", "    growth: {onset: H3, end: H1}\n")));
+  CHECK(r2a.ok());
   auto r2 = validate(model_yaml(planar_fault("F1", "1", "[5000, 5000] m", "1300 m", "0 deg", "60 deg", "100000 m", "max: " + q("200 m"),
-                                             "dip_slip", "{type: rigid}", "    growth: {onset: H3, end: H1}\n")));
+                                             "dip_slip", "{type: vertical_shear}", "    growth: {onset: H3, end: H1}\n")));
   CHECK(!r2.ok());
   CHECK(r2.text().find("F22") != std::string::npos);
   std::string c = clino("sigmoidal");

@@ -32,7 +32,7 @@ if(NOT STX_GIT_COMMIT)
 endif()
 
 # ---- Layer 0: core -------------------------------------------------------------------------
-add_library(stratonix_core STATIC src/core/core.cpp src/core/well.cpp src/core/linalg.cpp)
+add_library(stratonix_core STATIC src/core/core.cpp src/core/well.cpp src/core/linalg.cpp src/core/faultsystems.cpp)
 target_include_directories(stratonix_core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_definitions(stratonix_core PRIVATE
   STRATONIX_VERSION="${PROJECT_VERSION}" STRATONIX_GIT_COMMIT="${STX_GIT_COMMIT}"

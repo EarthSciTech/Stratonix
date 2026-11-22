@@ -544,6 +544,43 @@ younger):
 
 Examples: `salt_sheet_drape`, `saucer_sill_forced_fold`, `injectite_complex`.
 
+## 2.18 Fault systems, breached relays and growth on more hanging walls (2026.4)
+
+A top-level `fault_systems` list writes a whole network once. Before the description is typed,
+each system expands into ordinary faults named `<system>_01`, `<system>_02`, ... They are
+appended to `faults`, carry the system's evidence class and a source naming the system, and are
+listed in the resolved description. Every rule and check then applies to each of them as to a
+fault written by hand (C10 scaling included). Rule F43 covers the systems.
+
+| `type` | Keys | Expands into |
+| --- | --- | --- |
+| `polygonal` | `unit_top`, `unit_base` (horizons), `area` [[x0, y0], [x1, y1]], `reference_depth`, `spacing` (100 to 2000 m), `dip_mean` (30 to 70 degrees), `dip_sd`, `throw_ratio` (throw / length, at most 0.1), `seed` | planar normal faults on a seeded jittered lattice, tips on the two horizons, conjugate dip directions, throws scaled by length; at most 48 per system |
+| `flower` | `master` (a planar fault dipping at least 80 degrees), `sense` (`positive` or `negative`), `splays` (2 to 9), `spread` (10 to 60 degrees), `vertical_component`, `branch_depth` | the non-vertical splays, reverse (positive) or normal (negative), each abutting the master on its own side and sharing the vertical component; the master keeps the horizontal slip |
+| `duplex` | `start` (the hinterland ramp, midway between floor and roof), `strike` (ramps dip to its right), `floor_depth`, `roof_depth`, `horses` (at most 12), `horse_length`, `ramp_angle` (10 to 45 degrees), `slip` (per horse), `length` | ramp-flat thrusts (floor flat, ramp, roof flat) on fault-parallel-flow hanging walls, each younger than the one behind it; the style (hinterland-dipping, antiformal stack, foreland-dipping) follows from slip / horse length and is named in the source |
+
+Every system takes a `name` and an `age`; generated faults take the age plus 0.001 per fault in
+order.
+
+**Breached relays.** `relay: {fault: G, breached: true}` replaces the soft-linked ramp with a
+connecting fault `<F>_<G>_breach` across the middle of the overlap. It contains the relay faults'
+slip vector, so neither carries its hanging wall across it. Both relay faults terminate against
+it, each on its own side, so the throw passes from one to the other through the breach. The
+connecting fault has no slip of its own (`linking: true`): its offset is the linked faults'
+throw, so C4 and C10 skip it.
+
+**Growth strata and phases** move each layer by its own throw. Since 2026.4 they work on planar
+faults with `rigid`, `decay` and `linear_between_faults` hanging walls as well as `layer_rigid`.
+The hanging wall's distance factor scales each layer's throw. Curved and fold-kinematic hanging
+walls are not combined with growth yet. Faults that move level by level must be all the faults
+of a model or none.
+
+**Grids of dense networks.** `grid.pillars: vertical` keeps every pillar vertical, with the
+faults stair-stepped across cells. Use it when many intersecting faults would tilt pillars into
+each other. The default is `fault_conforming`.
+
+Examples: `polygonal_faults`, `negative_flower`, `thrust_duplex`, `breached_relay`,
+`growth_fault_decay`.
+
 # 3. Running
 
 | Command | What it does |

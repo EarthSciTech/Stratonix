@@ -778,6 +778,46 @@
         }
       }
     },
+    "fault_systems": {
+      "type": "array",
+      "description": "Stage 4B (STX-TN-15 sections 2.1 to 2.3): polygonal fault networks, flower structures and duplexes, expanded into ordinary faults before typing.",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "age"],
+        "additionalProperties": false,
+        "properties": {
+          "age": {"$ref": "#/$defs/param"},
+          "area": {"$ref": "#/$defs/param"},
+          "reference_depth": {"$ref": "#/$defs/param"},
+          "spacing": {"$ref": "#/$defs/param"},
+          "dip_mean": {"$ref": "#/$defs/param"},
+          "dip_sd": {"$ref": "#/$defs/param"},
+          "throw_ratio": {"$ref": "#/$defs/param"},
+          "seed": {"$ref": "#/$defs/param"},
+          "vertical_component": {"$ref": "#/$defs/param"},
+          "spread": {"$ref": "#/$defs/param"},
+          "splays": {"$ref": "#/$defs/param"},
+          "branch_depth": {"$ref": "#/$defs/param"},
+          "start": {"$ref": "#/$defs/param"},
+          "strike": {"$ref": "#/$defs/param"},
+          "horses": {"$ref": "#/$defs/param"},
+          "horse_length": {"$ref": "#/$defs/param"},
+          "ramp_angle": {"$ref": "#/$defs/param"},
+          "slip": {"$ref": "#/$defs/param"},
+          "length": {"$ref": "#/$defs/param"},
+          "thickness": {"$ref": "#/$defs/param"},
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+          "type": {"type": "string", "enum": ["polygonal", "flower", "duplex"]},
+          "unit_top": {"type": "string"},
+          "unit_base": {"type": "string"},
+          "master": {"type": "string"},
+          "sense": {"type": "string", "enum": ["positive", "negative"]},
+          "floor_depth": {"$ref": "#/$defs/param"},
+          "roof_depth": {"$ref": "#/$defs/param"},
+          "note": {"type": "string"}
+        }
+      }
+    },
     "faults": {
       "type": "array",
       "items": {
@@ -792,6 +832,7 @@
         ],
         "additionalProperties": false,
         "properties": {
+          "linking": {"type": "boolean", "description": "Stage 4B: the connecting fault of a breached relay, generated; it has no slip of its own."},
           "name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9_.-]+$"
@@ -1987,6 +2028,11 @@
         },
         "tetrahedral": {
           "type": "boolean"
+        },
+        "pillars": {
+          "type": "string",
+          "enum": ["fault_conforming", "vertical"],
+          "description": "Stage 4B: vertical pillars for dense intersecting fault networks (faults stair-stepped across cells)."
         }
       }
     },

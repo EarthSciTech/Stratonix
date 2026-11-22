@@ -1,0 +1,53 @@
+# Stage 4B example (STX-TN-15 section 2.3): a forward-breaking thrust duplex of four horses between
+# a floor thrust at 1500 m (in Unit_3) and a roof thrust at 1100 m (in Unit_1). Each ramp dips 30
+# degrees to the east, the horses are 600 m long and each carries 300 m of slip, so the slip is half
+# the horse length: a hinterland-dipping duplex. The duplex is written once and expands into
+# ramp-flat thrusts (floor flat, ramp, roof flat) on fault-parallel-flow hanging walls, each younger than the one behind it and carrying the older
+# horses over its ramp. DESIGN model; every parameter carries value, unit, evidence and source.
+stratonix_schema: 1
+model: {name: thrust_duplex, version: "1.0.0", status: DESIGN,
+        title: "Hinterland-dipping thrust duplex between a floor and a roof"}
+crs: {name: "local engineering frame", epsg: 0, vertical_datum: "model datum, z = 0", length_unit: m}
+domain:
+  origin: "[0, 0] m | user_instruction | worked example"
+  size:   "[10000, 10000] m | user_instruction | worked example"
+  depth_range: "[0, 3000] m | user_instruction | worked example"
+  grid_spacing: "50 m | user_instruction | worked example"
+wells:
+  - name: W1
+    role: control
+    head: "[1000, 1000] m | user_instruction | worked example: control well, fixed block"
+    tops:
+      H1: "1000 m | user_instruction | worked example"
+      H2: "1200 m | user_instruction | worked example"
+      H3: "1400 m | user_instruction | worked example"
+      H4: "1600 m | user_instruction | worked example"
+stratigraphy:
+  reference: {well: W1}
+  horizons: [{name: H1, intended_offset: true}, {name: H2}, {name: H3}, {name: H4, intended_offset: true}]
+  units:
+    - {name: Unit_1, top: H1, base: H2}
+    - {name: Unit_2, top: H2, base: H3}
+    - {name: Unit_3, top: H3, base: H4}
+structure:
+  regional: {type: flat}
+fault_systems:
+  - name: DX
+    type: duplex
+    age: "1 ordinal | user_instruction | worked example: the hinterland ramp first"
+    floor_depth: "1500 m | user_instruction | worked example: floor thrust in Unit_3"
+    roof_depth: "1100 m | user_instruction | worked example: roof thrust in Unit_1"
+    start: "[6500, 5000] m | user_instruction | worked example: the hinterland ramp, midway between floor and roof"
+    strike: "0 deg | user_instruction | worked example: ramps dip east, transport to the west"
+    length: "30000 m | user_instruction | worked example: longer than the model"
+    horses: "4 ordinal | user_instruction | worked example"
+    horse_length: "600 m | user_instruction | worked example"
+    ramp_angle: "30 deg | literature_derived | Boyer and Elliott (1982): ramps of 20 to 30 degrees"
+    slip: "300 m | user_instruction | worked example: slip per horse"
+frame: {fixed: {well: W1}}
+outputs:
+  sections:
+    - name: XS_EW
+      polyline: "[[2000, 5000], [8000, 5000]] m | user_instruction | worked example: across the duplex"
+  vertical_exaggeration: "2 ratio | user_instruction | worked example"
+  exports: [petrel, vtk, csv]

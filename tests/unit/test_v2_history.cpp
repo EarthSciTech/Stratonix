@@ -133,14 +133,17 @@ TEST_CASE("P29 refusals (F26)") {
                                 events({60, 80, 90, 100}, "  - {name: X, type: fault, fault: F9, age: " + age(85) + "}\n")));
   CHECK(!r1.ok());
   CHECK(r1.text().find("F26") != std::string::npos);
-  auto r2 = validate(model_yaml(planar_fault("F1", "1", "[5000, 5000] m", "1300 m", "0 deg", "60 deg", "100000 m", "max: " + q("300 m"),
-                                             "dip_slip"),
-                                "", {1000, 1200, 1400, 1600},
-                                events({60, 80, 90, 100},
-                                       "  - {name: A, type: fault, fault: F1, age: " + age(85) + ", throw: " + q("300 m") + ", sense: normal}\n"
-                                       "  - {name: B, type: fault, fault: F1, age: " + age(70) + ", throw: " + q("150 m") + ", sense: reverse}\n")));
-  CHECK(!r2.ok());
-  CHECK(r2.text().find("F26") != std::string::npos);
+  // stage 4B (I-030): phases on a rigid planar fault go level by level and are accepted
+  const std::string phased = model_yaml(planar_fault("F1", "1", "[5000, 5000] m", "1300 m", "0 deg", "60 deg", "100000 m", "max: " + q("300 m"),
+                                                     "dip_slip"),
+                                        "", {1000, 1200, 1400, 1600},
+                                        events({60, 80, 90, 100},
+                                               "  - {name: A, type: fault, fault: F1, age: " + age(85) + ", throw: " + q("300 m") + ", sense: normal}\n"
+                                               "  - {name: B, type: fault, fault: F1, age: " + age(70) + ", throw: " + q("150 m") + ", sense: reverse}\n"));
+  auto r2 = validate(phased);
+  CHECK(r2.ok());
+  auto m2 = build_text(phased);
+  CHECK(m2 != nullptr);
   auto r3 = validate(model_yaml(lr_fault(), "", {1000, 1200, 1400, 1600}, events({60, 80, 90}, "")));
   CHECK(!r3.ok());
   CHECK(r3.text().find("F26") != std::string::npos);
