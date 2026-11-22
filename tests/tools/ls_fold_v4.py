@@ -63,7 +63,10 @@ def main(exe, report, npoints=100):
     model = GeologicalModel(bb[0, :], bb[1, :])
     model.set_model_data(pd.concat([train, s1]))
     frame = model.create_and_add_fold_frame("s1", interpolatortype="PLI", nelements=10000, buffer=0.5, solver="pyamg", damp=True)
-    model.create_and_add_folded_foliation("s0", frame, nelements=10000, buffer=0.5)
+    try:  # LoopStructural >= 1.12: the fold frame is keyword-only
+        model.create_and_add_folded_foliation("s0", fold_frame=frame, nelements=10000, buffer=0.5)
+    except TypeError:  # earlier versions take it positionally
+        model.create_and_add_folded_foliation("s0", frame, nelements=10000, buffer=0.5)
     xyz = hold[["X", "Y", "Z"]].to_numpy(float)
     g_ls = model.evaluate_feature_gradient("s0", xyz)
     e_ls = angles(g_ls, truth)

@@ -13,6 +13,12 @@ add_library(stratonix_engines STATIC
   src/engines/foldframe.cpp
   src/engines/posterior.cpp
   src/engines/geophysics.cpp
+  src/engines/bodies.cpp
+  src/engines/faultstyles.cpp
+  src/engines/depositional.cpp
+  src/engines/restoration3d.cpp
+  src/engines/fractures.cpp
+  src/engines/thermal.cpp
   src/engines/wells.cpp
   src/engines/register.cpp)
 target_link_libraries(stratonix_engines PUBLIC stratonix_model stratonix_desc stratonix_registry)
