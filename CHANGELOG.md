@@ -43,6 +43,11 @@ has its own version (`stratonix_schema`).
     properties `P32` and `P32_DFN` (realised network intensity per cell), and temperature and
     overpressure are drawn over the burial curves at each well.
 
+- Stage 4C opened (STX-TN-16): interfaces for well logs (LAS 2.0 and 3.0, DLIS), deviation
+  surveys, ages and well correlation, log upscaling, SEG-Y volumes, horizon picks and fault
+  sticks, layer-cake time-to-depth conversion, coordinate transformations and geological maps;
+  `test_v4_data` D1 to D18, expected to fail until Prompts 55 to 57.
+
 ### Changed
 - C27 (watertight surfaces) checks the present-day model only; restored states are covered by
   C17 and C26. The checks, figures and exports of a build share the faulted horizon surfaces, so

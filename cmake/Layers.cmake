@@ -19,6 +19,8 @@ add_library(stratonix_engines STATIC
   src/engines/restoration3d.cpp
   src/engines/fractures.cpp
   src/engines/thermal.cpp
+  src/engines/surveys.cpp
+  src/engines/timedepth.cpp
   src/engines/wells.cpp
   src/engines/register.cpp)
 target_link_libraries(stratonix_engines PUBLIC stratonix_model stratonix_desc stratonix_registry)
@@ -32,7 +34,8 @@ add_library(stratonix_repr STATIC
   src/repr/closure.cpp
   src/repr/grid.cpp
   src/repr/geotime.cpp
-  src/repr/topology.cpp)
+  src/repr/topology.cpp
+  src/repr/upscale.cpp)
 target_link_libraries(stratonix_repr PUBLIC stratonix_model stratonix_registry)
 stx_layer(stratonix_repr 4)
 
@@ -51,6 +54,9 @@ add_library(stratonix_io STATIC
   src/io/neutral.cpp
   src/io/importers.cpp
   src/io/grid_export.cpp
+  src/io/welldata.cpp
+  src/io/seismic.cpp
+  src/io/maps.cpp
   src/io/register.cpp)
 target_link_libraries(stratonix_io PUBLIC stratonix_engines stratonix_repr)
 if(STRATONIX_WITH_FESAPI)

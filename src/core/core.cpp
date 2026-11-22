@@ -126,6 +126,15 @@ bool crs_reprojection_available() {
 #endif
 }
 
+// Stage 4C stub (STX-TN-16 section 2.4): implemented by Prompt 56.
+CrsTransform::CrsTransform(const CrsInfo&, const CrsInfo&) {
+  throw Error(ErrorCode::NotImplemented, "CrsTransform: not implemented yet (Prompt 56)");
+}
+CrsTransform::~CrsTransform() = default;
+void CrsTransform::apply(std::vector<double>&, std::vector<double>&, std::vector<double>&) const {
+  throw Error(ErrorCode::NotImplemented, "CrsTransform::apply: not implemented yet (Prompt 56)");
+}
+
 // ---- SHA-256 (FIPS 180-4) -------------------------------------------------------------------
 namespace {
 struct Sha256 {
