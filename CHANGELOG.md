@@ -147,6 +147,9 @@ Checks C26 to C40, rules F34 to F50 come with them. The C API stays 1.2.
 - The LAS reader reads files as lasio does where the standard leaves room (UTF-16, curves without
   a mnemonic or colon, extra or missing data columns, decimal commas, LAS 3.0 files with LAS 2.0
   section names), each reported; the index is never treated as null.
+- PROJ's database is looked for beside the library or executable (`share/proj`) and in the
+  directory found when the build was configured, unless PROJ_DATA or PROJ_LIB is set; the Windows
+  package carries `share/proj/proj.db` with PROJ's DLL.
 
 ### Fixed
 - FESAPI is found from a Windows path with backslashes; PROJ is found where it ships no CMake

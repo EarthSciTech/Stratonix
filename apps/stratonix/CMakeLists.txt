@@ -5,6 +5,11 @@ install(TARGETS stratonix RUNTIME DESTINATION bin)
 if(WIN32)
   # Ship the DLLs of dynamically linked dependencies (Cairo is LGPL and linked dynamically).
   install(FILES $<TARGET_RUNTIME_DLLS:stratonix> DESTINATION bin OPTIONAL)
+  # PROJ's DLL is shipped, so its database goes with it (found at run time in ..\share\proj).
+  # On Linux the system's libproj keeps its own database.
+  if(STRATONIX_WITH_PROJ AND STX_PROJ_DB)
+    install(FILES "${STX_PROJ_DB}" DESTINATION share/proj)
+  endif()
 endif()
 # Stage 4C (STX-TN-16 section 4): release packages carry the RESQML exporter. FESAPI's library is
 # shipped beside the executable (lib on Linux, found through the RPATH; bin on Windows), with its

@@ -4,6 +4,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <fstream>
 #include <iostream>
@@ -12,6 +13,7 @@
 #include <sstream>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "stratonix/core/crs.hpp"
 
@@ -137,6 +139,9 @@ bool crs_reprojection_available() {
 #endif
 }
 
+namespace detail {
+std::string module_dir();  // directory of the executable or shared library holding this code; empty if unknown
+}
 // Stage 4C (STX-TN-16 section 2.4): a transformation between two CRS chosen by PROJ.
 #ifdef STRATONIX_WITH_PROJ
 namespace {
@@ -145,9 +150,36 @@ std::string crs_def(const CrsInfo& c) {
   if (c.epsg > 0) return "EPSG:" + std::to_string(c.epsg);
   throw Error(ErrorCode::Validation, "a local frame (epsg 0, no WKT) cannot be transformed to or from a coordinate reference system");
 }
+// PROJ needs its database (proj.db). When neither PROJ_DATA nor PROJ_LIB is set, look next to the
+// module holding this code (an installed package keeps it in share/proj), then in the directory
+// found when the build was configured.
+void set_proj_search_paths(PJ_CONTEXT* ctx) {
+  const char* e1 = std::getenv("PROJ_DATA");
+  const char* e2 = std::getenv("PROJ_LIB");
+  if ((e1 && *e1) || (e2 && *e2)) return;
+  std::vector<std::string> cand;
+  const std::string m = detail::module_dir();
+  if (!m.empty()) {
+    cand.push_back(m + "/../share/proj");
+    cand.push_back(m + "/share/proj");
+    cand.push_back(m + "/proj");
+    cand.push_back(m);
+  }
+#ifdef STRATONIX_PROJ_DATA_DIR
+  cand.push_back(STRATONIX_PROJ_DATA_DIR);
+#endif
+  std::vector<std::string> found;
+  for (const auto& c : cand)
+    if (std::ifstream(c + "/proj.db", std::ios::binary).good()) found.push_back(c);
+  if (found.empty()) return;
+  std::vector<const char*> ptr;
+  for (const auto& f : found) ptr.push_back(f.c_str());
+  proj_context_set_search_paths(ctx, static_cast<int>(ptr.size()), ptr.data());
+}
 }  // namespace
 CrsTransform::CrsTransform(const CrsInfo& from, const CrsInfo& to) {
   PJ_CONTEXT* ctx = proj_context_create();
+  set_proj_search_paths(ctx);
   PJ* p = proj_create_crs_to_crs(ctx, crs_def(from).c_str(), crs_def(to).c_str(), nullptr);
   if (!p) {
     const std::string why = proj_context_errno_string(ctx, proj_context_errno(ctx));
@@ -384,9 +416,31 @@ void parallel_for(std::size_t n, std::size_t chunk,
 #include <psapi.h>
 #pragma comment(lib, "psapi.lib")
 #else
+#include <dlfcn.h>
 #include <sys/resource.h>
 #endif
 namespace stratonix {
+namespace detail {
+std::string module_dir() {
+  std::string path;
+#if defined(_WIN32)
+  HMODULE h = nullptr;
+  if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         reinterpret_cast<LPCSTR>(&module_dir), &h)) {
+    char buf[MAX_PATH * 4];
+    const DWORD n = GetModuleFileNameA(h, buf, static_cast<DWORD>(sizeof(buf)));
+    if (n > 0 && n < sizeof(buf)) path.assign(buf, n);
+  }
+  for (auto& c : path)
+    if (c == '\\') c = '/';
+#else
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void*>(&module_dir), &info) && info.dli_fname) path = info.dli_fname;
+#endif
+  const auto k = path.find_last_of('/');
+  return k == std::string::npos ? std::string() : path.substr(0, k);
+}
+}  // namespace detail
 std::size_t peak_rss_bytes() {
 #if defined(_WIN32)
   PROCESS_MEMORY_COUNTERS pmc;

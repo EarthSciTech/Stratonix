@@ -304,6 +304,8 @@ jobs:
           if ($v -notmatch "RESQML 2.0.1 export \(FESAPI\): included") { throw "the package does not include the RESQML exporter" }
           & $exe.FullName export examples/fault_system_relay_splay.yaml -o C:/stx_resqml --formats resqml
           if (-not (Get-ChildItem C:/stx_resqml -Recurse -Filter *.epc)) { throw "no RESQML file written" }
+          # PROJ's DLL is shipped with its database
+          if (-not (Get-ChildItem C:/stx_clean -Recurse -Filter proj.db)) { throw "the package does not carry PROJ's database" }
       - uses: actions/upload-artifact@v4
         if: matrix.config == 'Release'
         with:
