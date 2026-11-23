@@ -166,6 +166,9 @@ Checks C26 to C40, rules F34 to F50 come with them. The C API stays 1.2.
   checks (I-048).
 - RESQML exports are validated against the Energistics schemas only when the owner supplies them
   to CI (I-034).
+- Models with many faults take minutes to draw: the figures evaluate the fault surfaces and
+  cut-off lines again (the thrust duplex example builds in 2 to 6 minutes, most of it in figures;
+  I-051). The Windows Debug CI job leaves that example to the other builds.
 
 ## [2026.3] - 2026-11-15 - Version 3: data, grids and uncertainty
 

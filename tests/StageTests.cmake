@@ -130,6 +130,10 @@ foreach(ex one_fault dome_blind_fault implicit_from_samples layered_faults_sheet
            -DDESC=${PROJECT_SOURCE_DIR}/examples/${ex}.yaml -DOUT=${STX_TEST_TMP}/cli_build_${ex}
            -P ${CMAKE_CURRENT_SOURCE_DIR}/RunBuild.cmake)
 endforeach()
+# The thrust duplex takes over four hours in an MSVC Debug build (checked iterators; its figures
+# evaluate the fault surfaces again, I-051): label it so the Windows Debug job can leave it to the
+# Windows Release, Linux debug and sanitizer builds, which build it.
+set_tests_properties(cli_build_thrust_duplex PROPERTIES LABELS slow_debug)
 foreach(ex implicit_unconformity_from_samples implicit_relay_splay_from_samples implicit_detachment_folds_from_samples implicit_faults_series_from_data polygonal_faults)
   set_tests_properties(cli_build_${ex} PROPERTIES TIMEOUT 3600)
 endforeach()
