@@ -38,3 +38,16 @@ foreach(b missing_evidence overlapping_units tip_below_base)
 endforeach()
 add_test(NAME cli_version COMMAND stratonix version)
 add_test(NAME cli_plugins COMMAND stratonix plugins)
+
+# Sanitizer builds run several times slower, and ctest runs four tests at once on CI's four cores:
+# the time limits set above are tripled there (tests with no limit keep ctest's default).
+if(STRATONIX_SANITIZE)
+  get_property(stx_all_tests DIRECTORY PROPERTY TESTS)
+  foreach(t IN LISTS stx_all_tests)
+    get_test_property(${t} TIMEOUT stx_to)
+    if(stx_to)
+      math(EXPR stx_to "${stx_to} * 3")
+      set_tests_properties(${t} PROPERTIES TIMEOUT ${stx_to})
+    endif()
+  endforeach()
+endif()
