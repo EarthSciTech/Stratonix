@@ -207,7 +207,12 @@ class Search {
             if (r2 <= 1.0) cand.push_back({r2, q});
           }
         }
-    std::sort(cand.begin(), cand.end());
+    // (distance, index) is a total order, so sorting only the first max_data gives the same nodes
+    // in the same order as a full sort; an octant limit may skip candidates, so it sorts them all
+    if (!s_.max_per_octant && s_.max_data > 0 && cand.size() > s_.max_data)
+      std::partial_sort(cand.begin(), cand.begin() + static_cast<std::ptrdiff_t>(s_.max_data), cand.end());
+    else
+      std::sort(cand.begin(), cand.end());
     std::vector<std::size_t> out;
     std::size_t oct[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     for (auto& [r2, q] : cand) {

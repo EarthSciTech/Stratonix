@@ -1,6 +1,7 @@
 // Minimal test harness (Catch2-style macros) so the test suite builds without network access.
 // Each test executable registers TEST_CASEs and runs them all; CTest runs the executables.
 #pragma once
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <functional>
@@ -80,12 +81,26 @@ inline std::string tmp_dir() {
     if (!stx_thrown_) STX_FAIL_MSG("expected exception: " #stmt); \
   } while (0)
 
+namespace stxtest {
+/// A case runs when the filter is empty or one of its '|'-separated parts occurs in its name.
+inline bool selected(const std::string& name, const std::string& filter) {
+  if (filter.empty()) return true;
+  std::size_t a = 0;
+  while (a <= filter.size()) {
+    const std::size_t b = std::min(filter.find('|', a), filter.size());
+    const std::string part = filter.substr(a, b - a);
+    if (!part.empty() && name.find(part) != std::string::npos) return true;
+    a = b + 1;
+  }
+  return false;
+}
+}  // namespace stxtest
 #define STX_TEST_MAIN()                                                                 \
   int main(int argc, char** argv) {                                                     \
     std::string filter = argc > 1 ? argv[1] : "";                                       \
     int run = 0;                                                                        \
     for (auto& c : stxtest::cases()) {                                                  \
-      if (!filter.empty() && std::string(c.name).find(filter) == std::string::npos) continue; \
+      if (!stxtest::selected(c.name, filter)) continue;                                  \
       ++run;                                                                            \
       int before = stxtest::failures();                                                 \
       try { c.fn(); } catch (stxtest::Abort&) {                                         \

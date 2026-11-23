@@ -150,6 +150,9 @@ Checks C26 to C40, rules F34 to F50 come with them. The C API stays 1.2.
 - PROJ's database is looked for beside the library or executable (`share/proj`) and in the
   directory found when the build was configured, unless PROJ_DATA or PROJ_LIB is set; the Windows
   package carries `share/proj/proj.db` with PROJ's DLL.
+- The geostatistics neighbour search sorts only the nearest candidates it keeps (same nodes, same
+  order, same bytes; indicator simulation about 2.5 times faster); test_v4_scale runs as three
+  ctest entries so the debug and sanitizer builds finish within their time limits.
 
 ### Fixed
 - FESAPI is found from a Windows path with backslashes; PROJ is found where it ships no CMake

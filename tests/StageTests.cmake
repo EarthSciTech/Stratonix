@@ -49,8 +49,14 @@ set_tests_properties(test_v4_geology PROPERTIES TIMEOUT 3600)
 stx_test(test_v4_data stratonix_package)
 set_tests_properties(test_v4_data PROPERTIES TIMEOUT 1800)
 # Stage 4D (STX-TN-17 section 9): written first (Prompt 58), built by Prompts 59 to 61
+# Three entries so that ctest runs them side by side (debug and sanitizer builds take minutes on
+# the simulations and builds): geostatistics and sensitivity, indicator simulation, builds.
 stx_test(test_v4_scale stratonix_package)
-set_tests_properties(test_v4_scale PROPERTIES TIMEOUT 1800)
+set_tests_properties(test_v4_scale PROPERTIES DISABLED TRUE)  # the three entries below run every case
+add_test(NAME test_v4_scale_geostat COMMAND test_v4_scale "S1 |S2 |S3 |S4 |S6 |S7 |S8 |S9 |S10 ")
+add_test(NAME test_v4_scale_sis COMMAND test_v4_scale "S5 ")
+add_test(NAME test_v4_scale_builds COMMAND test_v4_scale "S11 |S12 |S13 ")
+set_tests_properties(test_v4_scale_geostat test_v4_scale_sis test_v4_scale_builds PROPERTIES TIMEOUT 3600)
 # Stage 4A: the fold-frame command on a sine fold (axis 000, wavelength 4 km)
 add_test(NAME cli_fold_frame COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:stratonix> -DOUT=${STX_TEST_TMP}/cli_fold_frame.json
          "-DARGS=fold-frame;${CMAKE_CURRENT_SOURCE_DIR}/data/fold_bedding.csv" -P ${CMAKE_CURRENT_SOURCE_DIR}/RunCmd.cmake)
