@@ -5,6 +5,12 @@ has its own version (`stratonix_schema`).
 
 ## [Unreleased]
 
+### Changed
+
+- RESQML schema validation in CI takes the Energistics schemas from repository secrets
+  (`STX_RESQML_XSD_1` to `_8`), packed by the owner with `tools/resqml_xsd_secrets.py`; nothing is
+  hosted or committed. The `STX_RESQML_XSD_URL` secret is no longer read (I-034).
+
 ## [2026.4] - 2026-11-23 - Version 4: geological engine and real data
 
 Version 4 adds:

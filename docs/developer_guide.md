@@ -256,6 +256,14 @@ writer and a reader, a round trip against the model, and an entry in the indepen
 Petrel set, add it to `petrel_set_ids()` and refresh `tests/data/petrel_synthetic_sha256.txt`
 deliberately (the test writes the new list to the test folder).
 
+RESQML exports are validated in CI against the Energistics RESQML 2.0.1 schemas, which are licensed
+and never committed or hosted. The owner packs them into the repository secrets
+`STX_RESQML_XSD_1` to `_8` with `tools/resqml_xsd_secrets.py pack <package>` (documentation
+removed, one tar.xz archive, base64 parts of at most 48 000 characters, a header with the part
+count and the archive checksum); the `resqml` job rebuilds the folder with `unpack` and refuses
+parts that do not rebuild the packed archive. `tests/tools/check_resqml_xsd_secrets.py` tests the
+packing on a made-up package.
+
 ## 4.5 An optimised kernel
 
 Keep the reference implementation; add the optimised one behind the same function, selected by

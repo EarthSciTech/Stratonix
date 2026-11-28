@@ -80,6 +80,13 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_figures.py ${STX_TEST_TMP}/figures_synthetic/figures)
   set_tests_properties(figures_independent_check PROPERTIES DEPENDS test_figures SKIP_RETURN_CODE 77)
 endif()
+# I-034: the RESQML schemas travel to CI in repository secrets; the packing must rebuild an
+# equivalent schema set (self-test on a made-up package; skipped without lxml)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME resqml_xsd_secrets
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_resqml_xsd_secrets.py)
+  set_tests_properties(resqml_xsd_secrets PROPERTIES SKIP_RETURN_CODE 77)
+endif()
 if(Python3_Interpreter_FOUND)
   add_test(NAME petrel_set_independent_check
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_petrel_set.py ${STX_TEST_TMP}/export_petrel_a)

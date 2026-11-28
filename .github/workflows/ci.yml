@@ -174,18 +174,29 @@ jobs:
           export LD_LIBRARY_PATH=$PWD/fesapi-install/lib:$PWD/fesapi-install/lib64:$LD_LIBRARY_PATH
           build/linux-gcc-release/apps/stratonix/stratonix export examples/fault_system_relay_splay.yaml -o resqml_out --formats grdecl,resqml
           build/linux-gcc-release/tests/test_v3_grids G12
-      # Stage 4C (STX-TN-16 section 4, I-034): the RESQML 2.0.1 schemas belong to Energistics and are
-      # never committed; the owner supplies them to CI as a zip URL in the secret STX_RESQML_XSD_URL.
-      # Without it every export reports "not validated: schemas not supplied", never a pass.
-      - name: RESQML schemas (owner-supplied)
+      # I-034: the RESQML 2.0.1 schemas belong to Energistics; they are never committed and never
+      # hosted. The owner packs them into the secrets STX_RESQML_XSD_1..8 with
+      # tools/resqml_xsd_secrets.py (documentation removed, tar.xz, base64, parts of 48 000
+      # characters, a header with the part count and the archive checksum). Without them every
+      # export reports "not validated: schemas not supplied", never a pass.
+      - name: RESQML schemas (owner-supplied secrets)
         env:
-          XSD_URL: ${{ secrets.STX_RESQML_XSD_URL }}
+          STX_RESQML_XSD_1: ${{ secrets.STX_RESQML_XSD_1 }}
+          STX_RESQML_XSD_2: ${{ secrets.STX_RESQML_XSD_2 }}
+          STX_RESQML_XSD_3: ${{ secrets.STX_RESQML_XSD_3 }}
+          STX_RESQML_XSD_4: ${{ secrets.STX_RESQML_XSD_4 }}
+          STX_RESQML_XSD_5: ${{ secrets.STX_RESQML_XSD_5 }}
+          STX_RESQML_XSD_6: ${{ secrets.STX_RESQML_XSD_6 }}
+          STX_RESQML_XSD_7: ${{ secrets.STX_RESQML_XSD_7 }}
+          STX_RESQML_XSD_8: ${{ secrets.STX_RESQML_XSD_8 }}
         run: |
-          if [ -n "$XSD_URL" ]; then
-            mkdir -p "$RUNNER_TEMP/resqml_xsd" && curl -fsSL "$XSD_URL" -o "$RUNNER_TEMP/resqml_xsd.zip"
-            unzip -q "$RUNNER_TEMP/resqml_xsd.zip" -d "$RUNNER_TEMP/resqml_xsd"
+          python3 -m pip install lxml
+          if [ -n "$STX_RESQML_XSD_1" ]; then
+            python3 tools/resqml_xsd_secrets.py unpack "$RUNNER_TEMP/resqml_xsd"
             echo "STX_RESQML_XSD_DIR=$RUNNER_TEMP/resqml_xsd" >> "$GITHUB_ENV"
             echo "STX_RESQML_XSD_REQUIRED=1" >> "$GITHUB_ENV"
+          else
+            echo "RESQML schemas not supplied (secrets STX_RESQML_XSD_1..8 not set): exports will report not validated"
           fi
       - name: Read back with resqpy and validate against the schemas
         run: |
