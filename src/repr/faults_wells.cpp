@@ -22,9 +22,9 @@ void fault_vertical_roots(const Model& m, int f, const std::vector<double>& xs, 
   std::vector<Vec3> p(n);
   FaultEval a, b;
   for (std::size_t i = 0; i < n; ++i) p[i] = {xs[i], ys[i], z_hi};
-  m.evaluate_fault(f, p, a);
+  m.evaluate_fault_geometry(f, p, a);
   for (std::size_t i = 0; i < n; ++i) p[i].z = z_lo;
-  m.evaluate_fault(f, p, b);
+  m.evaluate_fault_geometry(f, p, b);
   std::vector<double> hi(n, z_hi), lo(n, z_lo), dhi = a.distance, dlo = b.distance;
   std::vector<std::size_t> act;
   for (std::size_t i = 0; i < n; ++i)
@@ -36,7 +36,7 @@ void fault_vertical_roots(const Model& m, int f, const std::vector<double>& xs, 
       q[k] = {xs[i], ys[i], 0.5 * (hi[i] + lo[i])};
     }
     FaultEval e;
-    m.evaluate_fault(f, q, e);
+    m.evaluate_fault_geometry(f, q, e);
     std::vector<std::size_t> next;
     for (std::size_t k = 0; k < act.size(); ++k) {
       std::size_t i = act[k];
@@ -72,40 +72,48 @@ FaultSurface fault_surface(const Model& m, int f, double spacing, double extend)
   std::vector<Vec3> q(N);
   for (std::size_t j = 0; j < fs.nb; ++j)
     for (std::size_t i = 0; i < fs.na; ++i) q[i + fs.na * j] = fi.ref_point + fi.strike_dir * fs.a[i] + fi.dip_dir * fs.b[j];
-  // Secant iteration along the approximate normal (exact in one step for planar faults).
+  // Secant iteration along the approximate normal (exact in one step for planar faults). Only the
+  // distance is needed, and a node whose distance is below 1e-8 keeps its position from then on,
+  // so each step evaluates only the nodes still moving (I-051; the same values as evaluating all).
   FaultEval e;
-  m.evaluate_fault(f, q, e);
+  m.evaluate_fault_geometry(f, q, e);
   std::vector<double> t0(N, 0.0), s0 = e.distance, t1(N), s1(N);
   for (std::size_t k = 0; k < N; ++k) t1[k] = -s0[k];
-  auto eval_at = [&](const std::vector<double>& t, std::vector<double>& out) {
-    std::vector<Vec3> p(N);
-    for (std::size_t k = 0; k < N; ++k) p[k] = q[k] + fi.normal * t[k];
-    FaultEval ee;
-    m.evaluate_fault(f, p, ee);
-    out = ee.distance;
+  std::vector<std::size_t> idx;
+  std::vector<Vec3> p;
+  FaultEval ee;
+  auto eval_at = [&](const std::vector<double>& t, std::vector<double>& out, const std::vector<std::size_t>* only) {
+    const std::size_t n = only ? only->size() : N;
+    p.resize(n);
+    for (std::size_t r = 0; r < n; ++r) {
+      const std::size_t k = only ? (*only)[r] : r;
+      p[r] = q[k] + fi.normal * t[k];
+    }
+    m.evaluate_fault_geometry(f, p, ee);
+    for (std::size_t r = 0; r < n; ++r) out[only ? (*only)[r] : r] = ee.distance[r];
   };
-  eval_at(t1, s1);
-  std::vector<double> t(t1);
+  eval_at(t1, s1, nullptr);
+  std::vector<double> t2(N), s2(N);
   for (int it = 0; it < 20; ++it) {
     double worst = 0;
     for (double v : s1) worst = std::max(worst, std::fabs(v));
     if (worst < 1e-8) break;
-    std::vector<double> t2(N);
+    idx.clear();
     for (std::size_t k = 0; k < N; ++k) {
       double den = s1[k] - s0[k];
       t2[k] = std::fabs(den) > 1e-14 ? t1[k] - s1[k] * (t1[k] - t0[k]) / den : t1[k];
       if (std::fabs(s1[k]) < 1e-8) t2[k] = t1[k];
+      if (t2[k] == t1[k]) s2[k] = s1[k];  // same point, same distance
+      else idx.push_back(k);
     }
-    std::vector<double> s2;
-    eval_at(t2, s2);
+    eval_at(t2, s2, &idx);
     t0.swap(t1); s0.swap(s1);
     t1 = t2; s1 = s2;
   }
-  t = t1;
   fs.nodes.resize(N);
-  for (std::size_t k = 0; k < N; ++k) fs.nodes[k] = q[k] + fi.normal * t[k];
+  for (std::size_t k = 0; k < N; ++k) fs.nodes[k] = q[k] + fi.normal * t1[k];
   FaultEval fe;
-  m.evaluate_fault(f, fs.nodes, fe);
+  m.evaluate_fault_geometry(f, fs.nodes, fe);
   fs.extent.resize(N);
   // Combine the tip-line extent with the domain box (<= 1 inside both).
   double cx = d.x0 + d.sx / 2, cy = d.y0 + d.sy / 2, cz = 0.5 * (d.z_top + d.z_base);
@@ -198,10 +206,16 @@ std::vector<CutoffLine> cutoff_lines(const Model& m, const FaultSurface& fs, int
   const auto& fi = m.info().faults.at(static_cast<std::size_t>(fs.fault));
   const std::size_t N = fs.nodes.size(), nh = m.info().horizons.size();
   std::vector<CutoffLine> res;
+  // Only lattice nodes inside the tip line and the domain are read below, so only they are
+  // evaluated (I-051); pos maps a lattice node to its place among them.
+  constexpr std::size_t npos = static_cast<std::size_t>(-1);
+  std::vector<std::size_t> pos(N, npos), inside;
+  for (std::size_t k = 0; k < N; ++k)
+    if (fs.extent[k] <= 1) { pos[k] = inside.size(); inside.push_back(k); }
   for (int side = 0; side < 2; ++side) {
     double sg = side == 0 ? 1.0 : -1.0;  // 0: hanging wall
-    std::vector<Vec3> p(N);
-    for (std::size_t k = 0; k < N; ++k) p[k] = fs.nodes[k] + fi.normal * (sg * eps);
+    std::vector<Vec3> p(inside.size());
+    for (std::size_t r = 0; r < inside.size(); ++r) p[r] = fs.nodes[inside[r]] + fi.normal * (sg * eps);
     EvalResult r;
     m.evaluate(p, kEvalScalars | kEvalBlock, r);
     (void)nh;
@@ -217,14 +231,15 @@ std::vector<CutoffLine> cutoff_lines(const Model& m, const FaultSurface& fs, int
       for (std::size_t j = 0; j + 1 < fs.nb; ++j) {
         std::size_t k1 = i + fs.na * j, k2 = i + fs.na * (j + 1);
         if (fs.extent[k1] > 1 || fs.extent[k2] > 1) continue;
+        const std::size_t r1 = pos[k1], r2 = pos[k2];
         // A segment whose ends lie in different blocks crosses another fault: the fault surface
         // is offset between them, so no cut-off is interpolated there.
-        if (r.block[k1] != r.block[k2]) continue;
+        if (r.block[r1] != r.block[r2]) continue;
         // Both samples must really lie on the intended wall (near offsets of a displaced fault
         // surface the side samples can fall on the other wall).
-        bool on_hw = ((r.block[k1] >> fs.fault) & 1u) != 0;
+        bool on_hw = ((r.block[r1] >> fs.fault) & 1u) != 0;
         if (on_hw != (side == 0)) continue;
-        double s1 = r.s(static_cast<std::size_t>(h), k1), s2 = r.s(static_cast<std::size_t>(h), k2);
+        double s1 = r.s(static_cast<std::size_t>(h), r1), s2 = r.s(static_cast<std::size_t>(h), r2);
         if ((s1 >= 0) != (s2 >= 0)) { segs.push_back({i, k1, k2, 0.0, 1.0, s1 >= 0}); break; }
       }
     // The side's scalar on the plane itself is extrapolated from eps and 2*eps off the plane,
@@ -258,7 +273,7 @@ std::vector<CutoffLine> cutoff_lines(const Model& m, const FaultSurface& fs, int
     EvalResult rf;
     m.evaluate(side_pts, kEvalBlock, rf);
     for (std::size_t k = 0; k < segs.size(); ++k)
-      if (rf.block[k] == r.block[segs[k].k1]) cl.by_column[segs[k].col] = fin[k];
+      if (rf.block[k] == r.block[pos[segs[k].k1]]) cl.by_column[segs[k].col] = fin[k];
     Polyline cur;
     for (std::size_t i = 0; i < fs.na; ++i) {
       if (isnan3(cl.by_column[i])) { if (cur.size() >= 2) cl.parts.push_back(cur); cur.clear(); continue; }

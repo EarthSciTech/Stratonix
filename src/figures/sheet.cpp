@@ -79,11 +79,11 @@ Geometry build_geometry(const Model& m, const Polyline& line, double s0, double 
         std::vector<Vec3> p(NP + 1);
         for (int k = 0; k <= NP; ++k) p[static_cast<std::size_t>(k)] = {x, y, z_top + (z_bot - z_top) * k / NP};
         FaultEval fe;
-        m.evaluate_fault(static_cast<int>(f), p, fe);
+        m.evaluate_fault_geometry(static_cast<int>(f), p, fe);
         auto dist = [&](double z) {
           FaultEval e;
           Vec3 q{x, y, z};
-          m.evaluate_fault(static_cast<int>(f), std::span<const Vec3>(&q, 1), e);
+          m.evaluate_fault_geometry(static_cast<int>(f), std::span<const Vec3>(&q, 1), e);
           return e.distance[0];
         };
         for (int k = 0; k < NP; ++k) {
@@ -92,7 +92,7 @@ Geometry build_geometry(const Model& m, const Polyline& line, double s0, double 
           double z = illinois(dist, p[static_cast<std::size_t>(k)].z, p[static_cast<std::size_t>(k + 1)].z, da, db, 1e-6);
           Vec3 q{x, y, z};
           FaultEval e;
-          m.evaluate_fault(static_cast<int>(f), std::span<const Vec3>(&q, 1), e);
+          m.evaluate_fault_geometry(static_cast<int>(f), std::span<const Vec3>(&q, 1), e);
           g.fz[i][f] = z;
           g.fext[i][f] = e.extent[0];
           cuts.push_back(z);
@@ -666,7 +666,7 @@ SheetResult section_sheet(const FigureContext& c, const SheetSpec& sp) {
                   auto dist = [&](double z) {
                     Vec3 q{xy.x, xy.y, z};
                     FaultEval e;
-                    m.evaluate_fault(ff, std::span<const Vec3>(&q, 1), e);
+                    m.evaluate_fault_geometry(ff, std::span<const Vec3>(&q, 1), e);
                     return e.distance[0];
                   };
                   double lo = zg - 200, hi = zg + 200, dl = dist(lo), dh = dist(hi);

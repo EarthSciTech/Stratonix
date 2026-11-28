@@ -180,6 +180,25 @@ void ParametricModel::evaluate_fault(int f, std::span<const Vec3> pts, FaultEval
   else body(0, pts.size());
 }
 
+void ParametricModel::evaluate_fault_geometry(int f, std::span<const Vec3> pts, FaultEval& out) const {
+  if (f < 0 || static_cast<std::size_t>(f) >= faults_->size()) throw Error(ErrorCode::InvalidArgument, "fault index out of range");
+  const Fault& F = faults_->faults()[static_cast<std::size_t>(f)];
+  out.distance.resize(pts.size());
+  out.extent.resize(pts.size());
+  out.displacement.assign(pts.size(), 0.0);
+  auto body = [&](std::size_t a0, std::size_t b0) {
+    for (std::size_t i = a0; i < b0; ++i) {
+      Vec3 q = faults_->to_fault_frame(pts[i], f);
+      double a, b;
+      F.profile_coords(q, a, b);
+      out.distance[i] = F.sigma(q);
+      out.extent[i] = F.extent_coord(a, b);
+    }
+  };
+  if (optimised_kernels() && pts.size() >= 2048) parallel_for(pts.size(), 1024, body);
+  else body(0, pts.size());
+}
+
 void ParametricModel::restore(std::span<const Vec3> pts, std::span<Vec3> out) const {
   for (std::size_t i = 0; i < pts.size(); ++i) {
     out[i] = faults_->empty() ? pts[i] : faults_->restore(pts[i], nullptr);

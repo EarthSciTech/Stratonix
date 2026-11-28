@@ -19,6 +19,7 @@ class ParametricModel final : public Model {
   void scalar_in_block(std::span<const Vec3> pts, BlockCode block, int horizon,
                        std::span<double> out) const override;
   void evaluate_fault(int fault, std::span<const Vec3> pts, FaultEval& out) const override;
+  void evaluate_fault_geometry(int fault, std::span<const Vec3> pts, FaultEval& out) const override;
   void restore(std::span<const Vec3> pts, std::span<Vec3> out) const override;
   /// "structure" -> const Structure*, "faults" -> const FaultNetwork*.
   const void* capability(std::string_view name) const override;

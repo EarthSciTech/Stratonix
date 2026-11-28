@@ -10,6 +10,9 @@
 #include <mutex>
 #include <stdexcept>
 #include <tuple>
+#if defined(__GLIBC__)
+#include <malloc.h>  // malloc_trim
+#endif
 
 #include "repr_internal.hpp"
 #include "stratonix/core/util.hpp"
@@ -120,7 +123,7 @@ void fault_crossings(const Model& m, int f, const Domain& d, bool along_x, int n
       p.push_back(along_x ? Vec3{a, b, z} : Vec3{b, a, z});
     }
   FaultEval e;
-  m.evaluate_fault(f, p, e);
+  m.evaluate_fault_geometry(f, p, e);
   std::vector<std::array<double, 4>> br;  // line, lo, hi, d(lo)
   for (int l = 0; l < nlines; ++l)
     for (int s = 0; s + 1 < ns; ++s) {
@@ -135,7 +138,7 @@ void fault_crossings(const Model& m, int f, const Domain& d, bool along_x, int n
       q[k] = along_x ? Vec3{a, b, z} : Vec3{b, a, z};
     }
     FaultEval ee;
-    m.evaluate_fault(f, q, ee);
+    m.evaluate_fault_geometry(f, q, ee);
     for (std::size_t k = 0; k < br.size(); ++k) {
       double mid = 0.5 * (br[k][1] + br[k][2]);
       if ((ee.distance[k] > 0) == (br[k][3] > 0)) { br[k][1] = mid; br[k][3] = ee.distance[k]; } else br[k][2] = mid;
@@ -204,6 +207,23 @@ void pillar_roots(const Model& m, const std::vector<double>& coord, std::vector<
 }
 
 }  // namespace
+
+namespace {
+// Return freed heap memory to the system (glibc keeps small freed blocks otherwise; I-050).
+void release_free_memory() {
+#if defined(__GLIBC__)
+  malloc_trim(0);
+#endif
+}
+}  // namespace
+
+const char* CornerPointGrid::inactive_reason(std::size_t cell) const {
+  switch (cell < inactive_code.size() ? inactive_code[cell] : kActive) {
+    case kNoZoneBoundary: return "zone boundary not found on a pillar in the cell's fault block";
+    case kThin: return "thinner than the minimum thickness (pinch-out, truncation or layering)";
+    default: return "";
+  }
+}
 
 CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
   const ModelInfo& info = m.info();
@@ -279,7 +299,7 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
         mp[k] = along_x ? Vec3{cm[k].s, b, z_mid} : Vec3{b, cm[k].s, z_mid};
       }
       FaultEval fe;
-      if (!mp.empty()) m.evaluate_fault(static_cast<int>(f), mp, fe);
+      if (!mp.empty()) m.evaluate_fault_geometry(static_cast<int>(f), mp, fe);
       if (o.follow_fault_traces) {
         // stage 4D (STX-TN-17 section 2, I-035): one pillar column per fault - the node index
         // nearest the trace on average - is moved onto the trace in every line the fault
@@ -410,6 +430,9 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
     }
   }
 
+  // the pillar work arrays are not needed any more (I-050: released before the cell arrays exist)
+  for (auto* v : {&px, &py, &off_top_x, &off_base_x, &off_top_y, &off_base_y, &snap_dist}) std::vector<double>().swap(*v);
+  std::vector<std::array<double, 6>>().swap(snapped);
   // blocks: per column and zone, the most frequent block among the column's samples in the unit
   const std::size_t ncol = static_cast<std::size_t>(g.nx) * g.ny, nzone = o.zones.size();
   std::vector<BlockCode> zblock(ncol * nzone, 0);
@@ -441,7 +464,10 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
     });
   }
 
-  // zone boundaries on every pillar of every column, in the column's block for that zone
+  // zone boundaries on every pillar of every column, in the column's block for that zone; the root
+  // tasks and their index are released once each column has its eight elevations per zone (I-050)
+  std::vector<std::array<double, 8>> colz(ncol * nzone);  // per column and zone: 4 tops then 4 bases
+  {
   std::vector<RootTask> tasks;
   std::map<std::tuple<std::size_t, BlockCode, int>, std::size_t> task_of;
   auto task = [&](std::size_t p, BlockCode b, int h) {
@@ -465,6 +491,10 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
     }
   }
   pillar_roots(m, g.coord, tasks);
+  for (std::size_t c = 0; c < ncol * nzone; ++c)
+    for (int q = 0; q < 8; ++q) colz[c][q] = tasks[col_task[c][q]].z;
+  }
+  release_free_memory();
 
   // cells
   const std::size_t nc = g.ncell();
@@ -472,7 +502,7 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
   g.actnum.assign(nc, 0);
   g.zone.assign(nc, -1);
   g.block.assign(nc, 0);
-  g.inactive_reason.assign(nc, "");
+  g.inactive_code.assign(nc, CornerPointGrid::kActive);
   g.layer_unit.clear();
   for (auto& zs : o.zones)
     for (int l = 0; l < zs.layers; ++l) g.layer_unit.push_back(zs.unit);
@@ -485,8 +515,8 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
       double zt[4], zb[4];
       bool found = true;
       for (int q = 0; q < 4; ++q) {
-        zt[q] = tasks[col_task[col * nzone + z][q]].z;
-        zb[q] = tasks[col_task[col * nzone + z][4 + q]].z;
+        zt[q] = colz[col * nzone + z][q];
+        zb[q] = colz[col * nzone + z][4 + q];
         if (std::isnan(zt[q]) || std::isnan(zb[q])) { found = false; continue; }
         zt[q] = std::min(zt[q], prev_base[q]);  // no overlap with the zone above
         zb[q] = std::min(zb[q], zt[q]);         // no negative thickness
@@ -499,7 +529,7 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
         g.block[id] = zblock[col * nzone + z];
         if (!found) {
           for (int c = 0; c < 8; ++c) g.zcorn[g.zcorn_index(i, j, k, c)] = std::isnan(zt[c & 3]) ? z_hi : zt[c & 3];
-          g.inactive_reason[id] = "zone boundary not found on a pillar in the cell's fault block";
+          g.inactive_code[id] = CornerPointGrid::kNoZoneBoundary;
           continue;
         }
         double tsum = 0;
@@ -521,7 +551,7 @@ CornerPointGrid corner_point_grid(const Model& m, const GridOptions& o) {
         if (tsum / 4 >= o.min_thickness) {
           g.actnum[id] = 1;
         } else {
-          g.inactive_reason[id] = "thinner than the minimum thickness (pinch-out, truncation or layering)";
+          g.inactive_code[id] = CornerPointGrid::kThin;
         }
       }
       k0 += zs.layers;
@@ -593,13 +623,13 @@ GridDefects grid_defects(const Model& m, const CornerPointGrid& g, double fault_
           }
           if (pts.empty()) continue;
           ++d.fault_faces;
-          m.evaluate_fault(f, pts, fe);
+          m.evaluate_fault_geometry(f, pts, fe);
           // allowance for the chord of a curved fault: its distance from the pillar at mid-depth
           double sag = 0;
           {
             std::vector<Vec3> mids = {pillar_at_t(g.coord, pa, 0.5), pillar_at_t(g.coord, pb, 0.5)};
             FaultEval fm;
-            m.evaluate_fault(f, mids, fm);
+            m.evaluate_fault_geometry(f, mids, fm);
             sag = std::max(std::fabs(fm.distance[0]), std::fabs(fm.distance[1]));
           }
           double worst = 0;
@@ -841,7 +871,7 @@ TransmissibilityResult fault_transmissibility(const Model& m, const CornerPointG
       const double e = 0.5;
       std::vector<Vec3> q{on, on + Vec3{e, 0, 0}, on - Vec3{e, 0, 0}, on + Vec3{0, e, 0}, on - Vec3{0, e, 0}, on + Vec3{0, 0, e}, on - Vec3{0, 0, e}};
       FaultEval fe;
-      m.evaluate_fault(f.fault, q, fe);
+      m.evaluate_fault_geometry(f.fault, q, fe);
       Vec3 gr{(fe.distance[1] - fe.distance[2]) / (2 * e), (fe.distance[3] - fe.distance[4]) / (2 * e), (fe.distance[5] - fe.distance[6]) / (2 * e)};
       const double gn = norm(gr);
       if (gn < 1e-9 || std::isnan(fe.distance[0])) break;

@@ -857,6 +857,20 @@ Figure isopach_figure(const FigureContext& c, int unit, const Grid2D& g, const s
 // =========================================================================================
 // 3D view
 // =========================================================================================
+// Fault surfaces and cut-offs through the build's shared cache when it is of this model (I-051),
+// otherwise computed into the caller's scratch; the values are the same either way.
+const repr::FaultSurface& fault_surface_of(const FigureContext& c, int f, double spacing, repr::FaultSurface& scratch) {
+  if (c.surfaces && &c.surfaces->model() == c.model) return c.surfaces->fault_surface(f, spacing);
+  scratch = repr::fault_surface(*c.model, f, spacing);
+  return scratch;
+}
+const std::vector<repr::CutoffLine>& cutoffs_of(const FigureContext& c, int f, double spacing, int h, std::vector<repr::CutoffLine>& scratch) {
+  if (c.surfaces && &c.surfaces->model() == c.model) return c.surfaces->cutoffs(f, spacing, 0.0, h);
+  repr::FaultSurface fs;
+  scratch = repr::cutoff_lines(*c.model, fault_surface_of(c, f, spacing, fs), h);
+  return scratch;
+}
+
 Figure view3d_figure(const FigureContext& c, double az, double el, const std::string& preset) {
   Figure f(842, 560);
   const auto& inf = c.model->info();
@@ -866,8 +880,8 @@ Figure view3d_figure(const FigureContext& c, double az, double el, const std::st
   std::vector<Mesh3> meshes;
   // Faults and the deepest horizon opaque; shallower horizons see-through, deepest first.
   for (std::size_t ff = 0; ff < inf.faults.size(); ++ff) {
-    auto fs = repr::fault_surface(*c.model, static_cast<int>(ff), sp);
-    meshes.push_back({fs.mesh, rgb(200, 50, 40), 1.0});
+    repr::FaultSurface scratch;
+    meshes.push_back({fault_surface_of(c, static_cast<int>(ff), sp, scratch).mesh, rgb(200, 50, 40), 1.0});
   }
   // With many horizons the see-through layers are made fainter so that at least 20 % of the light
   // from the faults and the deepest horizon passes through all of them.
@@ -1738,8 +1752,8 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
     const auto& fs = repr::faulted_surface(*c.model, static_cast<int>(h), g, c.surfaces, scratch);
     std::vector<std::vector<repr::CutoffLine>> cut;
     for (std::size_t ff = 0; ff < inf.faults.size(); ++ff) {
-      auto fsurf = repr::fault_surface(*c.model, static_cast<int>(ff), std::max(10.0, g.dx / 2));
-      cut.push_back(repr::cutoff_lines(*c.model, fsurf, static_cast<int>(h)));
+      std::vector<repr::CutoffLine> scratch;
+      cut.push_back(cutoffs_of(c, static_cast<int>(ff), std::max(10.0, g.dx / 2), static_cast<int>(h), scratch));
     }
     repr::Closure cl;
     bool has = static_cast<int>(h) == c.closure_horizon;
@@ -1801,21 +1815,25 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
   // Fault-plane displacement maps and throw along strike of linked fault systems (stage 2A).
   if (!inf.faults.empty()) {
     const double fsp = std::max(10.0, std::max(d.sx, d.sy) / 300);
-    std::vector<repr::FaultSurface> surfs;
+    std::vector<repr::FaultSurface> scratch_s(inf.faults.size());  // used when there is no shared cache
+    std::vector<const repr::FaultSurface*> surfs(inf.faults.size());
     std::vector<std::vector<std::vector<repr::CutoffLine>>> cuts(inf.faults.size());
     for (std::size_t ff = 0; ff < inf.faults.size(); ++ff) {
-      surfs.push_back(repr::fault_surface(*c.model, static_cast<int>(ff), fsp));
-      for (std::size_t h = 0; h < inf.horizons.size(); ++h) cuts[ff].push_back(repr::cutoff_lines(*c.model, surfs[ff], static_cast<int>(h)));
+      surfs[ff] = &fault_surface_of(c, static_cast<int>(ff), fsp, scratch_s[ff]);
+      for (std::size_t h = 0; h < inf.horizons.size(); ++h) {
+        std::vector<repr::CutoffLine> scratch;
+        cuts[ff].push_back(cutoffs_of(c, static_cast<int>(ff), fsp, static_cast<int>(h), scratch));
+      }
       FaultEval fe;
-      c.model->evaluate_fault(static_cast<int>(ff), surfs[ff].nodes, fe);
-      auto fgr = fault_plane_figure(c, static_cast<int>(ff), surfs[ff], fe.displacement, cuts[ff]);
+      c.model->evaluate_fault(static_cast<int>(ff), surfs[ff]->nodes, fe);
+      auto fgr = fault_plane_figure(c, static_cast<int>(ff), *surfs[ff], fe.displacement, cuts[ff]);
       out.push_back(write_figure(fgr, folder, figure_basename(c, "fault-plane", inf.faults[ff].name),
                                  c.model_name + " - displacement on fault " + inf.faults[ff].name,
                                  "Displacement on fault " + inf.faults[ff].name + " with the cut-offs of every horizon.", notes_common));
       // fault rock and stress (stage 2F)
       if (c.fault_rock || c.stress.present) {
         const auto& fname = inf.faults[ff].name;
-        auto pts = repr::fault_rock_surface(*c.model, surfs[ff], c.rock, c.stress);
+        auto pts = repr::fault_rock_surface(*c.model, *surfs[ff], c.rock, c.stress);
         auto attr = [&](const char* kind, const std::string& label, const std::string& unit, auto get, double scale, double lo, double hi,
                         const std::string& caption) {
           std::vector<double> v(pts.size(), kNaN);
@@ -1826,12 +1844,12 @@ std::vector<WrittenFigure> write_figure_set(const FigureContext& c, const std::v
               any = any || std::isfinite(v[k]);
             }
           if (!any) return;
-          auto fg = fault_attribute_figure(c, static_cast<int>(ff), surfs[ff], v, cuts[ff], label, unit, lo, hi);
+          auto fg = fault_attribute_figure(c, static_cast<int>(ff), *surfs[ff], v, cuts[ff], label, unit, lo, hi);
           out.push_back(write_figure(fg, folder, figure_basename(c, kind, fname), c.model_name + " - " + label + " on fault " + fname,
                                      caption, notes_common));
         };
         if (c.fault_rock) {
-          auto fg = allan_figure(c, static_cast<int>(ff), surfs[ff], pts, cuts[ff]);
+          auto fg = allan_figure(c, static_cast<int>(ff), *surfs[ff], pts, cuts[ff]);
           out.push_back(write_figure(fg, folder, figure_basename(c, "allan", fname), c.model_name + " - Allan diagram of fault " + fname,
                                      "Allan diagram of fault " + fname + ": units juxtaposed across the fault, with the cut-offs of every horizon.",
                                      notes_common));

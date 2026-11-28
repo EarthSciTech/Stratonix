@@ -417,6 +417,7 @@ void parallel_for(std::size_t n, std::size_t chunk,
 #pragma comment(lib, "psapi.lib")
 #else
 #include <dlfcn.h>
+#include <unistd.h>
 #include <sys/resource.h>
 #endif
 namespace stratonix {
@@ -450,6 +451,19 @@ std::size_t peak_rss_bytes() {
   struct rusage ru;
   if (getrusage(RUSAGE_SELF, &ru) == 0) return static_cast<std::size_t>(ru.ru_maxrss) * 1024u;  // KiB on Linux
   return 0;
+#endif
+}
+
+std::size_t current_rss_bytes() {
+#if defined(_WIN32)
+  PROCESS_MEMORY_COUNTERS pmc;
+  if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) return pmc.WorkingSetSize;
+  return 0;
+#else
+  std::ifstream f("/proc/self/statm");
+  std::size_t pages_total = 0, pages_resident = 0;
+  if (!(f >> pages_total >> pages_resident)) return 0;
+  return pages_resident * static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
 #endif
 }
 

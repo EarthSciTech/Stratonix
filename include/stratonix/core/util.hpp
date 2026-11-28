@@ -47,6 +47,8 @@ bool optimised_kernels();
 
 /// Peak resident memory of this process in bytes (0 if unknown on this platform).
 std::size_t peak_rss_bytes();
+/// Memory in use now (resident set / working set) in bytes; 0 where unknown.
+std::size_t current_rss_bytes();
 
 // ---- Version and build information ---------------------------------------------------------
 struct BuildInfo {

@@ -357,7 +357,7 @@ WatertightReport watertightness(const Model& m, const GridSpec& g, const std::fu
     best = std::max(0.0, best);
     for (std::size_t f = 0; f < nf; ++f) {
       FaultEval fe;
-      m.evaluate_fault(static_cast<int>(f), std::span<const Vec3>(&e, 1), fe);
+      m.evaluate_fault_geometry(static_cast<int>(f), std::span<const Vec3>(&e, 1), fe);  // the distance only
       double v = std::fabs(fe.distance[0]);
       if (v < best) { best = v; *what = "fault:" + inf.faults[f].name; }
     }

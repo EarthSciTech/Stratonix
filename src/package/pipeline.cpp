@@ -7,6 +7,7 @@
 #include "stratonix/io/velocity.hpp"
 
 #include <algorithm>
+#include <fstream>
 #include <sstream>
 
 #include "stratonix/checks/checks.hpp"
@@ -486,7 +487,7 @@ std::vector<io::ExportedFile> write_exports(const desc::Description& d, const Mo
       faces = repr::grid_fault_faces(m, gp->grid);
       c.cells.faces = &faces;
     }
-    if (gp->has_tets) c.cells.tets = &gp->tets;
+    if (gp->has_tets && std::find(ids.begin(), ids.end(), "grid_vtk") != ids.end()) c.cells.tets = &gp->tets();
   }
   std::string note = "Every parameter of the description carries a value, unit, evidence class and source (see manifest.json).";
   return io::export_set(c, ids, folder, note);
@@ -855,6 +856,13 @@ void write_grid_outputs(const desc::Description& d, const Model& m, const GridPr
                         const std::filesystem::path& out_dir, bool figures) {
   const auto& g = gp.grid;
   const auto& inf = m.info();
+  // cells.csv is written as it is made, a row at a time through a 1 MB buffer (I-050: the
+  // whole table as one string took about 140 bytes per cell)
+  std::filesystem::create_directories(out_dir / "grid");
+  std::ofstream cells_os(out_dir / "grid" / "cells.csv", std::ios::binary | std::ios::trunc);
+  if (!cells_os) throw Error(ErrorCode::Io, "cannot write " + (out_dir / "grid" / "cells.csv").string());
+  std::vector<char> cells_buf(1 << 20);
+  cells_os.rdbuf()->pubsetbuf(cells_buf.data(), static_cast<std::streamsize>(cells_buf.size()));
   std::string t = "i,j,k,active,zone,block,volume_m3,x,y,z";
   for (auto& p : gp.props.props)
     if (p.name != "ZONE" && p.name != "BLOCK") t += "," + p.name;
@@ -862,6 +870,8 @@ void write_grid_outputs(const desc::Description& d, const Model& m, const GridPr
   for (int k = 0; k < g.nz; ++k)
     for (int j = 0; j < g.ny; ++j)
       for (int i = 0; i < g.nx; ++i) {
+        cells_os.write(t.data(), static_cast<std::streamsize>(t.size()));
+        t.clear();
         auto id = g.cell(i, j, k);
         auto cc = g.corners(i, j, k);
         Vec3 ctr = repr::cell_centre(cc);
@@ -872,8 +882,9 @@ void write_grid_outputs(const desc::Description& d, const Model& m, const GridPr
           if (p.name != "ZONE" && p.name != "BLOCK") t += "," + (std::isnan(p.v[id]) ? std::string() : (p.integer ? std::to_string(std::llround(p.v[id])) : fmt_shortest(p.v[id])));
         t += "\n";
       }
-  std::filesystem::create_directories(out_dir / "grid");
-  write_file(out_dir / "grid" / "cells.csv", t);
+  cells_os.write(t.data(), static_cast<std::streamsize>(t.size()));
+  cells_os.close();
+  if (!cells_os) throw Error(ErrorCode::Io, "write failed " + (out_dir / "grid" / "cells.csv").string());
   if (gp.has_trans) {
     std::string f = "fault,i,j,k,face,x,y,z,sgr,thickness_m,displacement_m,k_fault_mD,k_i_mD,k_j_mD,L_i_m,L_j_m,multiplier,missing,note\n";
     for (auto& ff : gp.trans.faces)
@@ -1706,7 +1717,9 @@ std::size_t stream_grid(const std::filesystem::path& description, const std::fil
     double layers = 0;
     for (auto& z : d.grid.zones) layers += z.layers.present ? z.layers.si() : 1;
     const double cells = std::ceil(dom.si(0) / sp0) * std::ceil(dom.si(1) / sp1) * std::max(1.0, layers);
-    const double need = cells * 130.0;  // corners 64 B, codes 16 B, reason 32 B, ZONE and BLOCK 16 B
+    // measured (I-050): about 145 bytes per cell for corners (64), codes (17), six properties
+    // (48) and the build's working memory, plus about 50 MB for the model
+    const double need = cells * 150.0 + 50e6;
     if (need > static_cast<double>(o.memory_limit))
       throw Error(ErrorCode::InvalidArgument, "stream_grid: about " + fmt_fixed(cells / 1e6, 1) + " million cells need about " + fmt_fixed(need / 1e9, 2) +
                                                   " GB, above the stated limit of " + fmt_fixed(static_cast<double>(o.memory_limit) / 1e9, 2) + " GB");

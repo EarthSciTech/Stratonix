@@ -349,6 +349,32 @@ const FaultedSurface& FaultedSurfaceCache::get(int h, const GridSpec& g) {
   return it->second;
 }
 
+// The fault surface and cut-offs are computed outside the lock (they run in parallel themselves);
+// when two callers race for one key, the first value stored is kept and both get it.
+const FaultSurface& FaultedSurfaceCache::fault_surface(int f, double spacing, double extend) {
+  const auto key = std::make_tuple(f, spacing, extend);
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    auto it = fsurf_.find(key);
+    if (it != fsurf_.end()) return it->second;
+  }
+  FaultSurface v = repr::fault_surface(*m_, f, spacing, extend);
+  std::lock_guard<std::mutex> lk(mu_);
+  return fsurf_.emplace(key, std::move(v)).first->second;
+}
+
+const std::vector<CutoffLine>& FaultedSurfaceCache::cutoffs(int f, double spacing, double extend, int h, double eps) {
+  const auto key = std::make_tuple(f, spacing, extend, h, eps);
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    auto it = cut_.find(key);
+    if (it != cut_.end()) return it->second;
+  }
+  std::vector<CutoffLine> v = repr::cutoff_lines(*m_, fault_surface(f, spacing, extend), h, eps);
+  std::lock_guard<std::mutex> lk(mu_);
+  return cut_.emplace(key, std::move(v)).first->second;
+}
+
 const FaultedSurface& faulted_surface(const Model& m, int h, const GridSpec& g, FaultedSurfaceCache* cache, FaultedSurface& scratch) {
   if (cache && &cache->model() == &m) return cache->get(h, g);
   scratch = horizon_grid_faulted(m, h, g);

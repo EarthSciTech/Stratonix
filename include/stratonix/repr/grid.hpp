@@ -52,7 +52,11 @@ struct CornerPointGrid {
   std::vector<BlockCode> block;       ///< per cell: fault block
   std::vector<std::int32_t> layer_unit;    ///< per layer k: model unit index
   std::vector<std::int32_t> pillar_fault;  ///< per pillar: fault index it lies on, or -1
-  std::vector<std::string> inactive_reason; ///< per cell: why it is inactive (empty if active)
+  /// Why a cell is inactive, one byte per cell (I-050: a code, not a string per cell).
+  enum InactiveCode : std::uint8_t { kActive = 0, kNoZoneBoundary = 1, kThin = 2 };
+  std::vector<std::uint8_t> inactive_code;  ///< per cell: InactiveCode
+  /// The reason as text ("" for an active cell).
+  const char* inactive_reason(std::size_t cell) const;
   std::size_t trace_fallbacks = 0;          ///< stage 4D: lines where a fault-following grid kept the stair step
 
   std::size_t ncell() const { return static_cast<std::size_t>(nx) * ny * nz; }

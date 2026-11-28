@@ -130,15 +130,10 @@ const repr::FaultedSurface& CheckContext::faulted_surface(int h) {
   return surfaces_->get(h, grid_);
 }
 const repr::FaultSurface& CheckContext::fault_lattice(int f) {
-  auto it = lattice_.find(f);
-  if (it == lattice_.end()) it = lattice_.emplace(f, repr::fault_surface(m_, f, fault_spacing_, 0.25)).first;
-  return it->second;
+  return surfaces_->fault_surface(f, fault_spacing_, 0.25);
 }
 const std::vector<repr::CutoffLine>& CheckContext::cutoffs(int f, int h) {
-  auto k = std::make_pair(f, h);
-  auto it = cutoffs_.find(k);
-  if (it == cutoffs_.end()) it = cutoffs_.emplace(k, repr::cutoff_lines(m_, fault_lattice(f), h)).first;
-  return it->second;
+  return surfaces_->cutoffs(f, fault_spacing_, 0.25, h);
 }
 const repr::ThrowRow& CheckContext::throw_row(int f, int h) {
   auto k = std::make_pair(f, h);
@@ -999,7 +994,7 @@ class C8 final : public Check {
         for (std::size_t k = 0; k < ff.nodes.size(); ++k)
           if (ff.extent[k] <= 1) inside.push_back(ff.nodes[k]);
         FaultEval eg;
-        c.model().evaluate_fault(static_cast<int>(g), inside, eg);
+        c.model().evaluate_fault_geometry(static_cast<int>(g), inside, eg);
         bool pos = false, neg = false;
         for (std::size_t k = 0; k < inside.size(); ++k)
           if (eg.extent[k] <= 1) {
@@ -1017,7 +1012,7 @@ class C8 final : public Check {
           std::size_t y = ga.abuts_fault == fa.name ? g : f, o = y == g ? f : g;
           const auto& fy = c.fault_lattice(static_cast<int>(y));
           FaultEval eo, ey;
-          c.model().evaluate_fault(static_cast<int>(o), fy.nodes, eo);
+          c.model().evaluate_fault_geometry(static_cast<int>(o), fy.nodes, eo);
           c.model().evaluate_fault(static_cast<int>(y), fy.nodes, ey);
           bool hw_side = d.faults[y].abuts_side == "hanging_wall";
           for (std::size_t k = 0; k < fy.nodes.size(); ++k)
@@ -1108,7 +1103,7 @@ std::vector<std::vector<repr::FaultRockPoint>> fault_rock_nodes(CheckContext& c,
   const auto st = stress_input(d, c.model());
   const double spacing = std::max(c.model().info().domain.spacing * 2, 50.0);
   for (std::size_t f = 0; f < c.model().info().faults.size(); ++f) {
-    auto fs = repr::fault_surface(c.model(), static_cast<int>(f), spacing);
+    const auto& fs = c.surfaces()->fault_surface(static_cast<int>(f), spacing);
     out.push_back(repr::fault_rock_surface(c.model(), fs, in, st, max_extent));
   }
   return out;
@@ -1886,22 +1881,49 @@ repr::PropertyInputs property_inputs(const desc::Description& d, const Model& m)
   }
   return in;
 }
+const repr::TetGrid& GridProducts::tets() const {
+  if (!tets_)
+    tets_ = std::make_unique<repr::TetGrid>(
+        registry::Registry::global().create<repr::TetrahedralExtractor>(registry::Kind::Extractor, "tetrahedral")->extract(grid));
+  return *tets_;
+}
+
 GridProducts make_grid_products(const desc::Description& d, const Model& m) {
+  // diagnostic (STRATONIX_TIMING): seconds and peak memory after each grid product on stderr
+  static const bool timing = std::getenv("STRATONIX_TIMING") != nullptr;
+  auto t0 = std::chrono::steady_clock::now();
+  auto mark = [&](const char* what) {
+    if (!timing) return;
+    std::fprintf(stderr, "[stratonix timing] grid %s %.3f s, memory %.0f MB (peak %.0f MB)\n", what,
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), static_cast<double>(current_rss_bytes()) / 1e6,
+                 static_cast<double>(peak_rss_bytes()) / 1e6);
+    t0 = std::chrono::steady_clock::now();
+  };
+  mark("start");
   GridProducts gp;
   gp.options = grid_options(d, m);
   auto& reg = registry::Registry::global();
   gp.grid = reg.create<repr::CornerPointExtractor>(registry::Kind::Extractor, "corner_point")->extract(m, gp.options);
+  mark("corner points");
   gp.props = repr::grid_properties(m, gp.grid, property_inputs(d, m));
+  mark("properties");
   if (!d.grid.transmissibility.empty()) {
     gp.trans = repr::fault_transmissibility(m, gp.grid, gp.props, fault_rock_input(d, m));
     gp.has_trans = true;
+    mark("transmissibility");
   }
-  if (d.grid.tetrahedral) {
-    gp.tets = reg.create<repr::TetrahedralExtractor>(registry::Kind::Extractor, "tetrahedral")->extract(gp.grid);
-    gp.has_tets = true;
-  }
+  gp.has_tets = d.grid.tetrahedral;  // built on demand (GridProducts::tets)
   gp.fault_tolerance = 0.01 * std::min(gp.grid.dx, gp.grid.dy);  // Stratonix default
   gp.defects = repr::grid_defects(m, gp.grid, gp.fault_tolerance);
+  mark("defects");
+  if (timing) {
+    const auto& g = gp.grid;
+    std::size_t props = 0;
+    for (auto& p : gp.props.props) props += p.v.capacity() * sizeof(double);
+    std::fprintf(stderr, "[stratonix timing] grid arrays (MB): zcorn %.0f, coord %.0f, actnum %.0f, zone %.0f, block %.0f, inactive codes %.0f, %zu properties %.0f\n",
+                 g.zcorn.capacity() * 8e-6, g.coord.capacity() * 8e-6, g.actnum.capacity() * 4e-6, g.zone.capacity() * 4e-6, g.block.capacity() * sizeof(BlockCode) * 1e-6,
+                 g.inactive_code.capacity() * 1e-6, gp.props.props.size(), props * 1e-6);
+  }
   for (auto& f : m.info().faults) gp.fault_names.push_back(f.name);
   return gp;
 }
@@ -1953,7 +1975,8 @@ CheckReport run_checks(CheckContext& ctx) {
     const auto t0 = std::chrono::steady_clock::now();
     auto rs = chk->run(ctx);
     if (timing)
-      std::fprintf(stderr, "[stratonix timing] %s %.3f s\n", e->name.c_str(), std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+      std::fprintf(stderr, "[stratonix timing] %s %.3f s, peak memory %.0f MB\n", e->name.c_str(),
+                   std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), static_cast<double>(peak_rss_bytes()) / 1e6);
     rep.results.insert(rep.results.end(), rs.begin(), rs.end());
   }
   // Report in numeric order of the check ids (C1, C2, ..., C10, C11), stable within a check.

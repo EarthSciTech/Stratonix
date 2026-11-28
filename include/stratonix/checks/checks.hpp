@@ -49,8 +49,11 @@ struct GridProducts {
   repr::PropertySet props;
   bool has_trans = false;
   repr::TransmissibilityResult trans;
-  bool has_tets = false;
-  repr::TetGrid tets;
+  bool has_tets = false;  ///< the description asks for the tetrahedral grid
+  /// The tetrahedral grid, built when first asked for: only the export that writes it needs it
+  /// (I-050; six tetrahedra per cell are about 215 bytes per cell).
+  const repr::TetGrid& tets() const;
+  mutable std::unique_ptr<repr::TetGrid> tets_;
   repr::GridDefects defects;
   double fault_tolerance = 0;              ///< C25 tolerance (m)
   std::vector<std::string> fault_names;    ///< by fault index
@@ -151,8 +154,6 @@ class CheckContext {
   std::unique_ptr<repr::BlockList> blocks_;
   std::map<std::pair<int, BlockCode>, Grid2D> block_surf_;
   std::shared_ptr<repr::FaultedSurfaceCache> surfaces_;
-  std::map<int, repr::FaultSurface> lattice_;
-  std::map<std::pair<int, int>, std::vector<repr::CutoffLine>> cutoffs_;
   std::map<std::pair<int, int>, repr::ThrowRow> throws_;
   std::unique_ptr<GridProducts> grid_products_;
   std::unique_ptr<ContactGraph> graph_;

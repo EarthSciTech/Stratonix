@@ -773,6 +773,7 @@ void ConditionedModel::scalar_in_block(std::span<const Vec3> pts, BlockCode bloc
   inner_->scalar_in_block(pts, block, horizon, out);
 }
 void ConditionedModel::evaluate_fault(int fault, std::span<const Vec3> pts, FaultEval& out) const { inner_->evaluate_fault(fault, pts, out); }
+void ConditionedModel::evaluate_fault_geometry(int fault, std::span<const Vec3> pts, FaultEval& out) const { inner_->evaluate_fault_geometry(fault, pts, out); }
 void ConditionedModel::restore(std::span<const Vec3> pts, std::span<Vec3> out) const { inner_->restore(pts, out); }
 const void* ConditionedModel::capability(std::string_view name) const {
   if (name == "conditioning") return &r_;

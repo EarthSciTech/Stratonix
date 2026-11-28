@@ -205,7 +205,7 @@ TEST_CASE("G3 layering on a wedge: proportional, follow_top and follow_base") {
         worst = std::max(worst, std::fabs(corner_thickness(g, i, 3, k, 0) - expect));
         bool all_zero = true;
         for (int c = 0; c < 4; ++c) all_zero = all_zero && corner_thickness(g, i, 3, k, c) < 1e-9;
-        if (all_zero) (g.actnum[g.cell(i, 3, k)] == 0 && !g.inactive_reason[g.cell(i, 3, k)].empty() ? inactive_ok : inactive_bad)++;
+        if (all_zero) (g.actnum[g.cell(i, 3, k)] == 0 && *g.inactive_reason(g.cell(i, 3, k)) != '\0' ? inactive_ok : inactive_bad)++;
       }
     std::printf("  %s: worst layer error %.3g m, %d empty cells inactive\n", repr::layering_name(lay), worst, inactive_ok);
     CHECK(worst <= 1e-3);
@@ -227,7 +227,7 @@ TEST_CASE("G4 the checks catch an inverted cell") {
   g.block = {0};
   g.layer_unit = {1};
   g.pillar_fault.assign(4, -1);
-  g.inactive_reason = {""};
+  g.inactive_code = {CornerPointGrid::kActive};
   auto m = build_text(model_yaml(""));
   auto d = repr::grid_defects(*m, g, 1.0);
   CHECK(d.inverted == 1);

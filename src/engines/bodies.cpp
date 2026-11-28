@@ -294,6 +294,7 @@ class BodyModel final : public Model {
     inner_->scalar_in_block(q, block, horizon, out);
   }
   void evaluate_fault(int fault, std::span<const Vec3> pts, FaultEval& out) const override { inner_->evaluate_fault(fault, pts, out); }
+  void evaluate_fault_geometry(int fault, std::span<const Vec3> pts, FaultEval& out) const override { inner_->evaluate_fault_geometry(fault, pts, out); }
   void restore(std::span<const Vec3> pts, std::span<Vec3> out) const override {
     // restoration removes the bodies first: the host at the undeformed position
     std::vector<Vec3> q(pts.begin(), pts.end());
@@ -482,7 +483,7 @@ ModelPtr wrap_bodies(const desc::Description& d, ModelPtr base, BuildLog& log) {
         if (x.name == info.faults[f].name && x.age.present) fage = x.age.si();
       if (!(fage > b.rep.age) || smp.empty()) continue;
       FaultEval fe;
-      base->evaluate_fault(static_cast<int>(f), smp, fe);
+      base->evaluate_fault_geometry(static_cast<int>(f), smp, fe);
       bool pos = false, neg = false;
       for (std::size_t i = 0; i < smp.size(); ++i) {
         if (!(fe.extent[i] <= 1.0)) continue;

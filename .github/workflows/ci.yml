@@ -296,8 +296,7 @@ jobs:
         run: cmake --build build --config ${{ matrix.config }} --parallel
       - name: Test
         if: ${{ !(startsWith(github.ref, 'refs/tags/v') && matrix.config == 'Debug') }}
-        # the Debug job leaves the tests labelled slow_debug (the thrust duplex build) to the others
-        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure -j 4 ${{ matrix.config == 'Debug' && '-LE slow_debug' || '' }}
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure -j 4
       - name: Package (zip and NSIS installer)
         if: matrix.config == 'Release'
         run: cd build && cpack -C Release

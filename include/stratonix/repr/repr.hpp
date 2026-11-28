@@ -49,19 +49,7 @@ struct FaultedSurface {
 /// from the per-block root. Parity tested.
 FaultedSurface horizon_grid_faulted(const Model& m, int horizon, const GridSpec& g);
 
-/// Faulted horizon surfaces of one model, each computed once per horizon and lattice and shared by
-/// the checks, figures and exports of a build (stage 4B, I-020). Entries never move once made.
-class FaultedSurfaceCache {
- public:
-  explicit FaultedSurfaceCache(const Model& m) : m_(&m) {}
-  const Model& model() const { return *m_; }
-  const FaultedSurface& get(int horizon, const GridSpec& g);
-
- private:
-  const Model* m_;
-  std::mutex mu_;
-  std::map<std::tuple<int, long long, long long, long long, long long, std::size_t, std::size_t>, FaultedSurface> map_;
-};
+class FaultedSurfaceCache;
 /// The cached surface when `cache` is of `m`; otherwise computed into `scratch`, which is returned.
 const FaultedSurface& faulted_surface(const Model& m, int horizon, const GridSpec& g, FaultedSurfaceCache* cache, FaultedSurface& scratch);
 
@@ -115,6 +103,29 @@ struct CutoffLine {
 };
 /// Hanging-wall and footwall cut-off lines of a horizon on a fault (eps: offset from the plane).
 std::vector<CutoffLine> cutoff_lines(const Model& m, const FaultSurface& fs, int horizon, double eps = 0.25);
+
+/// Faulted horizon surfaces of one model, each computed once per horizon and lattice and shared by
+/// the checks, figures and exports of a build (stage 4B, I-020), and likewise its fault surfaces
+/// and cut-off lines, each computed once per fault, spacing and extension (I-051). Entries never
+/// move once made; a value is the same as the uncached function returns for the same arguments.
+class FaultedSurfaceCache {
+ public:
+  explicit FaultedSurfaceCache(const Model& m) : m_(&m) {}
+  const Model& model() const { return *m_; }
+  const FaultedSurface& get(int horizon, const GridSpec& g);
+  /// fault_surface(model, fault, spacing, extend), computed once.
+  const FaultSurface& fault_surface(int fault, double spacing, double extend = 0.0);
+  /// cutoff_lines(model, fault_surface(fault, spacing, extend), horizon, eps), computed once.
+  const std::vector<CutoffLine>& cutoffs(int fault, double spacing, double extend, int horizon, double eps = 0.25);
+
+ private:
+  const Model* m_;
+  std::mutex mu_;
+  std::map<std::tuple<int, long long, long long, long long, long long, std::size_t, std::size_t>, FaultedSurface> map_;
+  // keyed on the exact arguments, so a value is always the one computed with them
+  std::map<std::tuple<int, double, double>, FaultSurface> fsurf_;
+  std::map<std::tuple<int, double, double, int, double>, std::vector<CutoffLine>> cut_;
+};
 
 struct ThrowRow {
   int fault = -1, horizon = -1;

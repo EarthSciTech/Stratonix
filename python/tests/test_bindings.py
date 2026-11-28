@@ -66,3 +66,13 @@ def test_same_files_as_the_command_line(tmp_path):
     da, db = digest(a), digest(b)
     assert da.keys() == db.keys() and len(da) > 5
     assert da == db
+
+
+def test_numpy_loaded_first():
+    # a process that already has the system's C++ runtime (NumPy brings it) must not mix it with
+    # the library's own: building a model in such a process crashed in 2026.4 (fixed in 2026.4.1)
+    pytest.importorskip("numpy")
+    code = "import numpy, stratonix; m = stratonix.build_model(%r); print(m.counts()['horizons'])" % DESC
+    r = subprocess.run([os.sys.executable, "-c", code], capture_output=True, text=True, env=dict(os.environ))
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "3"

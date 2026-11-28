@@ -12,6 +12,12 @@ target_link_libraries(stratonix_c PRIVATE stratonix_package)
 set_target_properties(stratonix_c PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1
                       WINDOWS_EXPORT_ALL_SYMBOLS ON POSITION_INDEPENDENT_CODE ON)
 stx_layer(stratonix_c 7)
+# With the C++ runtime linked statically, its symbols are kept inside the library: a process that
+# already has the system's libstdc++ (Python with NumPy, for one) would otherwise bind some of them
+# to that copy and mix two runtimes (a crash in std::locale when a description is parsed).
+if(STRATONIX_STATIC_RUNTIME AND NOT STRATONIX_SANITIZE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT APPLE)
+  target_link_options(stratonix_c PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
 install(TARGETS stratonix_c RUNTIME DESTINATION bin LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)
 install(FILES include/stratonix_c.h DESTINATION include)
 

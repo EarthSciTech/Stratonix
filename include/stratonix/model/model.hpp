@@ -154,6 +154,9 @@ class Model {
                                std::span<double> out) const = 0;
   /// Distance to, extent coordinate on, and displacement of fault `fault` at points.
   virtual void evaluate_fault(int fault, std::span<const Vec3> pts, FaultEval& out) const = 0;
+  /// Distance and extent only (displacement left at 0): what locating a fault surface needs.
+  /// The values are those evaluate_fault() returns; engines that can skip the displacement do.
+  virtual void evaluate_fault_geometry(int fault, std::span<const Vec3> pts, FaultEval& out) const { evaluate_fault(fault, pts, out); }
   /// Positions in the restored (unfaulted) frame.
   virtual void restore(std::span<const Vec3> pts, std::span<Vec3> out) const = 0;
   /// Optional engine-specific capability by name (nullptr if not provided).

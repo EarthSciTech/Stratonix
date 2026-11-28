@@ -42,11 +42,13 @@ const repr::FaultedSurface& ExportContext::faulted(int h) {
   return it->second;
 }
 const repr::FaultSurface& ExportContext::fault_surface(int f) {
+  if (shared_ && &shared_->model() == &m_) return shared_->fault_surface(f, fault_spacing_);
   auto it = fsurf_.find(f);
   if (it == fsurf_.end()) it = fsurf_.emplace(f, repr::fault_surface(m_, f, fault_spacing_)).first;
   return it->second;
 }
 const std::vector<repr::CutoffLine>& ExportContext::cutoffs(int f, int h) {
+  if (shared_ && &shared_->model() == &m_) return shared_->cutoffs(f, fault_spacing_, 0.0, h);
   auto key = std::make_pair(f, h);
   auto it = cut_.find(key);
   if (it == cut_.end()) it = cut_.emplace(key, repr::cutoff_lines(m_, fault_surface(f), h)).first;

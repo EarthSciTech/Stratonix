@@ -295,6 +295,7 @@ class GeobodyModel final : public Model {
     inner_->scalar_in_block(pts, block, horizon, out);
   }
   void evaluate_fault(int fault, std::span<const Vec3> pts, FaultEval& out) const override { inner_->evaluate_fault(fault, pts, out); }
+  void evaluate_fault_geometry(int fault, std::span<const Vec3> pts, FaultEval& out) const override { inner_->evaluate_fault_geometry(fault, pts, out); }
   void restore(std::span<const Vec3> pts, std::span<Vec3> out) const override { inner_->restore(pts, out); }
   const void* capability(std::string_view name) const override {
     if (name == "geobodies") return &reports_;
