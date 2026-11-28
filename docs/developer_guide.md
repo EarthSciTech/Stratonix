@@ -1,8 +1,8 @@
 ---
 title: Stratonix developer guide
 doc_id: STX-DG
-version: 3.0
-date: 2026-11-15
+version: 4.1
+date: 2026-11-28
 ---
 
 # Stratonix developer guide
@@ -271,6 +271,17 @@ Keep the reference implementation; add the optimised one behind the same functio
 of the thread count). Add a parity test in `test_parity.cpp` on the synthetic models and randomised
 points, including points on fault planes, at tips and outside the domain, with a stated
 tolerance, and a benchmark row in `bench.cpp`. See `docs/performance_and_threading.md`.
+
+Shared representations (2026.4.1). A build's checks, figures and exports share one
+`repr::FaultedSurfaceCache`: faulted horizon surfaces, fault surfaces and cut-off lines, each
+computed once for its exact arguments (`CheckContext::surfaces()`, `FigureContext::surfaces`,
+`ExportContext::share_surfaces`). Take fault surfaces and cut-offs from it rather than calling
+`repr::fault_surface` again. Where only the distance to a fault (or its extent coordinate) is
+needed, call `Model::evaluate_fault_geometry`: it gives the same values as `evaluate_fault`
+without the displacement, which needs a restoration. Keep per-cell data compact: grids are sized
+in bytes per cell (about 150 with GRDECL); write large tables as they are made (as GRDECL and
+`grid/cells.csv` are) and build optional products on demand (the tetrahedral grid). Check a change
+with `STRATONIX_TIMING=1`, which prints the time and memory after each check and grid step.
 
 ## 4.6 A check
 

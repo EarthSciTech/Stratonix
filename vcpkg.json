@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "stratonix",
-  "version": "2026.4",
+  "version": "2026.4.1",
   "description": "Stratonix geomodelling toolkit",
   "dependencies": [
     "libyaml",

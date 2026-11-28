@@ -11,6 +11,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   One check outcome.
 - `struct GridProducts`  
   Grids and properties of a description's grid block (stage 3B, STX-TN-12), computed once and shared by the checks (C23 to C25), the exports and the figures.
+- `const repr::TetGrid& tets() const;`  
+  The tetrahedral grid, built when first asked for: only the export that writes it needs it (I-050; six tetrahedra per cell are about 215 bytes per cell).
 - `int model_unit_of(const desc::Description& d, const Model& m, const std::string& unit);`  
   Model unit index of a description unit (by its top and base horizons), or -1.
 - `GridProducts make_grid_products(const desc::Description& d, const Model& m);`  
@@ -191,6 +193,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Global switch used by tests: when false, optimised kernels fall back to reference versions.
 - `std::size_t peak_rss_bytes();`  
   Peak resident memory of this process in bytes (0 if unknown on this platform).
+- `std::size_t current_rss_bytes();`  
+  Memory in use now (resident set / working set) in bytes; 0 where unknown.
 - `std::string xml_escape(std::string_view s);`  
   Escape for XML/SVG text and attributes.
 - `std::string json_escape(std::string_view s);`  
@@ -1163,6 +1167,8 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Scalar field of one horizon as seen from a given fault block (extended beyond the block).
 - `virtual void evaluate_fault(int fault, std::span<const Vec3> pts, FaultEval& out) const = 0;`  
   Distance to, extent coordinate on, and displacement of fault `fault` at points.
+- `virtual void evaluate_fault_geometry(int fault, std::span<const Vec3> pts, FaultEval& out) const { evaluate_fault(fault, pts, out); }`  
+  Distance and extent only (displacement left at 0): what locating a fault surface needs. The values are those evaluate_fault() returns; engines that can skip the displacement do.
 - `virtual void restore(std::span<const Vec3> pts, std::span<Vec3> out) const = 0;`  
   Positions in the restored (unfaulted) frame.
 - `virtual const void* capability(std::string_view name) const { (void)name; return nullptr; }`  
@@ -1370,6 +1376,10 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   (nx + 1) (ny + 1) pillars, 6 values each: top x, y, z then base x, y, z.
 - `std::vector<double> zcorn;`  
   8 nx ny nz corner elevations in Eclipse ZCORN order.
+- `enum InactiveCode : std::uint8_t { kActive = 0, kNoZoneBoundary = 1, kThin = 2 };`  
+  Why a cell is inactive, one byte per cell (I-050: a code, not a string per cell).
+- `const char* inactive_reason(std::size_t cell) const;`  
+  The reason as text ("" for an active cell).
 - `std::size_t zcorn_index(int i, int j, int k, int c) const;`  
   Index into zcorn of corner c (bit 0: i + 1, bit 1: j + 1, bit 2: bottom) of cell (i, j, k).
 - `Vec3 corner(int i, int j, int k, int c) const;`  
@@ -1421,8 +1431,6 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Root of a horizon's scalar along verticals, as seen from one block (extended beyond it). Reference: bisection. Optimised: bracketed secant (Illinois). NaN if no root within the domain's elevation range extended by `margin`.
 - `FaultedSurface horizon_grid_faulted(const Model& m, int horizon, const GridSpec& g);`  
   Faulted horizon surface with fault gaps. Reference: candidate blocks from dense sampling of each column. Optimised: block iteration from the per-block root. Parity tested.
-- `class FaultedSurfaceCache`  
-  Faulted horizon surfaces of one model, each computed once per horizon and lattice and shared by the checks, figures and exports of a build (stage 4B, I-020). Entries never move once made.
 - `const FaultedSurface& faulted_surface(const Model& m, int horizon, const GridSpec& g, FaultedSurfaceCache* cache, FaultedSurface& scratch);`  
   The cached surface when `cache` is of `m`; otherwise computed into `scratch`, which is returned.
 - `Grid2D unit_thickness_grid(const Model& m, int unit, const GridSpec& g);`  
@@ -1439,6 +1447,12 @@ Namespaces: `stratonix` (C++ library), C functions prefixed `stx_` (stable C API
   Fault sticks: polylines down dip at a strike spacing, inside the tip line.
 - `std::vector<CutoffLine> cutoff_lines(const Model& m, const FaultSurface& fs, int horizon, double eps = 0.25);`  
   Hanging-wall and footwall cut-off lines of a horizon on a fault (eps: offset from the plane).
+- `class FaultedSurfaceCache`  
+  Faulted horizon surfaces of one model, each computed once per horizon and lattice and shared by the checks, figures and exports of a build (stage 4B, I-020), and likewise its fault surfaces and cut-off lines, each computed once per fault, spacing and extension (I-051). Entries never move once made; a value is the same as the uncached function returns for the same arguments.
+- `const FaultSurface& fault_surface(int fault, double spacing, double extend = 0.0);`  
+  fault_surface(model, fault, spacing, extend), computed once.
+- `const std::vector<CutoffLine>& cutoffs(int fault, double spacing, double extend, int horizon, double eps = 0.25);`  
+  cutoff_lines(model, fault_surface(fault, spacing, extend), horizon, eps), computed once.
 - `std::vector<double> scalar_jumps(const Model& m, const std::vector<Vec3>& pts, const Vec3& normal, double eps = 0.25);`  
   Jump of each horizon's scalar across a surface at points with the given normal: the hanging-wall value minus the footwall value, each extrapolated linearly to the point from samples at eps and 2*eps on its side (exact for smooth linear fields). Result: [h * n + i].
 - `std::vector<WellTop> well_intersections(const Model& m, const WellPath& w, double step = 2.0);`  

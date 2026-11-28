@@ -1,8 +1,8 @@
 ---
 title: Stratonix user guide
 doc_id: STX-UG
-version: 3.0
-date: 2026-11-15
+version: 4.1
+date: 2026-11-28
 ---
 
 # Stratonix user guide
@@ -12,16 +12,19 @@ them, draws them and exports them for other software, Petrel first. It builds **
 every number in a model is stated in its description with a unit, an evidence class and a source,
 and Stratonix refuses a description where one is missing.
 
-Release 2026.2 (version 2) adds:
+What each release added, and where this guide describes it:
 
-- curved faults and fault systems;
-- folding mechanisms;
-- stratigraphic architecture;
-- salt and compaction;
-- deformation history and restoration;
-- faults as rock with the stress field.
+- 2026.2 (version 2): curved faults and fault systems, folding mechanisms, stratigraphic
+  architecture, salt and compaction, deformation history and restoration, faults as rock with
+  the stress field (sections 2.6 to 2.11).
+- 2026.3 (version 3): models conditioned to data, grids and properties, uncertainty and
+  ensembles (sections 2.12 to 2.14).
+- 2026.4 (version 4): the geological engine, geological completeness, real data, properties,
+  uncertainty and scale (sections 2.15 to 2.26).
+- 2026.4.1: faster builds of models with many faults and less memory per grid cell
+  (section 2.26), with identical outputs.
 
-Sections 2.6 to 2.11 describe them. A description written for 2026.1 builds unchanged.
+A description written for an earlier release builds unchanged.
 
 # 1. Installing
 
@@ -875,10 +878,12 @@ format, path, size and modification time). In the library, `make_build_cache` an
 `run_build_cached` also reuse a whole build of an identical description. Cached and uncached
 builds give the same bytes (test S11).
 
-**Large grids.** GRDECL files are written as they are made, never held whole in memory. A grid
-needs about 420 bytes of memory per cell (measured: 2.5 million cells in 1.0 GB); `stream_grid`
-refuses a grid whose arrays would exceed a stated memory limit. Builds at 1, 2 or 8 threads write
-the same bytes (test S12).
+**Large grids.** GRDECL files and `grid/cells.csv` are written as they are made, never held
+whole in memory, and the tetrahedral grid (`grid.tetrahedral`) is built only when the `grid_vtk`
+export writes it. From 2026.4.1 a grid build with GRDECL needs about 150 bytes of memory per cell
+(measured: 2.5 million cells in 0.42 GB, 10.1 million in 1.52 GB; 50 million cells about 7.3 GB);
+the `grid_vtk` export holds its files in memory and needs more. `stream_grid` refuses a grid that
+would exceed a stated memory limit. Builds at 1, 2 or 8 threads write the same bytes (test S12).
 
 # 3. Running
 

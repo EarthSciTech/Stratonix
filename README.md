@@ -19,6 +19,11 @@ Release 2026.4 (version 4) adds:
   grids that follow fault traces, total-effect sensitivity, caching, and Python bindings
   (`pip install stratonix`).
 
+Maintenance release 2026.4.1 makes builds with many faults several times faster (fault surfaces
+computed once per build and shared), cuts the memory a grid needs to about 150 bytes per cell,
+fixes the Python bindings when NumPy is loaded first, and lets CI validate RESQML against the
+Energistics schemas held in repository secrets.
+
 Release 2026.3 (version 3) added:
 
 - models conditioned to data: a large-data implicit solver, one field per stratigraphic series,

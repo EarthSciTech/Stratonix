@@ -1,15 +1,66 @@
 # Changelog
 
-All notable changes to Stratonix. Versions follow semantic versioning; the description schema
-has its own version (`stratonix_schema`).
+All notable changes to Stratonix. Versions are year-first: 2026.4 is version 4, and a third number
+marks a maintenance release of it (2026.4.1). The description schema has its own version
+(`stratonix_schema`).
 
 ## [Unreleased]
 
+## [2026.4.1] - 2026-11-28 - Maintenance release of version 4
+
+Faster builds of models with many faults, less memory per grid cell, a fix for the Python
+bindings, and RESQML schema validation in CI without hosting the schemas. Every output of every
+example is byte for byte the same as in 2026.4, apart from the version number written in the
+files' headers.
+
+### Migration notes
+
+- Nothing to change in description files (schema `stratonix_schema: 1`).
+- C++ API: `repr::CornerPointGrid::inactive_reason` is now a function, `inactive_reason(cell)`,
+  over a one-byte code per cell (`inactive_code`); `GridProducts::tets` is now a function that
+  builds the tetrahedral grid when first asked for. `Model::evaluate_fault_geometry` is new
+  (distance and extent only; engines that cannot skip the displacement use `evaluate_fault`).
+- CI: the RESQML schemas come from the secrets `STX_RESQML_XSD_1` to `_8`
+  (`tools/resqml_xsd_secrets.py pack`); `STX_RESQML_XSD_URL` is no longer read.
+
 ### Changed
 
+- Fault surfaces and their cut-off lines are computed once per build and shared by the checks,
+  figures and exports (`repr::FaultedSurfaceCache`); maps no longer recompute every fault
+  surface for every horizon (I-051).
+- A fault surface is located with the fault distance only and only at the lattice nodes still
+  moving; cut-off lines evaluate only the nodes inside the tip line and the domain; checks and
+  grid code that need only the distance to a fault no longer compute its displacement. The thrust
+  duplex example builds in 36 s instead of 275 s on the reference machine; ensemble members are
+  back at the speed of 2026.3 (I-049, I-051).
+- Grids need about 150 bytes of memory per cell instead of about 420: the reason a cell is
+  inactive is a one-byte code, the pillar and root-finding work arrays are released before the
+  cell arrays are made, `grid/cells.csv` is written as it is made, and the tetrahedral grid is
+  built only for the `grid_vtk` export (I-050). Measured: 2.5 million cells in 0.42 GB (was
+  1.06 GB), 10.1 million cells in 1.52 GB; 50 million cells about 7.3 GB.
+- `stream_grid` estimates 150 bytes per cell plus 50 MB against its memory limit.
+- `STRATONIX_TIMING` also prints the memory in use and the peak after each check and grid step.
 - RESQML schema validation in CI takes the Energistics schemas from repository secrets
-  (`STX_RESQML_XSD_1` to `_8`), packed by the owner with `tools/resqml_xsd_secrets.py`; nothing is
-  hosted or committed. The `STX_RESQML_XSD_URL` secret is no longer read (I-034).
+  (`STX_RESQML_XSD_1` to `_8`), packed by the owner with `tools/resqml_xsd_secrets.py`
+  (documentation removed, one compressed archive, parts of at most 48 000 characters with a
+  checksum); nothing is hosted or committed (I-034).
+- The Windows Debug CI job builds the thrust duplex example again.
+
+### Fixed
+
+- Python bindings on Linux: building a model crashed when NumPy (or anything else bringing the
+  system's C++ runtime) was loaded first. The C library now keeps its statically linked C++
+  runtime to itself (I-052).
+
+### Known limitations
+
+- Ensemble members run at the speed of 2026.3, not five times faster (I-049): the checks still
+  evaluate the model point by point (C27 about half of a member).
+- The Hamersley map example (`examples/experimental`) still fails C1 and C26 (I-048). A fold frame
+  removes two of the six failures; constraining the fold frame at depth passes the checks only by
+  moving the upper and lower units out of the model, with larger misfits to the map, so it is not
+  used.
+- The 50-million-cell memory figure is extrapolated from builds of 2.5 and 10.1 million cells.
 
 ## [2026.4] - 2026-11-23 - Version 4: geological engine and real data
 

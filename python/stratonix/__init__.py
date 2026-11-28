@@ -104,7 +104,7 @@ def capi_version():
 
 
 def library_version():
-    """The library's version ("2026.4")."""
+    """The library's version ("2026.4.1")."""
     return _lib.stx_library_version().decode()
 
 

@@ -1,8 +1,8 @@
 ---
 title: Stratonix roadmap v4 to v6
 doc_id: STX-RM
-version: 3.1
-date: 2026-11-21
+version: 3.2
+date: 2026-11-28
 ---
 
 # Stratonix roadmap v4 to v6
@@ -89,6 +89,19 @@ Prompt R then releases v4.
   construction (I-050).
 - Reproducibility across platforms needs control of the elementary functions, not only of the
   random stream: the geostatistics evaluates exp and log itself.
+
+**What 2026.4.1 taught.**
+- Most of the time went into computing the same fault surfaces again, not into the new checks:
+  sharing them between checks, figures and exports, and skipping the displacement where only the
+  distance to a fault is read, made the many-fault examples several times faster with identical
+  outputs. Ensemble members are back at the speed of v3; five times faster needs the checks to
+  evaluate the model in batches rather than point by point (I-049, C27 first).
+- Memory was in per-cell strings, whole tables built as strings and products nobody asked for:
+  with those gone a grid needs about 150 bytes per cell, and 50 million cells fit in 8 GB without
+  slab-wise construction (I-050). Slabs remain the route beyond that.
+- A fold frame fitted to the map's bedding helps the map model, but constraining it at depth
+  passed the checks only by moving units out of the model: the map model needs a fit that keeps
+  the map contacts (I-048).
 
 # 6. v5: applications (stage 5A, Prompts 62 to 68)
 
